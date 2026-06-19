@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lab-artifact.mjs";
 import { sha256File, writePng } from "./lab-png.mjs";
 import { compareMetricImages } from "../../packages/metric-stack/src/index.mjs";
+import { measureOptics } from "../../packages/metric-stack/src/optics.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -96,6 +97,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
     allowLayerSnapshot: true
   });
   const report = compareMetricImages(referenceRecord.png, candidateRecord.png);
+  const opticsReport = measureOptics(referenceRecord.png, candidateRecord.png);
   const reference = referenceRecord.artifact;
   const candidate = candidateRecord.artifact;
   const referenceUri = dataUri(referenceRecord.png_path, "image/png");
@@ -104,6 +106,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
   return page("Artifact Diff", [
     hero("Artifact Diff", `${reference.id} -> ${candidate.id}`, [
       statusPill("G2", report.status),
+      statusPill("G3", opticsReport.status),
       statusPill("ref null", reference.null_qualification ?? "unknown"),
       statusPill("cand null", candidate.null_qualification ?? "unknown")
     ]),
@@ -115,6 +118,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
       </div>
     `),
     section("Metric Summary", metricTable(report.metrics ?? {})),
+    section("Optics Summary", metricTable(opticsReport.metrics ?? {})),
     section("Reference", table([
       ["id", reference.id],
       ["rig", reference.rig_id],

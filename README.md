@@ -112,6 +112,7 @@ npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physica
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --manifest ./artifacts/r0.repeat-manifest.json
 npm run null:ladder -- --native ./artifacts/r0.capture.json --candidate ./artifacts/c0.capture.json --rung flat_p3_grey --out ./artifacts/null.report.json
 npm run metrics:compare -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g2.report.json
+npm run metrics:optics -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g3-optics.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
 npm run glass:diff -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/viewer/r0-r1.diff.html
@@ -123,9 +124,14 @@ Current metric scope:
 ```text
 G1: Display P3 artifact contract + linear Display P3 normalization
 G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness
+G3: inferred edge lensing, blur falloff, chromatic fringe, highlight/shadow, alpha/tint split
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
 Viewer: artifact/baseline inspect, R-vs-C diff, debug heatmap, null/energy/identifiability panels
 ```
+
+Current G3 mask scope is `edge_band_inferred_from_residual_v0` until exported
+pixel masks land in the capture artifact. Reports keep that method note in-band
+so prototype optics numbers cannot be mistaken for final G3 verdicts.
 
 The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
 capture repeatedly, writes a `repeat_capture_manifest`, and enforces nominal

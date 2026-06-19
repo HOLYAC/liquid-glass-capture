@@ -21,6 +21,7 @@ artifact identity
 baseline namespace
 null qualification status
 G2 static metric summary
+G3 optics summary
 debug heatmap
 energy summary when present
 identifiability tags when present
