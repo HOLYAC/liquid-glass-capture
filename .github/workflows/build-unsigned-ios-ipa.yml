@@ -15,11 +15,15 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 25.8.0
           cache: npm
 
       - name: Install JS dependencies
-        run: npm ci
+        run: |
+          npm install --global npm@11.11.0
+          node --version
+          npm --version
+          npm ci
 
       - name: Show Xcode and SDKs
         run: |
