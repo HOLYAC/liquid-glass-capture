@@ -99,7 +99,12 @@ final class ReplayKitCompositorCaptureDaemon {
     }
 
     let ciImage = CIImage(cvPixelBuffer: imageBuffer)
-    guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
+    guard let cgImage = ciContext.createCGImage(
+      ciImage,
+      from: ciImage.extent,
+      format: .RGBA8,
+      colorSpace: Self.displayP3ColorSpace()
+    ) else {
       session.recordError("Could not create CGImage from ReplayKit frame")
       return
     }
@@ -138,6 +143,10 @@ final class ReplayKitCompositorCaptureDaemon {
 
   private static func sha256Hex(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func displayP3ColorSpace() -> CGColorSpace {
+    CGColorSpace(name: CGColorSpace.displayP3) ?? CGColorSpaceCreateDeviceRGB()
   }
 
   private static func error(_ message: String) -> NSError {
@@ -289,7 +298,7 @@ private final class ReplayKitCaptureSession {
       ],
       "color": [
         "embedded_icc_profile": "Display P3",
-        "icc_sha256": "replaykit-unverified-display-p3",
+        "icc_sha256": Self.displayP3ICCSHA256() ?? "missing-display-p3-icc",
         "working_space": "display-p3-linear",
         "stored_transfer": "srgb-transfer",
         "white_point": "D65"
@@ -398,6 +407,14 @@ private final class ReplayKitCaptureSession {
 
   private static func sha256Hex(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func displayP3ICCSHA256() -> String? {
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.displayP3),
+          let iccData = colorSpace.copyICCData() as Data? else {
+      return nil
+    }
+    return sha256Hex(iccData)
   }
 }
 
