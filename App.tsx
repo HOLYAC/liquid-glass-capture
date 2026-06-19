@@ -52,18 +52,39 @@ function Chip({
 
 export default function App() {
   const [mode, setMode] = useState<(typeof modes)[number]>("glass_over_substrate");
-  const [substrate, setSubstrate] = useState<(typeof substrates)[number]>("checker_4px");
-  const [shape, setShape] = useState<(typeof shapes)[number]>("capsule");
-  const [phase, setPhase] = useState<(typeof phases)[number]>("rest");
+  const [substrate, setSubstrate] = useState<(typeof substrates)[number]>("caret_selection");
+  const [shape, setShape] = useState<(typeof shapes)[number]>("twin_capsules");
+  const [phase, setPhase] = useState<(typeof phases)[number]>("merge_near");
   const [tint, setTint] = useState<(typeof tints)[number]>("none");
-  const [interactive, setInteractive] = useState(false);
-  const [autoplay, setAutoplay] = useState(false);
-  const [controls, setControls] = useState(true);
+  const [interactive, setInteractive] = useState(true);
+  const [autoplay, setAutoplay] = useState(true);
+  const [controls, setControls] = useState(false);
+  const [touchCount, setTouchCount] = useState(0);
 
   const scenario = useMemo(
     () => [substrate, shape, phase, mode, interactive ? "interactive" : "static", tint].join("__"),
     [substrate, shape, phase, mode, interactive, tint]
   );
+
+  function pressGlass() {
+    setInteractive(true);
+    setAutoplay(true);
+    setPhase("press");
+  }
+
+  function releaseGlass() {
+    const nextTouch = touchCount + 1;
+    setTouchCount(nextTouch);
+    setPhase(phases[nextTouch % phases.length]);
+
+    if (nextTouch % 2 === 0) {
+      setShape(nextValue(shapes, shape));
+    }
+
+    if (nextTouch % 3 === 0) {
+      setSubstrate(nextValue(substrates, substrate));
+    }
+  }
 
   return (
     <View style={styles.root}>
@@ -79,8 +100,16 @@ export default function App() {
         autoplay={autoplay}
       />
 
-      {controls ? (
-        <SafeAreaView style={styles.overlay} pointerEvents="box-none">
+      <SafeAreaView style={styles.overlay} pointerEvents="box-none">
+        <Pressable
+          delayLongPress={520}
+          onLongPress={() => setControls(true)}
+          onPressIn={pressGlass}
+          onPressOut={releaseGlass}
+          style={styles.touchLayer}
+        />
+
+        {controls ? (
           <View style={styles.panel}>
             <Text style={styles.title}>Liquid Glass Capture</Text>
             <Text style={styles.scenario}>{scenario}</Text>
@@ -95,10 +124,8 @@ export default function App() {
               <Chip label="controls" value="hide" onPress={() => setControls(false)} />
             </ScrollView>
           </View>
-        </SafeAreaView>
-      ) : (
-        <Pressable style={styles.restore} onLongPress={() => setControls(true)} />
-      )}
+        ) : null}
+      </SafeAreaView>
     </View>
   );
 }
@@ -111,6 +138,13 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: "flex-end"
+  },
+  touchLayer: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0
   },
   panel: {
     margin: 14,
@@ -155,12 +189,5 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 12,
     fontWeight: "700"
-  },
-  restore: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    width: 44,
-    height: 44
   }
 });
