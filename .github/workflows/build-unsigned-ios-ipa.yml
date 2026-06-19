@@ -42,19 +42,29 @@ jobs:
             exit 1
           fi
 
-          SCHEME="LiquidGlassCapture"
           xcodebuild -list -workspace "$WORKSPACE"
           SCHEMES_JSON="$(xcodebuild -list -json -workspace "$WORKSPACE")"
-          python3 - "$SCHEME" "$SCHEMES_JSON" <<'PY'
+          SCHEME="$(python3 - "$SCHEMES_JSON" <<'PY'
           import json
           import sys
 
-          expected = sys.argv[1]
-          schemes = json.loads(sys.argv[2]).get("workspace", {}).get("schemes", [])
-          if expected not in schemes:
-              print(f"Expected app scheme {expected!r}, got: {schemes}", file=sys.stderr)
-              raise SystemExit(1)
+          schemes = json.loads(sys.argv[1]).get("workspace", {}).get("schemes", [])
+          preferred = [
+              "LiquidGlassCapture (LiquidGlassCapture project)",
+              "LiquidGlassCapture",
+          ]
+          for scheme in preferred:
+              if scheme in schemes:
+                  print(scheme)
+                  raise SystemExit(0)
+          for scheme in schemes:
+              if scheme.startswith("LiquidGlassCapture") and "Pods project" not in scheme:
+                  print(scheme)
+                  raise SystemExit(0)
+          print(f"No app LiquidGlassCapture scheme found. Got: {schemes}", file=sys.stderr)
+          raise SystemExit(1)
           PY
+          )"
 
           echo "workspace=$WORKSPACE"
           echo "scheme=$SCHEME"
