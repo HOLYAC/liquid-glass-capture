@@ -86,6 +86,17 @@ export default function App() {
     }
   }
 
+  function cycleScene() {
+    const nextTouch = touchCount + 1;
+    setTouchCount(nextTouch);
+    setPhase(phases[nextTouch % phases.length]);
+    setShape(nextValue(shapes, shape));
+
+    if (nextTouch % 2 === 0) {
+      setSubstrate(nextValue(substrates, substrate));
+    }
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar hidden />
@@ -101,14 +112,6 @@ export default function App() {
       />
 
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
-        <Pressable
-          delayLongPress={520}
-          onLongPress={() => setControls(true)}
-          onPressIn={pressGlass}
-          onPressOut={releaseGlass}
-          style={styles.touchLayer}
-        />
-
         {controls ? (
           <View style={styles.panel}>
             <Text style={styles.title}>Liquid Glass Capture</Text>
@@ -125,6 +128,18 @@ export default function App() {
             </ScrollView>
           </View>
         ) : null}
+
+        <View style={styles.bottomBar} pointerEvents="box-none">
+          <Pressable onPress={cycleScene} style={styles.bottomButton}>
+            <Text style={styles.bottomButtonText}>1</Text>
+          </Pressable>
+          <Pressable onPressIn={pressGlass} onPressOut={releaseGlass} style={styles.bottomButtonPrimary}>
+            <Text style={styles.bottomButtonText}>0</Text>
+          </Pressable>
+          <Pressable onPress={() => setControls((value) => !value)} style={styles.bottomButton}>
+            <Text style={styles.bottomButtonText}>2</Text>
+          </Pressable>
+        </View>
       </SafeAreaView>
     </View>
   );
@@ -136,23 +151,26 @@ const styles = StyleSheet.create({
     backgroundColor: "#000"
   },
   overlay: {
-    flex: 1,
-    justifyContent: "flex-end"
-  },
-  touchLayer: {
     bottom: 0,
+    flex: 1,
+    justifyContent: "flex-end",
     left: 0,
     position: "absolute",
     right: 0,
-    top: 0
+    top: 0,
+    zIndex: 10
   },
   panel: {
-    margin: 14,
+    bottom: 86,
+    left: 14,
+    position: "absolute",
+    right: 14,
     padding: 14,
     borderRadius: 16,
     backgroundColor: "rgba(0,0,0,0.62)",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.22)"
+    borderColor: "rgba(255,255,255,0.22)",
+    zIndex: 3
   },
   title: {
     color: "white",
@@ -187,6 +205,42 @@ const styles = StyleSheet.create({
   chipValue: {
     marginTop: 3,
     color: "white",
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  bottomBar: {
+    alignItems: "center",
+    alignSelf: "center",
+    bottom: 16,
+    flexDirection: "row",
+    gap: 14,
+    height: 58,
+    justifyContent: "center",
+    position: "absolute",
+    zIndex: 2
+  },
+  bottomButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.22)",
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 44,
+    justifyContent: "center",
+    width: 44
+  },
+  bottomButtonPrimary: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255,255,255,0.34)",
+    borderRadius: 29,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 58,
+    justifyContent: "center",
+    width: 58
+  },
+  bottomButtonText: {
+    color: "rgba(255,255,255,0.72)",
     fontSize: 12,
     fontWeight: "700"
   }
