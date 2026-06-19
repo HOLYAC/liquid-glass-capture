@@ -8,7 +8,9 @@ import { compareMetricImages } from "../packages/metric-stack/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
 
 function main() {
   const args = parseArgs(process.argv.slice(2));

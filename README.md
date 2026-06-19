@@ -113,6 +113,8 @@ npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physica
 npm run null:ladder -- --native ./artifacts/r0.capture.json --candidate ./artifacts/c0.capture.json --rung flat_p3_grey --out ./artifacts/null.report.json
 npm run metrics:compare -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g2.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
+npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
+npm run glass:diff -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/viewer/r0-r1.diff.html
 npm run lab:self-test
 ```
 
@@ -122,6 +124,7 @@ Current metric scope:
 G1: Display P3 artifact contract + linear Display P3 normalization
 G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
+Viewer: artifact/baseline inspect, R-vs-C diff, debug heatmap, null/energy/identifiability panels
 ```
 
 The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
