@@ -56,6 +56,155 @@ public final class LiquidGlassCaptureView: ExpoView {
     super.layoutSubviews()
     host?.view.frame = bounds
   }
+
+  public func captureSnapshot(label: String, metadata: [String: Any]) throws -> [String: Any] {
+    if bounds.width < 1 || bounds.height < 1 {
+      throw NSError(domain: "LiquidGlassCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "View has no drawable bounds"])
+    }
+
+    layoutIfNeeded()
+
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = UIScreen.main.scale
+    format.opaque = true
+
+    let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
+    let image = renderer.image { _ in
+      drawHierarchy(in: bounds, afterScreenUpdates: true)
+    }
+
+    guard let pngData = image.pngData() else {
+      throw NSError(domain: "LiquidGlassCapture", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not encode PNG"])
+    }
+
+    let fileManager = FileManager.default
+    let captureDir = try fileManager
+      .url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+      .appendingPathComponent("LiquidGlassCaptures", isDirectory: true)
+    try fileManager.createDirectory(at: captureDir, withIntermediateDirectories: true)
+
+    let stamp = Int(Date().timeIntervalSince1970 * 1000)
+    let safeLabel = label
+      .replacingOccurrences(of: "[^A-Za-z0-9_.-]", with: "_", options: .regularExpression)
+      .prefix(48)
+    let basename = "\(stamp)-\(safeLabel)"
+    let pngURL = captureDir.appendingPathComponent("\(basename).png")
+    let jsonURL = captureDir.appendingPathComponent("\(basename).json")
+
+    try pngData.write(to: pngURL, options: .atomic)
+
+    var payload: [String: Any] = [
+      "label": label,
+      "timestampMs": stamp,
+      "pngPath": pngURL.path,
+      "jsonPath": jsonURL.path,
+      "view": [
+        "width": Double(bounds.width),
+        "height": Double(bounds.height),
+        "scale": Double(format.scale)
+      ],
+      "props": [
+        "mode": model.mode.rawValue,
+        "substrate": model.substrate.rawValue,
+        "shape": model.shape.rawValue,
+        "phase": model.phase.rawValue,
+        "tint": model.tint.rawValue,
+        "interactive": model.interactive,
+        "autoplay": model.autoplay
+      ],
+      "metadata": metadata,
+      "metrics": Self.metrics(for: image)
+    ]
+
+    let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    try jsonData.write(to: jsonURL, options: .atomic)
+    payload["jsonPath"] = jsonURL.path
+    return payload
+  }
+
+  private static func metrics(for image: UIImage) -> [String: Any] {
+    guard let cgImage = image.cgImage else {
+      return ["sampled": false]
+    }
+
+    let width = 96
+    let height = 96
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    guard let context = CGContext(
+      data: &pixels,
+      width: width,
+      height: height,
+      bitsPerComponent: 8,
+      bytesPerRow: bytesPerRow,
+      space: colorSpace,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+      return ["sampled": false]
+    }
+
+    context.interpolationQuality = .high
+    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    var lumas = [Double](repeating: 0, count: width * height)
+    var lumaSum = 0.0
+    var satSum = 0.0
+    var minLuma = 1.0
+    var maxLuma = 0.0
+
+    for index in 0..<(width * height) {
+      let offset = index * bytesPerPixel
+      let red = Double(pixels[offset]) / 255.0
+      let green = Double(pixels[offset + 1]) / 255.0
+      let blue = Double(pixels[offset + 2]) / 255.0
+      let luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+      let high = max(red, green, blue)
+      let low = min(red, green, blue)
+      let saturation = high == 0 ? 0 : (high - low) / high
+
+      lumas[index] = luma
+      lumaSum += luma
+      satSum += saturation
+      minLuma = min(minLuma, luma)
+      maxLuma = max(maxLuma, luma)
+    }
+
+    let count = Double(width * height)
+    let meanLuma = lumaSum / count
+    let meanSaturation = satSum / count
+    var variance = 0.0
+    var edgeEnergy = 0.0
+
+    for y in 0..<height {
+      for x in 0..<width {
+        let index = y * width + x
+        let delta = lumas[index] - meanLuma
+        variance += delta * delta
+        if x + 1 < width {
+          edgeEnergy += abs(lumas[index] - lumas[index + 1])
+        }
+        if y + 1 < height {
+          edgeEnergy += abs(lumas[index] - lumas[index + width])
+        }
+      }
+    }
+
+    let edgeSamples = Double((width - 1) * height + (height - 1) * width)
+    return [
+      "sampled": true,
+      "sampleWidth": width,
+      "sampleHeight": height,
+      "meanLuma": meanLuma,
+      "minLuma": minLuma,
+      "maxLuma": maxLuma,
+      "rmsContrast": sqrt(variance / count),
+      "meanSaturation": meanSaturation,
+      "edgeEnergy": edgeEnergy / edgeSamples
+    ]
+  }
 }
 
 final class NativeHarnessModel: ObservableObject {

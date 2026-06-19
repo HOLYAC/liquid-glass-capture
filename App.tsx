@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   Pressable,
   SafeAreaView,
@@ -9,6 +9,11 @@ import {
   View
 } from "react-native";
 import { LiquidGlassCaptureView } from "liquid-glass-capture";
+import type {
+  LiquidGlassCaptureSnapshot,
+  LiquidGlassCaptureViewHandle,
+  LiquidGlassCaptureViewProps
+} from "liquid-glass-capture";
 
 const modes = ["substrate_only", "glass_over_substrate", "glass_over_black"] as const;
 const substrates = [
@@ -28,6 +33,12 @@ const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge
 const tints = ["none", "cyan", "amber", "red"] as const;
 
 type Choice = readonly string[];
+
+const NativeLiquidGlassCaptureView = LiquidGlassCaptureView as React.ComponentType<
+  LiquidGlassCaptureViewProps & {
+    ref?: React.Ref<LiquidGlassCaptureViewHandle>;
+  }
+>;
 
 function nextValue<T extends string>(values: readonly T[], current: T): T {
   return values[(values.indexOf(current) + 1) % values.length];
@@ -51,6 +62,7 @@ function Chip({
 }
 
 export default function App() {
+  const glassRef = useRef<LiquidGlassCaptureViewHandle>(null);
   const [mode, setMode] = useState<(typeof modes)[number]>("glass_over_substrate");
   const [substrate, setSubstrate] = useState<(typeof substrates)[number]>("caret_selection");
   const [shape, setShape] = useState<(typeof shapes)[number]>("twin_capsules");
@@ -60,6 +72,7 @@ export default function App() {
   const [autoplay, setAutoplay] = useState(true);
   const [controls, setControls] = useState(false);
   const [touchCount, setTouchCount] = useState(0);
+  const [captureStatus, setCaptureStatus] = useState("no capture");
 
   const scenario = useMemo(
     () => [substrate, shape, phase, mode, interactive ? "interactive" : "static", tint].join("__"),
@@ -97,10 +110,33 @@ export default function App() {
     }
   }
 
+  async function captureGlass() {
+    const handle = glassRef.current;
+    if (!handle?.captureSnapshotAsync) {
+      setCaptureStatus("capture unavailable");
+      setControls(true);
+      return;
+    }
+
+    try {
+      const snapshot: LiquidGlassCaptureSnapshot = await handle.captureSnapshotAsync("manual", {
+        scenario,
+        touchCount,
+        controls,
+        capturedFrom: "bottom_bar"
+      });
+      setCaptureStatus(snapshot.jsonPath);
+    } catch (error) {
+      setCaptureStatus(`capture failed: ${String(error)}`);
+    }
+    setControls(true);
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar hidden />
-      <LiquidGlassCaptureView
+      <NativeLiquidGlassCaptureView
+        ref={glassRef}
         style={StyleSheet.absoluteFill}
         mode={mode}
         substrate={substrate}
@@ -116,6 +152,7 @@ export default function App() {
           <View style={styles.panel}>
             <Text style={styles.title}>Liquid Glass Capture</Text>
             <Text style={styles.scenario}>{scenario}</Text>
+            <Text style={styles.captureStatus}>{captureStatus}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
               <Chip label="mode" value={mode} onPress={() => setMode(nextValue(modes, mode))} />
               <Chip label="substrate" value={substrate} onPress={() => setSubstrate(nextValue(substrates, substrate))} />
@@ -138,6 +175,9 @@ export default function App() {
           </Pressable>
           <Pressable onPress={() => setControls((value) => !value)} style={styles.bottomButton}>
             <Text style={styles.bottomButtonText}>2</Text>
+          </Pressable>
+          <Pressable onPress={captureGlass} style={styles.bottomButton}>
+            <Text style={styles.bottomButtonText}>C</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -183,6 +223,12 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.62)",
     fontFamily: "Menlo",
     fontSize: 10
+  },
+  captureStatus: {
+    marginTop: 6,
+    color: "rgba(255,255,255,0.58)",
+    fontFamily: "Menlo",
+    fontSize: 9
   },
   row: {
     gap: 10,

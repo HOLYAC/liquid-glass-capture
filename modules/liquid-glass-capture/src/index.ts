@@ -45,5 +45,27 @@ export type LiquidGlassCaptureViewProps = ViewProps & {
   autoplay?: boolean;
 };
 
+export type LiquidGlassCaptureSnapshot = {
+  label: string;
+  timestampMs: number;
+  pngPath: string;
+  jsonPath: string;
+  view: {
+    width: number;
+    height: number;
+    scale: number;
+  };
+  props: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+};
+
+export type LiquidGlassCaptureViewHandle = {
+  captureSnapshotAsync(
+    label: string,
+    metadata: Record<string, unknown>
+  ): Promise<LiquidGlassCaptureSnapshot>;
+};
+
 export const LiquidGlassCaptureView =
   requireNativeViewManager<LiquidGlassCaptureViewProps>("LiquidGlassCapture");

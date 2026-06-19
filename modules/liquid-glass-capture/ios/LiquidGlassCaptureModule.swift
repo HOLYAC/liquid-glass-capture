@@ -38,6 +38,11 @@ public final class LiquidGlassCaptureModule: Module {
       Prop("autoplay") { (view: LiquidGlassCaptureView, value: Bool) in
         view.autoplay = value
       }
+
+      AsyncFunction("captureSnapshotAsync") { (view: LiquidGlassCaptureView, label: String, metadata: [String: Any]) -> [String: Any] in
+        try view.captureSnapshot(label: label, metadata: metadata)
+      }
+      .runOnQueue(.main)
     }
   }
 }
