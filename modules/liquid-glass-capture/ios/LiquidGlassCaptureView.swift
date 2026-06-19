@@ -2,6 +2,7 @@ import ExpoModulesCore
 import CryptoKit
 import SwiftUI
 import UIKit
+import WebKit
 
 public final class LiquidGlassCaptureView: ExpoView {
   private let model = NativeHarnessModel()
@@ -11,6 +12,11 @@ public final class LiquidGlassCaptureView: ExpoView {
   public var mode: CaptureMode {
     get { model.mode }
     set { model.mode = newValue }
+  }
+
+  public var rig: RigKind {
+    get { model.rig }
+    set { model.rig = newValue }
   }
 
   public var substrate: SubstrateKind {
@@ -106,6 +112,7 @@ public final class LiquidGlassCaptureView: ExpoView {
         "scale": Double(format.scale)
       ],
       "props": [
+        "rig": model.rig.rawValue,
         "mode": model.mode.rawValue,
         "substrate": model.substrate.rawValue,
         "shape": model.shape.rawValue,
@@ -180,7 +187,7 @@ public final class LiquidGlassCaptureView: ExpoView {
     try maskData.write(to: maskURL, options: .atomic)
 
     let sceneId = metadata["sceneId"] as? String ?? (model.substrate.rawValue.hasPrefix("s00_") ? "S00_NULL" : "MANUAL_LEGACY")
-    let rigId = metadata["rigId"] as? String ?? (model.mode == .substrateOnly ? "R0" : "C0")
+    let rigId = metadata["rigId"] as? String ?? model.rig.rawValue
     let stateId = metadata["stateId"] as? String ?? model.substrate.rawValue
     let artifactId = "\(rigId)-\(sceneId)-\(stateId)-\(stamp)"
     let invalidReason = sceneId == "S00_NULL" ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID"
@@ -236,7 +243,7 @@ public final class LiquidGlassCaptureView: ExpoView {
         "animation_t": 0
       ],
       "shader": [
-        "pipeline": model.mode == .substrateOnly ? "passthrough" : "uniform_calibration"
+        "pipeline": Self.shaderPipeline(for: model.rig, mode: model.mode)
       ],
       "integrity": [
         "artifact_sha256": "pending",
@@ -420,6 +427,7 @@ public final class LiquidGlassCaptureView: ExpoView {
 
   private func labProps() -> [String: Any] {
     [
+      "rig": model.rig.rawValue,
       "mode": model.mode.rawValue,
       "substrate": model.substrate.rawValue,
       "shape": model.shape.rawValue,
@@ -429,9 +437,25 @@ public final class LiquidGlassCaptureView: ExpoView {
       "autoplay": model.autoplay
     ]
   }
+
+  private static func shaderPipeline(for rig: RigKind, mode: CaptureMode) -> String {
+    switch rig {
+    case .r0, .r1:
+      return "passthrough"
+    case .c0:
+      return mode == .substrateOnly ? "passthrough" : "uniform_calibration"
+    case .c1:
+      return "baked_verdict"
+    case .domC:
+      return "dom_css"
+    case .dxReplay:
+      return "dx_replay"
+    }
+  }
 }
 
 final class NativeHarnessModel: ObservableObject {
+  @Published var rig: RigKind = .r0
   @Published var mode: CaptureMode = .glassOverSubstrate
   @Published var substrate: SubstrateKind = .checker4
   @Published var shape: ProbeShape = .capsule
@@ -439,6 +463,15 @@ final class NativeHarnessModel: ObservableObject {
   @Published var tint: GlassTint = .none
   @Published var interactive = false
   @Published var autoplay = false
+}
+
+public enum RigKind: String {
+  case r0 = "R0"
+  case r1 = "R1"
+  case c0 = "C0"
+  case c1 = "C1"
+  case domC = "DOM_C"
+  case dxReplay = "DX_REPLAY"
 }
 
 public enum CaptureMode: String {
@@ -497,20 +530,246 @@ struct NativeCaptureRootView: View {
       GeometryReader { proxy in
         let time = timeline.date.timeIntervalSinceReferenceDate
         ZStack {
-          if model.mode == .glassOverBlack {
-            Color.black
-          } else {
-            NativeSubstrateView(kind: model.substrate)
-          }
+          switch model.rig {
+          case .r0:
+            if model.mode == .glassOverBlack {
+              Color.black
+            } else {
+              NativeSubstrateView(kind: model.substrate)
+            }
 
-          if model.mode != .substrateOnly {
-            NativeGlassLayer(model: model, time: time, size: proxy.size)
+            if model.mode != .substrateOnly {
+              NativeGlassLayer(model: model, time: time, size: proxy.size)
+            }
+          case .r1, .c0, .c1, .domC:
+            CandidateWebRigView(rig: model.rig, substrate: model.substrate, mode: model.mode)
+          case .dxReplay:
+            NativeSubstrateView(kind: model.substrate)
           }
         }
         .ignoresSafeArea()
       }
     }
     .background(Color.black)
+  }
+}
+
+struct CandidateWebRigView: UIViewRepresentable {
+  let rig: RigKind
+  let substrate: SubstrateKind
+  let mode: CaptureMode
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator()
+  }
+
+  func makeUIView(context: Context) -> WKWebView {
+    let configuration = WKWebViewConfiguration()
+    configuration.suppressesIncrementalRendering = false
+
+    let webView = WKWebView(frame: .zero, configuration: configuration)
+    webView.isOpaque = true
+    webView.backgroundColor = .black
+    webView.scrollView.backgroundColor = .black
+    webView.scrollView.isScrollEnabled = false
+    webView.scrollView.bounces = false
+    webView.scrollView.contentInsetAdjustmentBehavior = .never
+    webView.loadHTMLString(html, baseURL: nil)
+    context.coordinator.lastHTML = html
+    return webView
+  }
+
+  func updateUIView(_ webView: WKWebView, context: Context) {
+    if context.coordinator.lastHTML != html {
+      webView.loadHTMLString(html, baseURL: nil)
+      context.coordinator.lastHTML = html
+    }
+  }
+
+  private var html: String {
+    switch rig {
+    case .c0, .c1:
+      return Self.canvasPassthroughHTML(substrate: substrate, mode: mode)
+    case .r1, .domC:
+      return Self.domPassthroughHTML(substrate: substrate, mode: mode, includeDOMGlass: rig == .r1 && mode != .substrateOnly)
+    case .r0, .dxReplay:
+      return Self.domPassthroughHTML(substrate: substrate, mode: mode, includeDOMGlass: false)
+    }
+  }
+
+  final class Coordinator {
+    var lastHTML = ""
+  }
+
+  private static func canvasPassthroughHTML(substrate: SubstrateKind, mode: CaptureMode) -> String {
+    """
+    <!doctype html>
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <style>
+          html, body, canvas { margin:0; width:100%; height:100%; overflow:hidden; background:#000; }
+          canvas { display:block; }
+        </style>
+      </head>
+      <body>
+        <canvas id="stage"></canvas>
+        <script>
+          const substrate = "\(substrate.rawValue)";
+          const mode = "\(mode.rawValue)";
+          const canvas = document.getElementById("stage");
+          const ctx = canvas.getContext("2d", { colorSpace: "display-p3", alpha: false });
+
+          function resize() {
+            const scale = window.devicePixelRatio || 1;
+            canvas.width = Math.max(1, Math.round(innerWidth * scale));
+            canvas.height = Math.max(1, Math.round(innerHeight * scale));
+            draw();
+          }
+
+          function draw() {
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            if (mode === "glass_over_black") {
+              ctx.fillStyle = "#000";
+              ctx.fillRect(0, 0, w, h);
+            } else {
+              drawSubstrate(ctx, w, h, substrate);
+            }
+
+            if (mode !== "substrate_only") {
+              drawCalibrationPlaceholder(ctx, w, h);
+            }
+          }
+
+          function drawSubstrate(ctx, w, h, substrate) {
+            if (substrate === "s00_flat_grey") {
+              ctx.fillStyle = "color(display-p3 0.5 0.5 0.5)";
+              ctx.fillRect(0, 0, w, h);
+              return;
+            }
+            if (substrate === "s00_hard_edge") {
+              ctx.fillStyle = "#000";
+              ctx.fillRect(0, 0, w * 0.5, h);
+              ctx.fillStyle = "#fff";
+              ctx.fillRect(w * 0.5, 0, w * 0.5, h);
+              return;
+            }
+            if (substrate === "s00_p3_ramp") {
+              const g = ctx.createLinearGradient(0, 0, w, 0);
+              g.addColorStop(0.0, "color(display-p3 1 0 0)");
+              g.addColorStop(0.34, "color(display-p3 0 1 0)");
+              g.addColorStop(0.67, "color(display-p3 0 0 1)");
+              g.addColorStop(1.0, "#fff");
+              ctx.fillStyle = g;
+              ctx.fillRect(0, 0, w, h);
+              return;
+            }
+            if (substrate === "s00_smooth_gradient") {
+              const g = ctx.createLinearGradient(0, 0, w, h);
+              g.addColorStop(0.0, "rgb(20,20,20)");
+              g.addColorStop(0.38, "rgb(107,107,107)");
+              g.addColorStop(0.62, "rgb(163,163,163)");
+              g.addColorStop(1.0, "rgb(235,235,235)");
+              ctx.fillStyle = g;
+              ctx.fillRect(0, 0, w, h);
+              return;
+            }
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, w, h);
+            const cell = Math.max(4, Math.round(4 * (window.devicePixelRatio || 1)));
+            for (let y = 0; y < h; y += cell) {
+              for (let x = 0; x < w; x += cell) {
+                ctx.fillStyle = ((x / cell + y / cell) % 2) < 1 ? "#ebebeb" : "#0f0f0f";
+                ctx.fillRect(x, y, cell, cell);
+              }
+            }
+          }
+
+          function drawCalibrationPlaceholder(ctx, w, h) {
+            const cw = Math.min(w * 0.7, 820 * (window.devicePixelRatio || 1));
+            const ch = Math.min(Math.max(h * 0.12, 74), 120) * (window.devicePixelRatio || 1);
+            const x = (w - cw) * 0.5;
+            const y = h * 0.56 - ch * 0.5;
+            ctx.save();
+            ctx.globalAlpha = 0.18;
+            ctx.fillStyle = "#fff";
+            roundRect(ctx, x, y, cw, ch, ch * 0.5);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+          }
+
+          addEventListener("resize", resize, { passive: true });
+          resize();
+        </script>
+      </body>
+    </html>
+    """
+  }
+
+  private static func domPassthroughHTML(substrate: SubstrateKind, mode: CaptureMode, includeDOMGlass: Bool) -> String {
+    """
+    <!doctype html>
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <style>
+          html, body, #stage { margin:0; width:100%; height:100%; overflow:hidden; background:#000; }
+          #stage { position:relative; }
+          .s00_flat_grey { background: color(display-p3 0.5 0.5 0.5); }
+          .s00_hard_edge { background: linear-gradient(90deg, #000 0 50%, #fff 50% 100%); }
+          .s00_p3_ramp { background: linear-gradient(90deg, color(display-p3 1 0 0), color(display-p3 0 1 0) 34%, color(display-p3 0 0 1) 67%, #fff); }
+          .s00_smooth_gradient { background: linear-gradient(135deg, rgb(20,20,20), rgb(107,107,107) 38%, rgb(163,163,163) 62%, rgb(235,235,235)); }
+          .fallback { background-size: 8px 8px; background-image: linear-gradient(45deg, #ebebeb 25%, #0f0f0f 25%, #0f0f0f 50%, #ebebeb 50%, #ebebeb 75%, #0f0f0f 75%); }
+          .black { background:#000; }
+          .glass {
+            position:absolute;
+            left:50%;
+            top:56%;
+            width:min(70vw, 820px);
+            height:clamp(74px, 12vh, 120px);
+            transform:translate(-50%, -50%);
+            border-radius:999px;
+            background:rgba(255,255,255,0.14);
+            -webkit-backdrop-filter: blur(18px) saturate(1.25);
+            backdrop-filter: blur(18px) saturate(1.25);
+            box-shadow: inset 0 1px rgba(255,255,255,0.35), inset 0 -1px rgba(0,0,0,0.24);
+          }
+        </style>
+      </head>
+      <body>
+        <div id="stage" class="\(mode == .glassOverBlack ? "black" : cssClass(for: substrate))">
+          \(includeDOMGlass ? "<div class=\"glass\"></div>" : "")
+        </div>
+      </body>
+    </html>
+    """
+  }
+
+  private static func cssClass(for substrate: SubstrateKind) -> String {
+    switch substrate {
+    case .s00FlatGrey:
+      return "s00_flat_grey"
+    case .s00HardEdge:
+      return "s00_hard_edge"
+    case .s00P3Ramp:
+      return "s00_p3_ramp"
+    case .s00SmoothGradient:
+      return "s00_smooth_gradient"
+    default:
+      return "fallback"
+    }
   }
 }
 

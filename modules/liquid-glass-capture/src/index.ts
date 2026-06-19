@@ -6,6 +6,14 @@ export type LiquidGlassCaptureMode =
   | "glass_over_substrate"
   | "glass_over_black";
 
+export type LiquidGlassCaptureRig =
+  | "R0"
+  | "R1"
+  | "C0"
+  | "C1"
+  | "DOM_C"
+  | "DX_REPLAY";
+
 export type LiquidGlassCaptureSubstrate =
   | "s00_flat_grey"
   | "s00_hard_edge"
@@ -41,6 +49,7 @@ export type LiquidGlassCapturePhase =
 export type LiquidGlassCaptureTint = "none" | "cyan" | "amber" | "red";
 
 export type LiquidGlassCaptureViewProps = ViewProps & {
+  rig?: LiquidGlassCaptureRig;
   mode?: LiquidGlassCaptureMode;
   substrate?: LiquidGlassCaptureSubstrate;
   shape?: LiquidGlassCaptureShape;

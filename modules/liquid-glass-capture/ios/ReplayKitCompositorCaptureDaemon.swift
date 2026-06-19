@@ -305,7 +305,7 @@ private final class ReplayKitCaptureSession {
         "sustained_duration_ms": Int(Date().timeIntervalSince(startedAt) * 1000)
       ],
       "shader": [
-        "pipeline": props["mode"] as? String == "substrate_only" ? "passthrough" : "uniform_calibration"
+        "pipeline": Self.shaderPipeline(rigId: rigId, mode: props["mode"] as? String)
       ],
       "perf": [
         "dropped_frames": 0
@@ -376,6 +376,23 @@ private final class ReplayKitCaptureSession {
       return "s00-smooth-gradient-v1"
     default:
       return "manual-\(stateId)"
+    }
+  }
+
+  private static func shaderPipeline(rigId: String, mode: String?) -> String {
+    switch rigId {
+    case "R0", "R1":
+      return "passthrough"
+    case "C0":
+      return mode == "substrate_only" ? "passthrough" : "uniform_calibration"
+    case "C1":
+      return "baked_verdict"
+    case "DOM_C":
+      return "dom_css"
+    case "DX_REPLAY":
+      return "dx_replay"
+    default:
+      return "passthrough"
     }
   }
 

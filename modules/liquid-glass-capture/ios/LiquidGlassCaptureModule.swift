@@ -11,6 +11,10 @@ public final class LiquidGlassCaptureModule: Module {
     View(LiquidGlassCaptureView.self) {
       ViewName("LiquidGlassCapture")
 
+      Prop("rig") { (view: LiquidGlassCaptureView, value: String) in
+        view.rig = RigKind(rawValue: value) ?? .r0
+      }
+
       Prop("mode") { (view: LiquidGlassCaptureView, value: String) in
         view.mode = CaptureMode(rawValue: value) ?? .glassOverSubstrate
       }

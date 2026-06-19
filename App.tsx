@@ -11,11 +11,13 @@ import {
 import { LiquidGlassCaptureView } from "liquid-glass-capture";
 import type {
   LiquidGlassCaptureLabArtifact,
+  LiquidGlassCaptureRig,
   LiquidGlassCaptureSnapshot,
   LiquidGlassCaptureViewHandle,
   LiquidGlassCaptureViewProps
 } from "liquid-glass-capture";
 
+const rigs = ["R0", "R1", "C0", "DOM_C", "C1", "DX_REPLAY"] as const;
 const modes = ["substrate_only", "glass_over_substrate", "glass_over_black"] as const;
 const substrates = [
   "s00_flat_grey",
@@ -84,6 +86,7 @@ function Chip({
 
 export default function App() {
   const glassRef = useRef<LiquidGlassCaptureViewHandle>(null);
+  const [rig, setRig] = useState<LiquidGlassCaptureRig>("R0");
   const [mode, setMode] = useState<(typeof modes)[number]>("substrate_only");
   const [substrate, setSubstrate] = useState<(typeof substrates)[number]>("native_text_selection");
   const [shape, setShape] = useState<(typeof shapes)[number]>("twin_capsules");
@@ -97,8 +100,8 @@ export default function App() {
   const [compositorActive, setCompositorActive] = useState(false);
 
   const scenario = useMemo(
-    () => [substrate, shape, phase, mode, interactive ? "interactive" : "static", tint].join("__"),
-    [substrate, shape, phase, mode, interactive, tint]
+    () => [rig, substrate, shape, phase, mode, interactive ? "interactive" : "static", tint].join("__"),
+    [rig, substrate, shape, phase, mode, interactive, tint]
   );
 
   function pressGlass() {
@@ -146,7 +149,7 @@ export default function App() {
         labPlan: "apple_glass_parity_execution_plan_v1_2",
         sceneId: substrate.startsWith("s00_") ? "S00_NULL" : "MANUAL_LEGACY",
         stateId: substrate,
-        rigId: mode === "substrate_only" ? "R0" : "C0",
+        rigId: rig,
         captureKind: "layer_snapshot",
         invalidReason: mode === "substrate_only" && substrate.startsWith("s00_") ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID",
         scenario,
@@ -187,7 +190,7 @@ export default function App() {
           labPlan: "apple_glass_parity_execution_plan_v1_2",
           sceneId: substrate.startsWith("s00_") ? "S00_NULL" : "MANUAL_LEGACY",
           stateId: substrate,
-          rigId: mode === "substrate_only" ? "R0" : "C0",
+          rigId: rig,
           captureKind: "compositor",
           touchPhase: phase === "press" ? "press" : phase.startsWith("drag") ? "drag" : "rest",
           nullQualification: "fail",
@@ -212,6 +215,7 @@ export default function App() {
       <NativeLiquidGlassCaptureView
         ref={glassRef}
         style={StyleSheet.absoluteFill}
+        rig={rig}
         mode={mode}
         substrate={substrate}
         shape={shape}
@@ -228,6 +232,7 @@ export default function App() {
             <Text style={styles.scenario}>{scenario}</Text>
             <Text style={styles.captureStatus}>{captureStatus}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              <Chip label="rig" value={rig} onPress={() => setRig(nextValue(rigs, rig))} />
               <Chip label="mode" value={mode} onPress={() => setMode(nextValue(modes, mode))} />
               <Chip label="substrate" value={substrate} onPress={() => setSubstrate(nextValue(substrates, substrate))} />
               <Chip label="shape" value={shape} onPress={() => setShape(nextValue(shapes, shape))} />
