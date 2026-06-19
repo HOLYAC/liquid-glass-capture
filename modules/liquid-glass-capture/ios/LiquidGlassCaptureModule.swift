@@ -62,6 +62,11 @@ public final class LiquidGlassCaptureModule: Module {
         view.stopCompositorCapture(promise: promise)
       }
       .runOnQueue(.main)
+
+      AsyncFunction("runNullQualificationAsync") { (view: LiquidGlassCaptureView, referenceArtifactPath: String, candidateArtifactPath: String, rung: String?, promise: Promise) in
+        view.runNullQualification(referenceArtifactPath: referenceArtifactPath, candidateArtifactPath: candidateArtifactPath, rung: rung, promise: promise)
+      }
+      .runOnQueue(.main)
     }
   }
 }

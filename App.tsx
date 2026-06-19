@@ -98,6 +98,8 @@ export default function App() {
   const [touchCount, setTouchCount] = useState(0);
   const [captureStatus, setCaptureStatus] = useState("no capture");
   const [compositorActive, setCompositorActive] = useState(false);
+  const [lastReferenceArtifact, setLastReferenceArtifact] = useState<string | null>(null);
+  const [lastCandidateArtifact, setLastCandidateArtifact] = useState<string | null>(null);
 
   const scenario = useMemo(
     () => [rig, substrate, shape, phase, mode, interactive ? "interactive" : "static", tint].join("__"),
@@ -183,6 +185,14 @@ export default function App() {
       if (compositorActive) {
         const payload = await handle.stopCompositorCaptureAsync();
         setCompositorActive(false);
+        const jsonPath = typeof payload.jsonPath === "string" ? payload.jsonPath : null;
+        if (jsonPath) {
+          if (payload.rig_id === "R0") {
+            setLastReferenceArtifact(jsonPath);
+          } else {
+            setLastCandidateArtifact(jsonPath);
+          }
+        }
         setCaptureStatus(String(payload.jsonPath ?? payload.sessionDir ?? "compositor stopped"));
       } else {
         const metadata = {
@@ -209,6 +219,29 @@ export default function App() {
     setControls(true);
   }
 
+  async function runNullQualification() {
+    const handle = glassRef.current;
+    if (!handle?.runNullQualificationAsync) {
+      setCaptureStatus("null qualification unavailable");
+      setControls(true);
+      return;
+    }
+
+    if (!lastReferenceArtifact || !lastCandidateArtifact) {
+      setCaptureStatus("need R0 and candidate compositor captures");
+      setControls(true);
+      return;
+    }
+
+    try {
+      const report = await handle.runNullQualificationAsync(lastReferenceArtifact, lastCandidateArtifact, null);
+      setCaptureStatus(String(report.jsonPath ?? report.null_qualification ?? "null report written"));
+    } catch (error) {
+      setCaptureStatus(`null failed: ${String(error)}`);
+    }
+    setControls(true);
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar hidden />
@@ -231,6 +264,7 @@ export default function App() {
             <Text style={styles.title}>Liquid Glass Capture</Text>
             <Text style={styles.scenario}>{scenario}</Text>
             <Text style={styles.captureStatus}>{captureStatus}</Text>
+            <Text style={styles.captureStatus}>R0 {lastReferenceArtifact ? "ready" : "missing"} / C {lastCandidateArtifact ? "ready" : "missing"}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
               <Chip label="rig" value={rig} onPress={() => setRig(nextValue(rigs, rig))} />
               <Chip label="mode" value={mode} onPress={() => setMode(nextValue(modes, mode))} />
@@ -260,6 +294,9 @@ export default function App() {
           </Pressable>
           <Pressable onPress={toggleCompositorCapture} style={compositorActive ? styles.bottomButtonPrimary : styles.bottomButton}>
             <Text style={styles.bottomButtonText}>R</Text>
+          </Pressable>
+          <Pressable onPress={runNullQualification} style={styles.bottomButton}>
+            <Text style={styles.bottomButtonText}>N</Text>
           </Pressable>
         </View>
       </SafeAreaView>

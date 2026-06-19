@@ -7,6 +7,7 @@ import WebKit
 public final class LiquidGlassCaptureView: ExpoView {
   private let model = NativeHarnessModel()
   private let compositorCapture = ReplayKitCompositorCaptureDaemon()
+  private let nullQualification = NullQualificationService()
   private var host: UIHostingController<NativeCaptureRootView>?
 
   public var mode: CaptureMode {
@@ -291,6 +292,19 @@ public final class LiquidGlassCaptureView: ExpoView {
       case .failure(let error):
         promise.reject(error)
       }
+    }
+  }
+
+  public func runNullQualification(referenceArtifactPath: String, candidateArtifactPath: String, rung: String?, promise: Promise) {
+    do {
+      let payload = try nullQualification.run(
+        referenceArtifactPath: referenceArtifactPath,
+        candidateArtifactPath: candidateArtifactPath,
+        rung: rung
+      )
+      promise.resolve(payload)
+    } catch {
+      promise.reject(error)
     }
   }
 

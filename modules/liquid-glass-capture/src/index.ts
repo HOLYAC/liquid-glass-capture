@@ -94,6 +94,11 @@ export type LiquidGlassCaptureViewHandle = {
     metadata: Record<string, unknown>
   ): Promise<Record<string, unknown>>;
   stopCompositorCaptureAsync?(): Promise<Record<string, unknown>>;
+  runNullQualificationAsync?(
+    referenceArtifactPath: string,
+    candidateArtifactPath: string,
+    rung?: string | null
+  ): Promise<Record<string, unknown>>;
 };
 
 export const LiquidGlassCaptureView =
