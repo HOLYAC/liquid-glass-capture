@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Liquid Glass Capture",
+    "slug": "liquid-glass-capture",
+    "scheme": "liquidglasscapture",
+    "version": "0.1.0",
+    "platforms": [
+      "ios"
+    ],
+    "orientation": "landscape",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zaeba.liquidglasscapture",
+      "requireFullScreen": true,
+      "infoPlist": {
+        "UIRequiresFullScreen": true,
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "26.0"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "eb04735e-c11d-4b4e-9d97-4362b918961d"
+      }
+    },
+    "owner": "eclngqee"
+  }
+}

@@ -1,0 +1,83 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  unsigned-ipa:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Show Xcode and SDKs
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Generate iOS project
+        run: npx expo prebuild --platform ios --clean --non-interactive
+
+      - name: Build unsigned device app
+        run: |
+          set -euo pipefail
+          WORKSPACE="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
+          if [ -z "$WORKSPACE" ]; then
+            echo "No Xcode workspace found under ios/"
+            exit 1
+          fi
+
+          SCHEME="$(xcodebuild -list -json -workspace "$WORKSPACE" | python3 -c 'import json,sys; data=json.load(sys.stdin); schemes=data.get("workspace",{}).get("schemes",[]); print(schemes[0] if schemes else "")')"
+          if [ -z "$SCHEME" ]; then
+            echo "No Xcode scheme found in $WORKSPACE"
+            exit 1
+          fi
+
+          echo "workspace=$WORKSPACE"
+          echo "scheme=$SCHEME"
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 2 -name '*.app' -type d | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found under Release-iphoneos"
+            find build/DerivedData/Build/Products -maxdepth 4 -type d || true
+            exit 1
+          fi
+
+          mkdir -p dist/Payload
+          cp -R "$APP_PATH" dist/Payload/
+          (cd dist && /usr/bin/zip -qry LiquidGlassCapture-unsigned.ipa Payload)
+          ls -lh dist/LiquidGlassCapture-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiquidGlassCapture-unsigned-ipa
+          path: dist/LiquidGlassCapture-unsigned.ipa
+          if-no-files-found: error
