@@ -233,6 +233,7 @@ public enum SubstrateKind: String {
   case lumaRamp = "luma_ramp"
   case textWeights = "text_weights"
   case caretSelection = "caret_selection"
+  case nativeTextSelection = "native_text_selection"
   case noise
 }
 
@@ -304,6 +305,8 @@ struct NativeSubstrateView: View {
         TextWeights()
       case .caretSelection:
         CaretSelection()
+      case .nativeTextSelection:
+        NativeTextSelection()
       case .noise:
         NoiseSubstrate()
       }
@@ -441,6 +444,70 @@ struct CaretSelection: View {
       }
       .font(.system(size: 54, weight: .regular))
       .frame(width: 960, alignment: .leading)
+    }
+  }
+}
+
+struct NativeTextSelection: View {
+  var body: some View {
+    GeometryReader { proxy in
+      NativeTextSelectionTextView()
+        .frame(
+          width: min(proxy.size.width * 0.82, 1040),
+          height: min(max(proxy.size.height * 0.14, 96), 132)
+        )
+        .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.56)
+    }
+  }
+}
+
+struct NativeTextSelectionTextView: UIViewRepresentable {
+  func makeUIView(context: Context) -> UITextView {
+    let textView = UITextView()
+    textView.text = "glass bubble"
+    textView.font = .systemFont(ofSize: 54, weight: .regular)
+    textView.textColor = .white
+    textView.backgroundColor = UIColor(white: 0.12, alpha: 1)
+    textView.tintColor = UIColor(red: 0.25, green: 0.86, blue: 1.0, alpha: 1)
+    textView.isEditable = true
+    textView.isSelectable = true
+    textView.isScrollEnabled = false
+    textView.autocorrectionType = .no
+    textView.spellCheckingType = .no
+    textView.smartQuotesType = .no
+    textView.inputView = UIView(frame: .zero)
+    textView.textContainerInset = UIEdgeInsets(top: 30, left: 38, bottom: 20, right: 38)
+    textView.textContainer.lineFragmentPadding = 0
+    textView.layer.cornerRadius = 54
+    textView.layer.cornerCurve = .continuous
+    textView.clipsToBounds = true
+
+    DispatchQueue.main.async {
+      focusAndSelect(textView)
+    }
+
+    return textView
+  }
+
+  func updateUIView(_ textView: UITextView, context: Context) {
+    DispatchQueue.main.async {
+      focusAndSelect(textView)
+    }
+  }
+
+  private func focusAndSelect(_ textView: UITextView) {
+    guard textView.window != nil else {
+      return
+    }
+
+    if !textView.isFirstResponder {
+      textView.becomeFirstResponder()
+    }
+
+    if let range = textView.text.range(of: "bubble") {
+      let location = textView.text.distance(from: textView.text.startIndex, to: range.lowerBound)
+      let length = textView.text.distance(from: range.lowerBound, to: range.upperBound)
+      textView.selectedRange = NSRange(location: location, length: length)
     }
   }
 }

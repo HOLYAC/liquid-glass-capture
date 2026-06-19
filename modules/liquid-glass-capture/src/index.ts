@@ -16,6 +16,7 @@ export type LiquidGlassCaptureSubstrate =
   | "luma_ramp"
   | "text_weights"
   | "caret_selection"
+  | "native_text_selection"
   | "noise";
 
 export type LiquidGlassCaptureShape =

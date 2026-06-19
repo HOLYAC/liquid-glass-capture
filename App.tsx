@@ -26,6 +26,7 @@ const substrates = [
   "luma_ramp",
   "text_weights",
   "caret_selection",
+  "native_text_selection",
   "noise"
 ] as const;
 const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
@@ -63,8 +64,8 @@ function Chip({
 
 export default function App() {
   const glassRef = useRef<LiquidGlassCaptureViewHandle>(null);
-  const [mode, setMode] = useState<(typeof modes)[number]>("glass_over_substrate");
-  const [substrate, setSubstrate] = useState<(typeof substrates)[number]>("caret_selection");
+  const [mode, setMode] = useState<(typeof modes)[number]>("substrate_only");
+  const [substrate, setSubstrate] = useState<(typeof substrates)[number]>("native_text_selection");
   const [shape, setShape] = useState<(typeof shapes)[number]>("twin_capsules");
   const [phase, setPhase] = useState<(typeof phases)[number]>("merge_near");
   const [tint, setTint] = useState<(typeof tints)[number]>("none");
