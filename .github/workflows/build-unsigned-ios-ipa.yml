@@ -10,10 +10,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -38,11 +38,19 @@ jobs:
             exit 1
           fi
 
-          SCHEME="$(xcodebuild -list -json -workspace "$WORKSPACE" | python3 -c 'import json,sys; data=json.load(sys.stdin); schemes=data.get("workspace",{}).get("schemes",[]); print(schemes[0] if schemes else "")')"
-          if [ -z "$SCHEME" ]; then
-            echo "No Xcode scheme found in $WORKSPACE"
-            exit 1
-          fi
+          SCHEME="LiquidGlassCapture"
+          xcodebuild -list -workspace "$WORKSPACE"
+          SCHEMES_JSON="$(xcodebuild -list -json -workspace "$WORKSPACE")"
+          python3 - "$SCHEME" "$SCHEMES_JSON" <<'PY'
+          import json
+          import sys
+
+          expected = sys.argv[1]
+          schemes = json.loads(sys.argv[2]).get("workspace", {}).get("schemes", [])
+          if expected not in schemes:
+              print(f"Expected app scheme {expected!r}, got: {schemes}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
 
           echo "workspace=$WORKSPACE"
           echo "scheme=$SCHEME"
@@ -76,7 +84,7 @@ jobs:
           ls -lh dist/LiquidGlassCapture-unsigned.ipa
 
       - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: LiquidGlassCapture-unsigned-ipa
           path: dist/LiquidGlassCapture-unsigned.ipa
