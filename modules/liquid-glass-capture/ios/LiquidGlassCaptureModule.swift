@@ -9,7 +9,7 @@ public final class LiquidGlassCaptureModule: Module {
     }
 
     View(LiquidGlassCaptureView.self) {
-      Name("LiquidGlassCapture")
+      ViewName("LiquidGlassCapture")
 
       Prop("mode") { (view: LiquidGlassCaptureView, value: String) in
         view.mode = CaptureMode(rawValue: value) ?? .glassOverSubstrate

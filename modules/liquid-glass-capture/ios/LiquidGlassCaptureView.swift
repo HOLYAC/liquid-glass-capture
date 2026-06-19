@@ -220,7 +220,7 @@ struct GridSubstrate: View {
 struct RGBStripes: View {
   var body: some View {
     Canvas { context, size in
-      let colors: [Color] = [.red, .green, .blue, .cyan, .yellow, .magenta, .white, .black]
+      let colors: [Color] = [.red, .green, .blue, .cyan, .yellow, Color(red: 1, green: 0, blue: 1), .white, .black]
       let width = max(1, size.width / CGFloat(colors.count * 7))
       var x: CGFloat = 0
       var index = 0

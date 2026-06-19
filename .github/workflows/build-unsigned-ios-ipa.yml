@@ -33,6 +33,25 @@ jobs:
       - name: Generate iOS project
         run: npx expo prebuild --platform ios --clean --non-interactive
 
+      - name: Verify native module registration
+        run: |
+          set -euo pipefail
+
+          test -f modules/liquid-glass-capture/ios/LiquidGlassCapture.podspec
+          npm ls liquid-glass-capture --depth=0
+
+          grep -R "LiquidGlassCapture" ios/Podfile.lock
+
+          PROVIDER="$(find ios -name ExpoModulesProvider.swift -type f | head -n 1)"
+          if [ -z "$PROVIDER" ]; then
+            echo "ExpoModulesProvider.swift was not generated"
+            exit 1
+          fi
+
+          echo "provider=$PROVIDER"
+          grep "import LiquidGlassCapture" "$PROVIDER"
+          grep "LiquidGlassCaptureModule.self" "$PROVIDER"
+
       - name: Build unsigned device app
         run: |
           set -euo pipefail
