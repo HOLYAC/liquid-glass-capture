@@ -13,11 +13,13 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zaeba.liquidglasscapture",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "requireFullScreen": true,
       "infoPlist": {
         "UIRequiresFullScreen": true,
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
       }
     },
     "plugins": [
