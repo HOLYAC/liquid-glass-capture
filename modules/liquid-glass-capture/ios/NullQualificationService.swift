@@ -185,7 +185,7 @@ final class NullQualificationService {
 
   private static func resolve(path: String, relativeTo directory: URL) -> URL {
     let url = URL(fileURLWithPath: path)
-    if url.isAbsoluteURL && path.hasPrefix("/") {
+    if path.hasPrefix("/") {
       return url
     }
     return directory.appendingPathComponent(path)
@@ -548,4 +548,3 @@ private struct NullMetrics {
     ]
   }
 }
-
