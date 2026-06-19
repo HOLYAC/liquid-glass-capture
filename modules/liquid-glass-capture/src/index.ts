@@ -80,6 +80,11 @@ export type LiquidGlassCaptureViewHandle = {
     label: string,
     metadata: Record<string, unknown>
   ): Promise<LiquidGlassCaptureLabArtifact>;
+  startCompositorCaptureAsync?(
+    label: string,
+    metadata: Record<string, unknown>
+  ): Promise<Record<string, unknown>>;
+  stopCompositorCaptureAsync?(): Promise<Record<string, unknown>>;
 };
 
 export const LiquidGlassCaptureView =

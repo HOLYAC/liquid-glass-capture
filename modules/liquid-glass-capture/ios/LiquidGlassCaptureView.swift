@@ -5,6 +5,7 @@ import UIKit
 
 public final class LiquidGlassCaptureView: ExpoView {
   private let model = NativeHarnessModel()
+  private let compositorCapture = ReplayKitCompositorCaptureDaemon()
   private var host: UIHostingController<NativeCaptureRootView>?
 
   public var mode: CaptureMode {
@@ -253,6 +254,39 @@ public final class LiquidGlassCaptureView: ExpoView {
     return artifact
   }
 
+  public func startCompositorCapture(label: String, metadata: [String: Any], promise: Promise) {
+    let scale = UIScreen.main.scale
+    let viewportPx = [
+      "width": Int(bounds.width * scale),
+      "height": Int(bounds.height * scale)
+    ]
+
+    compositorCapture.start(
+      label: label,
+      metadata: metadata,
+      props: labProps(),
+      viewportPx: viewportPx
+    ) { result in
+      switch result {
+      case .success(let payload):
+        promise.resolve(payload)
+      case .failure(let error):
+        promise.reject(error)
+      }
+    }
+  }
+
+  public func stopCompositorCapture(promise: Promise) {
+    compositorCapture.stop { result in
+      switch result {
+      case .success(let payload):
+        promise.resolve(payload)
+      case .failure(let error):
+        promise.reject(error)
+      }
+    }
+  }
+
   private static func metrics(for image: UIImage) -> [String: Any] {
     guard let cgImage = image.cgImage else {
       return ["sampled": false]
@@ -382,6 +416,18 @@ public final class LiquidGlassCaptureView: ExpoView {
     default:
       return "manual-\(stateId)"
     }
+  }
+
+  private func labProps() -> [String: Any] {
+    [
+      "mode": model.mode.rawValue,
+      "substrate": model.substrate.rawValue,
+      "shape": model.shape.rawValue,
+      "phase": model.phase.rawValue,
+      "tint": model.tint.rawValue,
+      "interactive": model.interactive,
+      "autoplay": model.autoplay
+    ]
   }
 }
 

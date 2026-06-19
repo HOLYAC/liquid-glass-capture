@@ -50,6 +50,21 @@ function nextValue<T extends string>(values: readonly T[], current: T): T {
   return values[(values.indexOf(current) + 1) % values.length];
 }
 
+function contentSeedFor(substrate: string): string {
+  switch (substrate) {
+    case "s00_flat_grey":
+      return "s00-flat-p3-grey-v1";
+    case "s00_hard_edge":
+      return "s00-hard-edge-v1";
+    case "s00_p3_ramp":
+      return "s00-p3-ramp-v1";
+    case "s00_smooth_gradient":
+      return "s00-smooth-gradient-v1";
+    default:
+      return `manual-${substrate}`;
+  }
+}
+
 function Chip({
   label,
   value,
@@ -79,6 +94,7 @@ export default function App() {
   const [controls, setControls] = useState(false);
   const [touchCount, setTouchCount] = useState(0);
   const [captureStatus, setCaptureStatus] = useState("no capture");
+  const [compositorActive, setCompositorActive] = useState(false);
 
   const scenario = useMemo(
     () => [substrate, shape, phase, mode, interactive ? "interactive" : "static", tint].join("__"),
@@ -152,6 +168,44 @@ export default function App() {
     setControls(true);
   }
 
+  async function toggleCompositorCapture() {
+    const handle = glassRef.current;
+    if (!handle?.startCompositorCaptureAsync || !handle.stopCompositorCaptureAsync) {
+      setCaptureStatus("compositor capture unavailable");
+      setControls(true);
+      return;
+    }
+
+    try {
+      if (compositorActive) {
+        const payload = await handle.stopCompositorCaptureAsync();
+        setCompositorActive(false);
+        setCaptureStatus(String(payload.jsonPath ?? payload.sessionDir ?? "compositor stopped"));
+      } else {
+        const metadata = {
+          schemaVersion: "1.2.0",
+          labPlan: "apple_glass_parity_execution_plan_v1_2",
+          sceneId: substrate.startsWith("s00_") ? "S00_NULL" : "MANUAL_LEGACY",
+          stateId: substrate,
+          rigId: mode === "substrate_only" ? "R0" : "C0",
+          captureKind: "compositor",
+          touchPhase: phase === "press" ? "press" : phase.startsWith("drag") ? "drag" : "rest",
+          nullQualification: "fail",
+          maxFrames: 180,
+          appearance: "dark",
+          contentSeed: contentSeedFor(substrate)
+        };
+        const payload = await handle.startCompositorCaptureAsync("compositor", metadata);
+        setCompositorActive(true);
+        setCaptureStatus(String(payload.sessionDir ?? "compositor started"));
+      }
+    } catch (error) {
+      setCompositorActive(false);
+      setCaptureStatus(`compositor failed: ${String(error)}`);
+    }
+    setControls(true);
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar hidden />
@@ -198,6 +252,9 @@ export default function App() {
           </Pressable>
           <Pressable onPress={captureGlass} style={styles.bottomButton}>
             <Text style={styles.bottomButtonText}>C</Text>
+          </Pressable>
+          <Pressable onPress={toggleCompositorCapture} style={compositorActive ? styles.bottomButtonPrimary : styles.bottomButton}>
+            <Text style={styles.bottomButtonText}>R</Text>
           </Pressable>
         </View>
       </SafeAreaView>

@@ -48,6 +48,16 @@ public final class LiquidGlassCaptureModule: Module {
         try view.captureLabArtifact(label: label, metadata: metadata)
       }
       .runOnQueue(.main)
+
+      AsyncFunction("startCompositorCaptureAsync") { (view: LiquidGlassCaptureView, label: String, metadata: [String: Any], promise: Promise) in
+        view.startCompositorCapture(label: label, metadata: metadata, promise: promise)
+      }
+      .runOnQueue(.main)
+
+      AsyncFunction("stopCompositorCaptureAsync") { (view: LiquidGlassCaptureView, promise: Promise) in
+        view.stopCompositorCapture(promise: promise)
+      }
+      .runOnQueue(.main)
     }
   }
 }
