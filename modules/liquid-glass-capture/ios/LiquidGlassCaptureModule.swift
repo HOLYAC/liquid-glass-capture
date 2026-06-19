@@ -43,6 +43,11 @@ public final class LiquidGlassCaptureModule: Module {
         try view.captureSnapshot(label: label, metadata: metadata)
       }
       .runOnQueue(.main)
+
+      AsyncFunction("captureLabArtifactAsync") { (view: LiquidGlassCaptureView, label: String, metadata: [String: Any]) -> [String: Any] in
+        try view.captureLabArtifact(label: label, metadata: metadata)
+      }
+      .runOnQueue(.main)
     }
   }
 }

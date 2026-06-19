@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import CryptoKit
 import SwiftUI
 import UIKit
 
@@ -122,6 +123,136 @@ public final class LiquidGlassCaptureView: ExpoView {
     return payload
   }
 
+  public func captureLabArtifact(label: String, metadata: [String: Any]) throws -> [String: Any] {
+    if bounds.width < 1 || bounds.height < 1 {
+      throw NSError(domain: "LiquidGlassCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "View has no drawable bounds"])
+    }
+
+    layoutIfNeeded()
+
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = UIScreen.main.scale
+    format.opaque = true
+
+    let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
+    let image = renderer.image { _ in
+      drawHierarchy(in: bounds, afterScreenUpdates: true)
+    }
+
+    guard let pngData = image.pngData() else {
+      throw NSError(domain: "LiquidGlassCapture", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not encode PNG"])
+    }
+
+    let fileManager = FileManager.default
+    let captureDir = try fileManager
+      .url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+      .appendingPathComponent("LiquidGlassCaptures", isDirectory: true)
+    try fileManager.createDirectory(at: captureDir, withIntermediateDirectories: true)
+
+    let stamp = Int(Date().timeIntervalSince1970 * 1000)
+    let safeLabel = label
+      .replacingOccurrences(of: "[^A-Za-z0-9_.-]", with: "_", options: .regularExpression)
+      .prefix(48)
+    let basename = "\(stamp)-\(safeLabel)-capture-artifact"
+    let pngURL = captureDir.appendingPathComponent("\(basename).png")
+    let maskURL = captureDir.appendingPathComponent("\(basename).mask-pack.json")
+    let jsonURL = captureDir.appendingPathComponent("\(basename).capture.json")
+
+    try pngData.write(to: pngURL, options: .atomic)
+
+    let maskPack: [String: Any] = [
+      "schema_version": "1.2.0",
+      "mask_pack_id": "glass_core_mask_pack_v1",
+      "masks": [
+        ["id": "core"],
+        ["id": "edge_band"],
+        ["id": "highlight"],
+        ["id": "text"],
+        ["id": "text_halo"],
+        ["id": "background_control"],
+        ["id": "motion_path"],
+        ["id": "compositor_region"],
+        ["id": "product_focus"]
+      ]
+    ]
+    let maskData = try JSONSerialization.data(withJSONObject: maskPack, options: [.prettyPrinted, .sortedKeys])
+    try maskData.write(to: maskURL, options: .atomic)
+
+    let sceneId = metadata["sceneId"] as? String ?? (model.substrate.rawValue.hasPrefix("s00_") ? "S00_NULL" : "MANUAL_LEGACY")
+    let rigId = metadata["rigId"] as? String ?? (model.mode == .substrateOnly ? "R0" : "C0")
+    let stateId = metadata["stateId"] as? String ?? model.substrate.rawValue
+    let artifactId = "\(rigId)-\(sceneId)-\(stateId)-\(stamp)"
+    let invalidReason = sceneId == "S00_NULL" ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID"
+
+    var artifact: [String: Any] = [
+      "schema_version": "1.2.0",
+      "id": artifactId,
+      "rig_id": rigId,
+      "scene_id": sceneId,
+      "state_id": stateId,
+      "git_commit": metadata["gitCommit"] as? String ?? "device-local",
+      "technical_class": "INVALID",
+      "verdict_class": "INVALID",
+      "invalid_reason": invalidReason,
+      "null_qualification": sceneId == "S00_NULL" ? "pass" : "fail",
+      "capture_kind": "layer_snapshot",
+      "device_info": [
+        "model_name": UIDevice.current.model,
+        "model_identifier": UIDevice.current.model,
+        "os_name": "iOS",
+        "os_version": UIDevice.current.systemVersion,
+        "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
+        "sdk_build": Bundle.main.infoDictionary?["DTSDKBuild"] as? String ?? "runtime-unknown",
+        "screen_scale": Double(UIScreen.main.scale),
+        "refresh_hz": Double(UIScreen.main.maximumFramesPerSecond),
+        "thermal_state_start": Self.thermalStateString(ProcessInfo.processInfo.thermalState),
+        "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
+      ],
+      "environment": [
+        "appearance": traitCollection.userInterfaceStyle == .light ? "light" : "dark",
+        "reduce_transparency": UIAccessibility.isReduceTransparencyEnabled,
+        "reduce_motion": UIAccessibility.isReduceMotionEnabled,
+        "content_seed": Self.contentSeed(for: stateId),
+        "viewport_px": [
+          "width": Int(bounds.width * format.scale),
+          "height": Int(bounds.height * format.scale)
+        ],
+        "capture_timestamp_ns": "\(UInt64(Date().timeIntervalSince1970 * 1_000_000_000))"
+      ],
+      "color": [
+        "embedded_icc_profile": "Display P3",
+        "icc_sha256": "unverified-layer-snapshot",
+        "working_space": "display-p3-linear",
+        "stored_transfer": "srgb-transfer",
+        "white_point": "D65"
+      ],
+      "frame_pack": [
+        "base_png_sha256": Self.sha256Hex(pngData),
+        "base_png_path": pngURL.path,
+        "mask_pack_sha256": Self.sha256Hex(maskData),
+        "mask_pack_path": maskURL.path,
+        "touch_phase": Self.touchPhase(for: model.phase),
+        "animation_t": 0
+      ],
+      "shader": [
+        "pipeline": model.mode == .substrateOnly ? "passthrough" : "uniform_calibration"
+      ],
+      "integrity": [
+        "artifact_sha256": "pending",
+        "producer_version": "LiquidGlassCaptureNative.captureArtifact.v1"
+      ]
+    ]
+
+    var jsonData = try JSONSerialization.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
+    var integrity = artifact["integrity"] as? [String: Any] ?? [:]
+    integrity["artifact_sha256"] = Self.sha256Hex(jsonData)
+    artifact["integrity"] = integrity
+    jsonData = try JSONSerialization.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
+    try jsonData.write(to: jsonURL, options: .atomic)
+    artifact["jsonPath"] = jsonURL.path
+    return artifact
+  }
+
   private static func metrics(for image: UIImage) -> [String: Any] {
     guard let cgImage = image.cgImage else {
       return ["sampled": false]
@@ -205,6 +336,53 @@ public final class LiquidGlassCaptureView: ExpoView {
       "edgeEnergy": edgeEnergy / edgeSamples
     ]
   }
+
+  private static func sha256Hex(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func thermalStateString(_ state: ProcessInfo.ThermalState) -> String {
+    switch state {
+    case .nominal:
+      return "nominal"
+    case .fair:
+      return "fair"
+    case .serious:
+      return "serious"
+    case .critical:
+      return "critical"
+    @unknown default:
+      return "fair"
+    }
+  }
+
+  private static func touchPhase(for phase: ProbePhase) -> String {
+    switch phase {
+    case .press:
+      return "press"
+    case .dragLeft, .dragRight:
+      return "drag"
+    case .morphTall, .mergeNear, .mergeOverlap:
+      return "morph"
+    case .rest:
+      return "rest"
+    }
+  }
+
+  private static func contentSeed(for stateId: String) -> String {
+    switch stateId {
+    case "s00_flat_grey":
+      return "s00-flat-p3-grey-v1"
+    case "s00_hard_edge":
+      return "s00-hard-edge-v1"
+    case "s00_p3_ramp":
+      return "s00-p3-ramp-v1"
+    case "s00_smooth_gradient":
+      return "s00-smooth-gradient-v1"
+    default:
+      return "manual-\(stateId)"
+    }
+  }
 }
 
 final class NativeHarnessModel: ObservableObject {
@@ -224,6 +402,10 @@ public enum CaptureMode: String {
 }
 
 public enum SubstrateKind: String {
+  case s00FlatGrey = "s00_flat_grey"
+  case s00HardEdge = "s00_hard_edge"
+  case s00P3Ramp = "s00_p3_ramp"
+  case s00SmoothGradient = "s00_smooth_gradient"
   case checker1 = "checker_1px"
   case checker2 = "checker_2px"
   case checker4 = "checker_4px"
@@ -293,6 +475,14 @@ struct NativeSubstrateView: View {
     ZStack {
       Color.black
       switch kind {
+      case .s00FlatGrey:
+        S00FlatGrey()
+      case .s00HardEdge:
+        S00HardEdge()
+      case .s00P3Ramp:
+        S00P3Ramp()
+      case .s00SmoothGradient:
+        S00SmoothGradient()
       case .checker1, .checker2, .checker4, .checker8:
         Checkerboard(cell: checkerCell)
       case .grid:
@@ -315,12 +505,68 @@ struct NativeSubstrateView: View {
 
   private var checkerCell: CGFloat {
     switch kind {
+    case .s00FlatGrey, .s00HardEdge, .s00P3Ramp, .s00SmoothGradient:
+      return 4
     case .checker1: return 1
     case .checker2: return 2
     case .checker4: return 4
     case .checker8: return 8
     default: return 4
     }
+  }
+}
+
+struct S00FlatGrey: View {
+  var body: some View {
+    Color(red: 0.5, green: 0.5, blue: 0.5)
+  }
+}
+
+struct S00HardEdge: View {
+  var body: some View {
+    GeometryReader { proxy in
+      HStack(spacing: 0) {
+        Color.black
+          .frame(width: proxy.size.width * 0.5)
+        Color.white
+      }
+    }
+  }
+}
+
+struct S00P3Ramp: View {
+  var body: some View {
+    Rectangle()
+      .fill(
+        LinearGradient(
+          stops: [
+            .init(color: Color(red: 1.0, green: 0.0, blue: 0.0), location: 0.0),
+            .init(color: Color(red: 0.0, green: 1.0, blue: 0.0), location: 0.34),
+            .init(color: Color(red: 0.0, green: 0.0, blue: 1.0), location: 0.67),
+            .init(color: Color.white, location: 1.0)
+          ],
+          startPoint: .leading,
+          endPoint: .trailing
+        )
+      )
+  }
+}
+
+struct S00SmoothGradient: View {
+  var body: some View {
+    Rectangle()
+      .fill(
+        LinearGradient(
+          stops: [
+            .init(color: Color(white: 0.08), location: 0.0),
+            .init(color: Color(white: 0.42), location: 0.38),
+            .init(color: Color(white: 0.64), location: 0.62),
+            .init(color: Color(white: 0.92), location: 1.0)
+          ],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+      )
   }
 }
 

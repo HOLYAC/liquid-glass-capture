@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { sha256File, writePng } from "./lib/lab-png.mjs";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const valid = {
+  rig_id: ["R0", "R1", "C0", "C1", "DOM_C", "DX_REPLAY"],
+  scene_id: [
+    "S00_NULL",
+    "S01_SEARCH",
+    "S02_LOUPE",
+    "S03_PRESS",
+    "S04_MORPH",
+    "S05_FLOATING_BAR",
+    "S06_TINY_GLASS",
+    "S07_BUSY_PHOTO",
+    "S08_P3_GRADIENT",
+    "S09_NEAR_WHITE",
+    "S10_NEAR_BLACK",
+    "S11_VIDEO_FRAME",
+    "S12_SYSTEM_MATERIAL_ADJACENCY"
+  ],
+  capture_kind: ["compositor", "framebuffer", "layer_snapshot"],
+  touch_phase: ["rest", "press", "drag", "release", "morph", "sustained"]
+};
+
+main();
+
+function main() {
+  const args = process.argv.slice(2);
+  if (args.includes("--self-test")) {
+    const artifact = writeSelfTestArtifact();
+    validateFile(artifact);
+    console.log(`PASS ${artifact}`);
+    return;
+  }
+
+  if (args.length === 0) {
+    console.error("usage: node scripts/lab-artifact-validate.mjs <capture.json> [...]");
+    console.error("       node scripts/lab-artifact-validate.mjs --self-test");
+    process.exit(2);
+  }
+
+  let failures = 0;
+  for (const file of args) {
+    try {
+      validateFile(file);
+      console.log(`PASS ${file}`);
+    } catch (error) {
+      failures += 1;
+      console.error(`FAIL ${file}`);
+      console.error(String(error.message ?? error));
+    }
+  }
+
+  if (failures > 0) {
+    process.exit(1);
+  }
+}
+
+function validateFile(file) {
+  const absolute = resolve(file);
+  const artifact = JSON.parse(readFileSync(absolute, "utf8"));
+  const errors = validateArtifact(artifact, dirname(absolute));
+  if (errors.length > 0) {
+    throw new Error(errors.map((error) => `- ${error}`).join("\n"));
+  }
+}
+
+function validateArtifact(artifact, artifactDir) {
+  const errors = [];
+  requireValue(errors, artifact.schema_version === "1.2.0", "schema_version must be 1.2.0");
+  requireEnum(errors, "rig_id", artifact.rig_id, valid.rig_id);
+  requireEnum(errors, "scene_id", artifact.scene_id, valid.scene_id);
+  requireEnum(errors, "capture_kind", artifact.capture_kind, valid.capture_kind);
+  requireString(errors, "id", artifact.id);
+  requireString(errors, "state_id", artifact.state_id);
+  requireString(errors, "git_commit", artifact.git_commit);
+
+  if (artifact.rig_id === "R0" && artifact.scene_id !== "S00_NULL" && artifact.capture_kind === "layer_snapshot") {
+    errors.push("R0 glass reference cannot use layer_snapshot; compositor or framebuffer capture is required");
+  }
+
+  if (artifact.rig_id !== "DX_REPLAY" && looksLikeSimulator(artifact.device_info?.model_identifier)) {
+    errors.push("physical-device artifact required; simulator model_identifier is invalid");
+  }
+
+  validateDevice(errors, artifact.device_info);
+  validateEnvironment(errors, artifact.environment);
+  validateColor(errors, artifact.color);
+  validateFramePack(errors, artifact.frame_pack, artifactDir);
+  validateIntegrity(errors, artifact.integrity);
+  return errors;
+}
+
+function validateDevice(errors, device) {
+  if (!device || typeof device !== "object") {
+    errors.push("device_info is required");
+    return;
+  }
+
+  for (const key of ["model_name", "model_identifier", "os_version", "os_build", "sdk_build"]) {
+    requireString(errors, `device_info.${key}`, device[key]);
+  }
+  requireValue(errors, device.os_name === "iOS", "device_info.os_name must be iOS");
+  requireNumber(errors, "device_info.screen_scale", device.screen_scale);
+  requireNumber(errors, "device_info.refresh_hz", device.refresh_hz);
+  requireEnum(errors, "device_info.thermal_state_start", device.thermal_state_start, ["nominal", "fair", "serious", "critical"]);
+  requireValue(errors, typeof device.low_power_mode === "boolean", "device_info.low_power_mode must be boolean");
+}
+
+function validateEnvironment(errors, environment) {
+  if (!environment || typeof environment !== "object") {
+    errors.push("environment is required");
+    return;
+  }
+
+  requireEnum(errors, "environment.appearance", environment.appearance, ["light", "dark"]);
+  requireValue(errors, typeof environment.reduce_transparency === "boolean", "environment.reduce_transparency must be boolean");
+  requireValue(errors, typeof environment.reduce_motion === "boolean", "environment.reduce_motion must be boolean");
+  requireString(errors, "environment.capture_timestamp_ns", environment.capture_timestamp_ns);
+  requireNumber(errors, "environment.viewport_px.width", environment.viewport_px?.width);
+  requireNumber(errors, "environment.viewport_px.height", environment.viewport_px?.height);
+
+  if (!environment.content_seed && !environment.background_asset_hash) {
+    errors.push("environment requires content_seed or background_asset_hash");
+  }
+}
+
+function validateColor(errors, color) {
+  if (!color || typeof color !== "object") {
+    errors.push("color is required");
+    return;
+  }
+
+  requireValue(errors, color.embedded_icc_profile === "Display P3", "color.embedded_icc_profile must be Display P3");
+  requireString(errors, "color.icc_sha256", color.icc_sha256);
+  requireValue(errors, color.working_space === "display-p3-linear", "color.working_space must be display-p3-linear");
+  requireValue(errors, color.stored_transfer === "srgb-transfer", "color.stored_transfer must be srgb-transfer");
+  requireValue(errors, color.white_point === "D65", "color.white_point must be D65");
+}
+
+function validateFramePack(errors, framePack, artifactDir) {
+  if (!framePack || typeof framePack !== "object") {
+    errors.push("frame_pack is required");
+    return;
+  }
+
+  requireEnum(errors, "frame_pack.touch_phase", framePack.touch_phase, valid.touch_phase);
+  requireNumber(errors, "frame_pack.animation_t", framePack.animation_t);
+  verifyPathHash(errors, artifactDir, "frame_pack.base_png", framePack.base_png_path, framePack.base_png_sha256);
+  verifyPathHash(errors, artifactDir, "frame_pack.mask_pack", framePack.mask_pack_path, framePack.mask_pack_sha256);
+}
+
+function validateIntegrity(errors, integrity) {
+  if (!integrity || typeof integrity !== "object") {
+    errors.push("integrity is required");
+    return;
+  }
+  requireString(errors, "integrity.artifact_sha256", integrity.artifact_sha256);
+  requireString(errors, "integrity.producer_version", integrity.producer_version);
+}
+
+function verifyPathHash(errors, artifactDir, label, rawPath, expectedHash) {
+  requireString(errors, `${label}_path`, rawPath);
+  requireString(errors, `${label}_sha256`, expectedHash);
+  if (!rawPath || !expectedHash) return;
+
+  const path = isAbsolute(rawPath) ? rawPath : resolve(artifactDir, rawPath);
+  try {
+    const actual = sha256File(path);
+    if (actual.toLowerCase() !== String(expectedHash).toLowerCase()) {
+      errors.push(`${label}_sha256 mismatch: expected ${expectedHash}, got ${actual}`);
+    }
+  } catch (error) {
+    errors.push(`${label}_path cannot be read: ${path} (${error.message})`);
+  }
+}
+
+function writeSelfTestArtifact() {
+  const dir = join(repoRoot, "artifacts", "lab-self-test", "validate");
+  mkdirSync(dir, { recursive: true });
+
+  const width = 4;
+  const height = 4;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let index = 0; index < pixels.length; index += 4) {
+    pixels[index] = 128;
+    pixels[index + 1] = 128;
+    pixels[index + 2] = 128;
+    pixels[index + 3] = 255;
+  }
+
+  const pngPath = join(dir, "native.png");
+  writePng(pngPath, width, height, pixels);
+  const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
+  const artifactPath = join(dir, "native.capture.json");
+  const artifact = makeSelfTestArtifact(pngPath, maskPath);
+  writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
+  return artifactPath;
+}
+
+function makeSelfTestArtifact(pngPath, maskPath) {
+  return {
+    schema_version: "1.2.0",
+    id: "self-test-native-s00",
+    rig_id: "R0",
+    scene_id: "S00_NULL",
+    state_id: "flat_p3_grey",
+    git_commit: "self-test",
+    technical_class: "INVALID",
+    verdict_class: "INVALID",
+    invalid_reason: "NON_PHYSICAL_PATH",
+    null_qualification: "pass",
+    capture_kind: "layer_snapshot",
+    device_info: {
+      model_name: "Self Test Device",
+      model_identifier: "iPhone-self-test",
+      os_name: "iOS",
+      os_version: "26.0",
+      os_build: "self-test",
+      sdk_build: "self-test",
+      screen_scale: 3,
+      refresh_hz: 60,
+      thermal_state_start: "nominal",
+      low_power_mode: false
+    },
+    environment: {
+      appearance: "dark",
+      reduce_transparency: false,
+      reduce_motion: false,
+      content_seed: "s00-flat-p3-grey-v1",
+      viewport_px: { width: 4, height: 4 },
+      capture_timestamp_ns: "0"
+    },
+    color: {
+      embedded_icc_profile: "Display P3",
+      icc_sha256: "self-test-display-p3",
+      working_space: "display-p3-linear",
+      stored_transfer: "srgb-transfer",
+      white_point: "D65"
+    },
+    frame_pack: {
+      base_png_sha256: sha256File(pngPath),
+      base_png_path: pngPath,
+      mask_pack_sha256: sha256File(maskPath),
+      mask_pack_path: maskPath,
+      touch_phase: "rest",
+      animation_t: 0
+    },
+    integrity: {
+      artifact_sha256: "self-test-pending",
+      producer_version: "lab-artifact-validate.self-test"
+    }
+  };
+}
+
+function requireString(errors, label, value) {
+  if (typeof value !== "string" || value.length === 0) {
+    errors.push(`${label} must be a non-empty string`);
+  }
+}
+
+function requireNumber(errors, label, value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    errors.push(`${label} must be a finite number`);
+  }
+}
+
+function requireEnum(errors, label, value, allowed) {
+  if (!allowed.includes(value)) {
+    errors.push(`${label} must be one of ${allowed.join(", ")}`);
+  }
+}
+
+function requireValue(errors, condition, message) {
+  if (!condition) {
+    errors.push(message);
+  }
+}
+
+function looksLikeSimulator(modelIdentifier) {
+  return typeof modelIdentifier === "string" && /simulator|x86|arm64-sim/i.test(modelIdentifier);
+}
+

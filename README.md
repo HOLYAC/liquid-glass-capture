@@ -2,6 +2,9 @@
 
 No-Mac install path for the Apple Liquid Glass capture harness.
 
+Canonical execution plan for the one-binary calibration lab lives in
+[`apple_glass_parity_execution_plan_v1_2.md`](apple_glass_parity_execution_plan_v1_2.md).
+
 This is an Expo app with a local Expo native module:
 
 ```text

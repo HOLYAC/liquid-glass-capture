@@ -7,6 +7,10 @@ export type LiquidGlassCaptureMode =
   | "glass_over_black";
 
 export type LiquidGlassCaptureSubstrate =
+  | "s00_flat_grey"
+  | "s00_hard_edge"
+  | "s00_p3_ramp"
+  | "s00_smooth_gradient"
   | "checker_1px"
   | "checker_2px"
   | "checker_4px"
@@ -61,11 +65,21 @@ export type LiquidGlassCaptureSnapshot = {
   metrics: Record<string, unknown>;
 };
 
+export type LiquidGlassCaptureLabArtifact = Record<string, unknown> & {
+  schema_version: "1.2.0";
+  id: string;
+  jsonPath: string;
+};
+
 export type LiquidGlassCaptureViewHandle = {
   captureSnapshotAsync(
     label: string,
     metadata: Record<string, unknown>
   ): Promise<LiquidGlassCaptureSnapshot>;
+  captureLabArtifactAsync?(
+    label: string,
+    metadata: Record<string, unknown>
+  ): Promise<LiquidGlassCaptureLabArtifact>;
 };
 
 export const LiquidGlassCaptureView =

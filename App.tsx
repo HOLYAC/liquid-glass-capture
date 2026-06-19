@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { LiquidGlassCaptureView } from "liquid-glass-capture";
 import type {
+  LiquidGlassCaptureLabArtifact,
   LiquidGlassCaptureSnapshot,
   LiquidGlassCaptureViewHandle,
   LiquidGlassCaptureViewProps
@@ -17,6 +18,10 @@ import type {
 
 const modes = ["substrate_only", "glass_over_substrate", "glass_over_black"] as const;
 const substrates = [
+  "s00_flat_grey",
+  "s00_hard_edge",
+  "s00_p3_ramp",
+  "s00_smooth_gradient",
   "checker_1px",
   "checker_2px",
   "checker_4px",
@@ -120,13 +125,27 @@ export default function App() {
     }
 
     try {
-      const snapshot: LiquidGlassCaptureSnapshot = await handle.captureSnapshotAsync("manual", {
+      const metadata = {
+        schemaVersion: "1.2.0",
+        labPlan: "apple_glass_parity_execution_plan_v1_2",
+        sceneId: substrate.startsWith("s00_") ? "S00_NULL" : "MANUAL_LEGACY",
+        stateId: substrate,
+        rigId: mode === "substrate_only" ? "R0" : "C0",
+        captureKind: "layer_snapshot",
+        invalidReason: mode === "substrate_only" && substrate.startsWith("s00_") ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID",
         scenario,
         touchCount,
         controls,
         capturedFrom: "bottom_bar"
-      });
-      setCaptureStatus(snapshot.jsonPath);
+      };
+
+      if (handle.captureLabArtifactAsync) {
+        const artifact: LiquidGlassCaptureLabArtifact = await handle.captureLabArtifactAsync("manual", metadata);
+        setCaptureStatus(artifact.jsonPath);
+      } else {
+        const snapshot: LiquidGlassCaptureSnapshot = await handle.captureSnapshotAsync("manual", metadata);
+        setCaptureStatus(snapshot.jsonPath);
+      }
     } catch (error) {
       setCaptureStatus(`capture failed: ${String(error)}`);
     }

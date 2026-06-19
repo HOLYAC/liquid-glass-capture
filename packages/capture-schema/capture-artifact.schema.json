@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ddouns.local/apple-glass-parity/capture-artifact.schema.json",
+  "title": "Apple Glass Parity CaptureArtifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "rig_id",
+    "scene_id",
+    "state_id",
+    "git_commit",
+    "capture_kind",
+    "device_info",
+    "environment",
+    "color",
+    "frame_pack",
+    "integrity"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.2.0" },
+    "id": { "type": "string", "minLength": 1 },
+    "rig_id": { "enum": ["R0", "R1", "C0", "C1", "DOM_C", "DX_REPLAY"] },
+    "scene_id": {
+      "enum": [
+        "S00_NULL",
+        "S01_SEARCH",
+        "S02_LOUPE",
+        "S03_PRESS",
+        "S04_MORPH",
+        "S05_FLOATING_BAR",
+        "S06_TINY_GLASS",
+        "S07_BUSY_PHOTO",
+        "S08_P3_GRADIENT",
+        "S09_NEAR_WHITE",
+        "S10_NEAR_BLACK",
+        "S11_VIDEO_FRAME",
+        "S12_SYSTEM_MATERIAL_ADJACENCY"
+      ]
+    },
+    "state_id": { "type": "string", "minLength": 1 },
+    "git_commit": { "type": "string", "minLength": 1 },
+    "technical_class": { "enum": ["SWIFTUI_PASS", "WEBKIT_PASS", "SHADER_PASS", "FAIL", "INVALID"] },
+    "verdict_class": {
+      "enum": [
+        "TECH_PASS_PENDING_SIGNOFF",
+        "PASS_WITH_REVIEW",
+        "PROD_PASS",
+        "BLOCKED_FOR_DESIGN",
+        "LEGIBILITY_BLOCK",
+        "FAIL",
+        "INVALID"
+      ]
+    },
+    "flake_class": { "enum": ["NONE", "INFRA_FLAKE", "PRODUCT_REGRESSION", "METRIC_NOISE", "UNKNOWN"] },
+    "null_qualification": { "enum": ["pass", "fail"] },
+    "invalid_reason": { "type": "string" },
+    "capture_kind": { "enum": ["compositor", "framebuffer", "layer_snapshot"] },
+    "device_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_name",
+        "model_identifier",
+        "os_name",
+        "os_version",
+        "os_build",
+        "sdk_build",
+        "screen_scale",
+        "refresh_hz",
+        "thermal_state_start",
+        "low_power_mode"
+      ],
+      "properties": {
+        "model_name": { "type": "string", "minLength": 1 },
+        "model_identifier": { "type": "string", "minLength": 1 },
+        "os_name": { "const": "iOS" },
+        "os_version": { "type": "string", "minLength": 1 },
+        "os_build": { "type": "string", "minLength": 1 },
+        "sdk_build": { "type": "string", "minLength": 1 },
+        "screen_scale": { "type": "number", "exclusiveMinimum": 0 },
+        "refresh_hz": { "type": "number", "exclusiveMinimum": 0 },
+        "thermal_state_start": { "enum": ["nominal", "fair", "serious", "critical"] },
+        "thermal_state_end": { "enum": ["nominal", "fair", "serious", "critical"] },
+        "low_power_mode": { "type": "boolean" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appearance",
+        "reduce_transparency",
+        "reduce_motion",
+        "viewport_px",
+        "capture_timestamp_ns"
+      ],
+      "properties": {
+        "appearance": { "enum": ["light", "dark"] },
+        "reduce_transparency": { "type": "boolean" },
+        "reduce_motion": { "type": "boolean" },
+        "content_seed": { "type": "string" },
+        "background_asset_hash": { "type": "string" },
+        "viewport_px": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "integer", "exclusiveMinimum": 0 },
+            "height": { "type": "integer", "exclusiveMinimum": 0 }
+          }
+        },
+        "capture_timestamp_ns": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [
+        { "required": ["content_seed"] },
+        { "required": ["background_asset_hash"] }
+      ]
+    },
+    "color": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["embedded_icc_profile", "icc_sha256", "working_space", "stored_transfer", "white_point"],
+      "properties": {
+        "embedded_icc_profile": { "const": "Display P3" },
+        "icc_sha256": { "type": "string", "minLength": 1 },
+        "working_space": { "const": "display-p3-linear" },
+        "stored_transfer": { "const": "srgb-transfer" },
+        "white_point": { "const": "D65" }
+      }
+    },
+    "frame_pack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_png_sha256",
+        "base_png_path",
+        "mask_pack_sha256",
+        "mask_pack_path",
+        "touch_phase",
+        "animation_t"
+      ],
+      "properties": {
+        "base_png_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "base_png_path": { "type": "string", "minLength": 1 },
+        "sequence_paths": { "type": "array", "items": { "type": "string" } },
+        "mask_pack_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "mask_pack_path": { "type": "string", "minLength": 1 },
+        "touch_phase": { "enum": ["rest", "press", "drag", "release", "morph", "sustained"] },
+        "animation_t": { "type": "number" },
+        "sustained_duration_ms": { "type": "number", "minimum": 0 },
+        "trajectory_source_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+      }
+    },
+    "shader": { "type": "object" },
+    "perf": { "type": "object" },
+    "energy": { "type": "object" },
+    "review": { "type": "object" },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_sha256", "producer_version"],
+      "properties": {
+        "artifact_sha256": { "type": "string", "minLength": 1 },
+        "producer_version": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
+

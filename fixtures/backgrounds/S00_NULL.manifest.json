@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.2.0",
+  "scene_id": "S00_NULL",
+  "purpose": "Pipeline qualification fixture. Candidate renders identity; no glass is present.",
+  "rungs": [
+    {
+      "id": "flat_p3_grey",
+      "kind": "flat",
+      "content_seed": "s00-flat-p3-grey-v1",
+      "expected_null": "byte_equal"
+    },
+    {
+      "id": "hard_edge",
+      "kind": "edge",
+      "content_seed": "s00-hard-edge-v1",
+      "expected_null": "byte_equal"
+    },
+    {
+      "id": "p3_ramp",
+      "kind": "ramp",
+      "content_seed": "s00-p3-ramp-v1",
+      "expected_null": "gamut_path_flat"
+    },
+    {
+      "id": "smooth_gradient",
+      "kind": "gradient",
+      "content_seed": "s00-smooth-gradient-v1",
+      "expected_null": "structural_flat_after_noise_separator"
+    }
+  ],
+  "policy": {
+    "flat_p3_grey": {
+      "max_abs_channel_delta": 0,
+      "mean_abs_channel_delta": 0
+    },
+    "hard_edge": {
+      "max_abs_channel_delta": 0,
+      "mean_abs_channel_delta": 0
+    },
+    "p3_ramp": {
+      "max_abs_channel_delta": 1,
+      "mean_abs_channel_delta": 0.25
+    },
+    "smooth_gradient": {
+      "max_abs_channel_delta": 2,
+      "mean_abs_channel_delta": 0.5,
+      "gradient_mean_abs_delta": 0.25
+    }
+  }
+}
+
