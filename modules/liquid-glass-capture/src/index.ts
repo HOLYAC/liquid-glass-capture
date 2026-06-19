@@ -99,6 +99,13 @@ export type LiquidGlassCaptureViewHandle = {
     candidateArtifactPath: string,
     rung?: string | null
   ): Promise<Record<string, unknown>>;
+  runCompositorRepeatCaptureAsync?(
+    label: string,
+    metadata: Record<string, unknown>,
+    repeatCount: number,
+    captureDurationMs: number,
+    cooldownMs: number
+  ): Promise<Record<string, unknown>>;
 };
 
 export const LiquidGlassCaptureView =

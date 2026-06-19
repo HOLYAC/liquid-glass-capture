@@ -187,7 +187,7 @@ public final class LiquidGlassCaptureView: ExpoView {
     let maskData = try JSONSerialization.data(withJSONObject: maskPack, options: [.prettyPrinted, .sortedKeys])
     try maskData.write(to: maskURL, options: .atomic)
 
-    let sceneId = metadata["sceneId"] as? String ?? (model.substrate.rawValue.hasPrefix("s00_") ? "S00_NULL" : "MANUAL_LEGACY")
+    let sceneId = metadata["sceneId"] as? String ?? (model.substrate.rawValue.hasPrefix("s00_") ? "S00_NULL" : "S01_SEARCH")
     let rigId = metadata["rigId"] as? String ?? model.rig.rawValue
     let stateId = metadata["stateId"] as? String ?? model.substrate.rawValue
     let artifactId = "\(rigId)-\(sceneId)-\(stateId)-\(stamp)"
@@ -308,6 +308,126 @@ public final class LiquidGlassCaptureView: ExpoView {
     }
   }
 
+  public func runCompositorRepeatCapture(
+    label: String,
+    metadata: [String: Any],
+    repeatCount: Int,
+    captureDurationMs: Int,
+    cooldownMs: Int,
+    promise: Promise
+  ) {
+    let boundedRepeatCount = max(1, min(repeatCount, 300))
+    let boundedCaptureDurationMs = max(250, min(captureDurationMs, 60_000))
+    let boundedCooldownMs = max(0, min(cooldownMs, 60_000))
+    let requiresNominalThermal = metadata["requiresNominalThermal"] as? Bool ?? true
+    let initialThermalState = ProcessInfo.processInfo.thermalState
+
+    if requiresNominalThermal && initialThermalState != .nominal {
+      promise.reject(Self.error("Baseline repeat capture requires nominal thermal state before first capture"))
+      return
+    }
+
+    let scale = UIScreen.main.scale
+    let viewportPx = [
+      "width": Int(bounds.width * scale),
+      "height": Int(bounds.height * scale)
+    ]
+    let stamp = UInt64(Date().timeIntervalSince1970 * 1000)
+    let safeLabel = label
+      .replacingOccurrences(of: "[^A-Za-z0-9_.-]", with: "_", options: .regularExpression)
+      .prefix(44)
+    let seriesId = "\(stamp)-\(safeLabel)-repeat"
+    let startedAtNs = UInt64(Date().timeIntervalSince1970 * 1_000_000_000)
+    var artifacts: [[String: Any]] = []
+    var failures: [String] = []
+    var runIteration: ((Int) -> Void)!
+
+    func finish(status: String) {
+      do {
+        let payload = try Self.writeRepeatManifest(
+          label: label,
+          seriesId: seriesId,
+          metadata: metadata,
+          status: status,
+          repeatCountRequested: boundedRepeatCount,
+          captureDurationMs: boundedCaptureDurationMs,
+          cooldownMs: boundedCooldownMs,
+          startedAtNs: startedAtNs,
+          initialThermalState: Self.thermalStateString(initialThermalState),
+          artifacts: artifacts,
+          failures: failures
+        )
+        promise.resolve(payload)
+      } catch {
+        promise.reject(error)
+      }
+    }
+
+    runIteration = { [weak self] index in
+      guard let self else {
+        failures.append("VIEW_DEALLOCATED")
+        finish(status: "aborted")
+        return
+      }
+
+      guard index < boundedRepeatCount else {
+        finish(status: failures.isEmpty ? "complete" : "partial")
+        return
+      }
+
+      let thermalState = ProcessInfo.processInfo.thermalState
+      if requiresNominalThermal && thermalState != .nominal {
+        failures.append("THERMAL_STATE_NOT_NOMINAL_BEFORE_REPEAT_\(index)")
+        finish(status: "aborted")
+        return
+      }
+
+      var iterationMetadata = metadata
+      iterationMetadata["captureSeriesId"] = seriesId
+      iterationMetadata["repeatIndex"] = index
+      iterationMetadata["repeatCount"] = boundedRepeatCount
+      iterationMetadata["requiresNominalThermal"] = requiresNominalThermal
+      iterationMetadata["captureDurationMs"] = boundedCaptureDurationMs
+      iterationMetadata["cooldownMs"] = boundedCooldownMs
+      if iterationMetadata["maxFrames"] == nil {
+        iterationMetadata["maxFrames"] = max(8, Int(ceil(Double(boundedCaptureDurationMs) / 1000.0 * Double(UIScreen.main.maximumFramesPerSecond))))
+      }
+
+      let iterationLabel = "\(seriesId)-\(String(format: "%03d", index))"
+      self.compositorCapture.start(
+        label: iterationLabel,
+        metadata: iterationMetadata,
+        props: self.labProps(),
+        viewportPx: viewportPx
+      ) { startResult in
+        switch startResult {
+        case .success:
+          DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(boundedCaptureDurationMs)) {
+            self.compositorCapture.stop { stopResult in
+              DispatchQueue.main.async {
+                switch stopResult {
+                case .success(let artifact):
+                  artifacts.append(artifact)
+                  DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(boundedCooldownMs)) {
+                    runIteration(index + 1)
+                  }
+                case .failure(let error):
+                  failures.append("STOP_FAILED_\(index): \(error.localizedDescription)")
+                  finish(status: "aborted")
+                }
+              }
+            }
+          }
+        case .failure(let error):
+          failures.append("START_FAILED_\(index): \(error.localizedDescription)")
+          finish(status: "aborted")
+        }
+      }
+    }
+
+    runIteration(0)
+  }
+
   private static func metrics(for image: UIImage) -> [String: Any] {
     guard let cgImage = image.cgImage else {
       return ["sampled": false]
@@ -394,6 +514,85 @@ public final class LiquidGlassCaptureView: ExpoView {
 
   private static func sha256Hex(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func error(_ message: String) -> NSError {
+    NSError(domain: "LiquidGlassCapture", code: 3, userInfo: [NSLocalizedDescriptionKey: message])
+  }
+
+  private static func writeRepeatManifest(
+    label: String,
+    seriesId: String,
+    metadata: [String: Any],
+    status: String,
+    repeatCountRequested: Int,
+    captureDurationMs: Int,
+    cooldownMs: Int,
+    startedAtNs: UInt64,
+    initialThermalState: String,
+    artifacts: [[String: Any]],
+    failures: [String]
+  ) throws -> [String: Any] {
+    let fileManager = FileManager.default
+    let seriesDir = try fileManager
+      .url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+      .appendingPathComponent("LiquidGlassCaptures", isDirectory: true)
+      .appendingPathComponent("Series", isDirectory: true)
+    try fileManager.createDirectory(at: seriesDir, withIntermediateDirectories: true)
+
+    let jsonURL = seriesDir.appendingPathComponent("\(seriesId).repeat-manifest.json")
+    let artifactJsonPaths = artifacts.compactMap { $0["jsonPath"] as? String }
+    let artifactSummaries = artifacts.map { artifact in
+      [
+        "id": artifact["id"] as? String ?? "",
+        "rig_id": artifact["rig_id"] as? String ?? "",
+        "scene_id": artifact["scene_id"] as? String ?? "",
+        "state_id": artifact["state_id"] as? String ?? "",
+        "jsonPath": artifact["jsonPath"] as? String ?? "",
+        "sessionDir": artifact["sessionDir"] as? String ?? "",
+        "frameCount": artifact["frameCount"] as? Int ?? 0
+      ] as [String: Any]
+    }
+
+    var manifest: [String: Any] = [
+      "schema_version": "1.2.0",
+      "kind": "repeat_capture_manifest",
+      "id": seriesId,
+      "label": label,
+      "status": status,
+      "rig_id": metadata["rigId"] as? String ?? "R0",
+      "scene_id": metadata["sceneId"] as? String ?? "S01_SEARCH",
+      "state_id": metadata["stateId"] as? String ?? "rest",
+      "baseline_class": metadata["baselineClass"] as? String ?? "mvl",
+      "capture_kind": "compositor",
+      "repeat_count_requested": repeatCountRequested,
+      "repeat_count_observed": artifactJsonPaths.count,
+      "capture_duration_ms": captureDurationMs,
+      "cooldown_ms": cooldownMs,
+      "started_at_ns": "\(startedAtNs)",
+      "finished_at_ns": "\(UInt64(Date().timeIntervalSince1970 * 1_000_000_000))",
+      "thermal": [
+        "requires_nominal_start": metadata["requiresNominalThermal"] as? Bool ?? true,
+        "initial_state": initialThermalState,
+        "final_state": Self.thermalStateString(ProcessInfo.processInfo.thermalState)
+      ],
+      "policy": [
+        "partial_is_not_verdict": true,
+        "mvl_repeat_n": 50,
+        "prod_p99_repeat_n": 300,
+        "sustained_repeat_n": 24
+      ],
+      "artifact_json_paths": artifactJsonPaths,
+      "artifacts": artifactSummaries,
+      "failures": failures
+    ]
+
+    var jsonData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    manifest["manifest_sha256"] = Self.sha256Hex(jsonData)
+    jsonData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    try jsonData.write(to: jsonURL, options: .atomic)
+    manifest["jsonPath"] = jsonURL.path
+    return manifest
   }
 
   private static func thermalStateString(_ state: ProcessInfo.ThermalState) -> String {

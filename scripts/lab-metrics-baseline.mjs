@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
@@ -17,17 +17,20 @@ const requestedRepeat = Object.freeze({
   sustained: 24
 });
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.selfTest) {
     const fixture = writeSelfTestFixture(args.out);
     const report = buildBaselineReport({
-      refs: fixture.refs,
-      probes: fixture.probes,
+      refs: readRepeatManifestPaths(fixture.refManifest),
+      probes: readRepeatManifestPaths(fixture.probeManifest),
       out: fixture.out,
-      baselineClass: "mvl"
+      baselineClass: "mvl",
+      repeatOverride: 50
     });
     console.log(`${report.baseline_status.toUpperCase()} ${fixture.out}`);
     return;
@@ -43,7 +46,7 @@ function main() {
   console.log(`${report.baseline_status.toUpperCase()} ${args.out ?? ""}`.trim());
 }
 
-function buildBaselineReport({ refs, probes, out, baselineClass = "mvl" }) {
+export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", repeatOverride }) {
   const referenceRecords = refs.map((path) => readCaptureArtifact(path));
   const probeRecords = probes.map((path) => readCaptureArtifact(path));
   const referenceReports = [];
@@ -61,7 +64,7 @@ function buildBaselineReport({ refs, probes, out, baselineClass = "mvl" }) {
     }
   }
 
-  const requested = requestedRepeat[baselineClass] ?? requestedRepeat.mvl;
+  const requested = repeatOverride ?? requestedRepeat[baselineClass] ?? requestedRepeat.mvl;
   const namespace = makeBaselineNamespace(referenceRecords[0], baselineClass);
   const report = {
     schema_version: "1.2.0",
@@ -174,6 +177,8 @@ function writeSelfTestFixture(outPath) {
   return {
     refs,
     probes,
+    refManifest: writeRepeatManifest(dir, "reference.repeat-manifest.json", refs),
+    probeManifest: writeRepeatManifest(dir, "probe.repeat-manifest.json", probes),
     out: outPath ? resolve(outPath) : join(dir, "baseline.metric.report.json")
   };
 }
@@ -243,6 +248,21 @@ function makeArtifact(rigId, pngPath, maskPath, index) {
   };
 }
 
+function writeRepeatManifest(dir, name, artifactPaths) {
+  const manifestPath = join(dir, name);
+  const manifest = {
+    schema_version: "1.2.0",
+    kind: "repeat_capture_manifest",
+    id: name.replace(/\.json$/, ""),
+    status: "partial",
+    repeat_count_requested: 50,
+    repeat_count_observed: artifactPaths.length,
+    artifact_json_paths: artifactPaths
+  };
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifestPath;
+}
+
 function parseArgs(args) {
   const parsed = {
     refs: [],
@@ -254,9 +274,33 @@ function parseArgs(args) {
     if (arg === "--self-test") parsed.selfTest = true;
     else if (arg === "--ref") parsed.refs.push(args[++index]);
     else if (arg === "--probe") parsed.probes.push(args[++index]);
+    else if (arg === "--ref-manifest") parsed.refs.push(...readRepeatManifestPaths(args[++index]));
+    else if (arg === "--probe-manifest") parsed.probes.push(...readRepeatManifestPaths(args[++index]));
     else if (arg === "--class") parsed.baselineClass = args[++index];
+    else if (arg === "--repeat") {
+      parsed.repeatOverride = Number(args[++index]);
+      if (!Number.isFinite(parsed.repeatOverride) || parsed.repeatOverride < 1) {
+        throw new Error("--repeat must be a positive number");
+      }
+    }
     else if (arg === "--out") parsed.out = args[++index];
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return parsed;
+}
+
+function readRepeatManifestPaths(path) {
+  const manifest = JSON.parse(readFileSync(resolve(path), "utf8"));
+  if (manifest.kind !== "repeat_capture_manifest") {
+    throw new Error(`${path}: expected repeat_capture_manifest`);
+  }
+  if (!Array.isArray(manifest.artifact_json_paths)) {
+    throw new Error(`${path}: missing artifact_json_paths`);
+  }
+  return manifest.artifact_json_paths.map((artifactPath) => {
+    if (typeof artifactPath !== "string" || artifactPath.length === 0) {
+      throw new Error(`${path}: artifact_json_paths must contain non-empty strings`);
+    }
+    return artifactPath;
+  });
 }

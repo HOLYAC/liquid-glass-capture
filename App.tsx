@@ -39,6 +39,7 @@ const substrates = [
 const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
 const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge_overlap", "morph_tall"] as const;
 const tints = ["none", "cyan", "amber", "red"] as const;
+const repeatCounts = [3, 10, 24, 50, 300] as const;
 
 type Choice = readonly string[];
 
@@ -48,7 +49,7 @@ const NativeLiquidGlassCaptureView = LiquidGlassCaptureView as React.ComponentTy
   }
 >;
 
-function nextValue<T extends string>(values: readonly T[], current: T): T {
+function nextValue<T extends string | number>(values: readonly T[], current: T): T {
   return values[(values.indexOf(current) + 1) % values.length];
 }
 
@@ -65,6 +66,36 @@ function contentSeedFor(substrate: string): string {
     default:
       return `manual-${substrate}`;
   }
+}
+
+function sceneIdFor(substrate: string, phase: string): "S00_NULL" | "S01_SEARCH" | "S03_PRESS" {
+  if (substrate.startsWith("s00_")) {
+    return "S00_NULL";
+  }
+  return phase === "press" ? "S03_PRESS" : "S01_SEARCH";
+}
+
+function stateIdFor(substrate: string, phase: string): string {
+  if (substrate.startsWith("s00_")) {
+    return substrate;
+  }
+  if (phase === "press") {
+    return "press";
+  }
+  if (phase.startsWith("drag")) {
+    return "drag";
+  }
+  if (phase.startsWith("merge") || phase.startsWith("morph")) {
+    return "morph";
+  }
+  return "rest";
+}
+
+function touchPhaseFor(phase: string): "rest" | "press" | "drag" | "morph" {
+  if (phase === "press") return "press";
+  if (phase.startsWith("drag")) return "drag";
+  if (phase.startsWith("merge") || phase.startsWith("morph")) return "morph";
+  return "rest";
 }
 
 function Chip({
@@ -98,6 +129,8 @@ export default function App() {
   const [touchCount, setTouchCount] = useState(0);
   const [captureStatus, setCaptureStatus] = useState("no capture");
   const [compositorActive, setCompositorActive] = useState(false);
+  const [batchActive, setBatchActive] = useState(false);
+  const [repeatCount, setRepeatCount] = useState<(typeof repeatCounts)[number]>(50);
   const [lastReferenceArtifact, setLastReferenceArtifact] = useState<string | null>(null);
   const [lastCandidateArtifact, setLastCandidateArtifact] = useState<string | null>(null);
 
@@ -149,8 +182,8 @@ export default function App() {
       const metadata = {
         schemaVersion: "1.2.0",
         labPlan: "apple_glass_parity_execution_plan_v1_2",
-        sceneId: substrate.startsWith("s00_") ? "S00_NULL" : "MANUAL_LEGACY",
-        stateId: substrate,
+        sceneId: sceneIdFor(substrate, phase),
+        stateId: stateIdFor(substrate, phase),
         rigId: rig,
         captureKind: "layer_snapshot",
         invalidReason: mode === "substrate_only" && substrate.startsWith("s00_") ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID",
@@ -198,11 +231,11 @@ export default function App() {
         const metadata = {
           schemaVersion: "1.2.0",
           labPlan: "apple_glass_parity_execution_plan_v1_2",
-          sceneId: substrate.startsWith("s00_") ? "S00_NULL" : "MANUAL_LEGACY",
-          stateId: substrate,
+          sceneId: sceneIdFor(substrate, phase),
+          stateId: stateIdFor(substrate, phase),
           rigId: rig,
           captureKind: "compositor",
-          touchPhase: phase === "press" ? "press" : phase.startsWith("drag") ? "drag" : "rest",
+          touchPhase: touchPhaseFor(phase),
           nullQualification: "fail",
           maxFrames: 180,
           appearance: "dark",
@@ -217,6 +250,72 @@ export default function App() {
       setCaptureStatus(`compositor failed: ${String(error)}`);
     }
     setControls(true);
+  }
+
+  async function runRepeatCapture() {
+    const handle = glassRef.current;
+    if (!handle?.runCompositorRepeatCaptureAsync) {
+      setCaptureStatus("repeat capture unavailable");
+      setControls(true);
+      return;
+    }
+
+    if (batchActive || compositorActive) {
+      setCaptureStatus("capture already active");
+      setControls(true);
+      return;
+    }
+
+    const sceneId = sceneIdFor(substrate, phase);
+    const stateId = stateIdFor(substrate, phase);
+    const baselineClass = repeatCount >= 300 ? "prod_p99" : repeatCount === 24 ? "sustained" : "mvl";
+    const metadata = {
+      schemaVersion: "1.2.0",
+      labPlan: "apple_glass_parity_execution_plan_v1_2",
+      sceneId,
+      stateId,
+      rigId: rig,
+      captureKind: "compositor",
+      touchPhase: touchPhaseFor(phase),
+      nullQualification: sceneId === "S00_NULL" ? "pass" : "fail",
+      baselineClass,
+      requiresNominalThermal: true,
+      maxFrames: 90,
+      appearance: "dark",
+      contentSeed: contentSeedFor(substrate)
+    };
+
+    try {
+      setBatchActive(true);
+      setControls(true);
+      setCaptureStatus(`repeat ${repeatCount} started`);
+      const payload = await handle.runCompositorRepeatCaptureAsync(
+        "baseline-repeat",
+        metadata,
+        repeatCount,
+        900,
+        750
+      );
+      const manifestPath = typeof payload.jsonPath === "string" ? payload.jsonPath : "repeat manifest written";
+      setCaptureStatus(manifestPath);
+
+      const artifactPaths = Array.isArray(payload.artifact_json_paths)
+        ? payload.artifact_json_paths.filter((value): value is string => typeof value === "string")
+        : [];
+      const lastArtifact = artifactPaths.at(-1) ?? null;
+      if (lastArtifact) {
+        if (rig === "R0") {
+          setLastReferenceArtifact(lastArtifact);
+        } else {
+          setLastCandidateArtifact(lastArtifact);
+        }
+      }
+    } catch (error) {
+      setCaptureStatus(`repeat failed: ${String(error)}`);
+    } finally {
+      setBatchActive(false);
+      setControls(true);
+    }
   }
 
   async function runNullQualification() {
@@ -274,6 +373,7 @@ export default function App() {
               <Chip label="tint" value={tint} onPress={() => setTint(nextValue(tints, tint))} />
               <Chip label="interactive" value={String(interactive)} onPress={() => setInteractive((value) => !value)} />
               <Chip label="autoplay" value={String(autoplay)} onPress={() => setAutoplay((value) => !value)} />
+              <Chip label="repeat" value={String(repeatCount)} onPress={() => setRepeatCount(nextValue(repeatCounts, repeatCount))} />
               <Chip label="controls" value="hide" onPress={() => setControls(false)} />
             </ScrollView>
           </View>
@@ -297,6 +397,9 @@ export default function App() {
           </Pressable>
           <Pressable onPress={runNullQualification} style={styles.bottomButton}>
             <Text style={styles.bottomButtonText}>N</Text>
+          </Pressable>
+          <Pressable onPress={runRepeatCapture} style={batchActive ? styles.bottomButtonPrimary : styles.bottomButton}>
+            <Text style={styles.bottomButtonText}>B</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -378,8 +481,8 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     bottom: 16,
     flexDirection: "row",
-    gap: 14,
-    height: 58,
+    gap: 8,
+    height: 54,
     justifyContent: "center",
     position: "absolute",
     zIndex: 2
@@ -388,21 +491,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.10)",
     borderColor: "rgba(255,255,255,0.22)",
-    borderRadius: 22,
+    borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
-    height: 44,
+    height: 40,
     justifyContent: "center",
-    width: 44
+    width: 40
   },
   bottomButtonPrimary: {
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.18)",
     borderColor: "rgba(255,255,255,0.34)",
-    borderRadius: 29,
+    borderRadius: 27,
     borderWidth: StyleSheet.hairlineWidth,
-    height: 58,
+    height: 54,
     justifyContent: "center",
-    width: 58
+    width: 54
   },
   bottomButtonText: {
     color: "rgba(255,255,255,0.72)",

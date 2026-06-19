@@ -67,6 +67,18 @@ public final class LiquidGlassCaptureModule: Module {
         view.runNullQualification(referenceArtifactPath: referenceArtifactPath, candidateArtifactPath: candidateArtifactPath, rung: rung, promise: promise)
       }
       .runOnQueue(.main)
+
+      AsyncFunction("runCompositorRepeatCaptureAsync") { (view: LiquidGlassCaptureView, label: String, metadata: [String: Any], repeatCount: Int, captureDurationMs: Int, cooldownMs: Int, promise: Promise) in
+        view.runCompositorRepeatCapture(
+          label: label,
+          metadata: metadata,
+          repeatCount: repeatCount,
+          captureDurationMs: captureDurationMs,
+          cooldownMs: cooldownMs,
+          promise: promise
+        )
+      }
+      .runOnQueue(.main)
     }
   }
 }

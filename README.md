@@ -108,9 +108,11 @@ v1.2 plan:
 ```bash
 npm run artifact:validate -- ./artifacts/sample.capture.json
 npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --out ./artifacts/ios-capture-plan.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --manifest ./artifacts/r0.repeat-manifest.json
 npm run null:ladder -- --native ./artifacts/r0.capture.json --candidate ./artifacts/c0.capture.json --rung flat_p3_grey --out ./artifacts/null.report.json
 npm run metrics:compare -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g2.report.json
-npm run metrics:baseline -- --ref ./artifacts/r0-a.capture.json --ref ./artifacts/r0-b.capture.json --probe ./artifacts/r1.capture.json --class mvl --out ./baselines/current.json
+npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run lab:self-test
 ```
 
@@ -121,6 +123,10 @@ G1: Display P3 artifact contract + linear Display P3 normalization
 G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
 ```
+
+The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
+capture repeatedly, writes a `repeat_capture_manifest`, and enforces nominal
+thermal state before each baseline iteration.
 
 The baseline script marks reports as `partial` until enough physical captures
 exist for the requested class (`mvl = 50`, `prod_p99 = 300`, `sustained = 24`).
