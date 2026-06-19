@@ -4,6 +4,7 @@ node_modules/
 .expo/
 /dist/
 /build/
+/artifacts/
 .DS_Store
 *.log
 npm-debug.log*
