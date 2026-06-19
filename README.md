@@ -100,6 +100,32 @@ npx expo start --dev-client
 
 Scan the QR code with the installed development client.
 
+## Lab Commands
+
+The local lab scripts implement the first machine-checkable part of the
+v1.2 plan:
+
+```bash
+npm run artifact:validate -- ./artifacts/sample.capture.json
+npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
+npm run null:ladder -- --native ./artifacts/r0.capture.json --candidate ./artifacts/c0.capture.json --rung flat_p3_grey --out ./artifacts/null.report.json
+npm run metrics:compare -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g2.report.json
+npm run metrics:baseline -- --ref ./artifacts/r0-a.capture.json --ref ./artifacts/r0-b.capture.json --probe ./artifacts/r1.capture.json --class mvl --out ./baselines/current.json
+npm run lab:self-test
+```
+
+Current metric scope:
+
+```text
+G1: Display P3 artifact contract + linear Display P3 normalization
+G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness
+Baseline: repeat policy + instrument-noise/candidate-gap summaries
+```
+
+The baseline script marks reports as `partial` until enough physical captures
+exist for the requested class (`mvl = 50`, `prod_p99 = 300`, `sustained = 24`).
+That is intentional: a partial baseline is useful evidence, not a final verdict.
+
 ## Production / TestFlight
 
 ```bash
