@@ -145,6 +145,7 @@
         "base_png_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
         "base_png_path": { "type": "string", "minLength": 1 },
         "sequence_paths": { "type": "array", "items": { "type": "string" } },
+        "sequence_timestamps_ms": { "type": "array", "items": { "type": "number" } },
         "mask_pack_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
         "mask_pack_path": { "type": "string", "minLength": 1 },
         "touch_phase": { "enum": ["rest", "press", "drag", "release", "morph", "sustained"] },
@@ -168,4 +169,3 @@
     }
   }
 }
-

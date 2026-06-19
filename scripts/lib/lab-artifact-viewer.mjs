@@ -2,11 +2,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lab-artifact.mjs";
+import { readArtifactFrameSequence } from "./lab-sequence.mjs";
 import { sha256File, writePng } from "./lab-png.mjs";
 import { compareMetricImages } from "../../packages/metric-stack/src/index.mjs";
 import { measureOptics } from "../../packages/metric-stack/src/optics.mjs";
+import { measureTemporal } from "../../packages/metric-stack/src/temporal.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
 
 export function resolveArtifactInput(input, options = {}) {
   const direct = resolve(input);
@@ -98,6 +101,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
   });
   const report = compareMetricImages(referenceRecord.png, candidateRecord.png);
   const opticsReport = measureOptics(referenceRecord.png, candidateRecord.png);
+  const temporalReport = measureTemporalSafely(referenceRecord, candidateRecord);
   const reference = referenceRecord.artifact;
   const candidate = candidateRecord.artifact;
   const referenceUri = dataUri(referenceRecord.png_path, "image/png");
@@ -107,6 +111,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
     hero("Artifact Diff", `${reference.id} -> ${candidate.id}`, [
       statusPill("G2", report.status),
       statusPill("G3", opticsReport.status),
+      statusPill("G4", temporalReport.status),
       statusPill("ref null", reference.null_qualification ?? "unknown"),
       statusPill("cand null", candidate.null_qualification ?? "unknown")
     ]),
@@ -119,6 +124,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
     `),
     section("Metric Summary", metricTable(report.metrics ?? {})),
     section("Optics Summary", metricTable(opticsReport.metrics ?? {})),
+    section("Temporal Summary", temporalSummary(temporalReport)),
     section("Reference", table([
       ["id", reference.id],
       ["rig", reference.rig_id],
@@ -173,12 +179,14 @@ export function writeViewerSelfTestArtifacts() {
   const candidatePng = join(dir, "viewer-candidate.png");
   writePng(referencePng, width, height, referencePixels);
   writePng(candidatePng, width, height, candidatePixels);
+  const referenceSequence = writeViewerMotionSequence(dir, "viewer-reference-seq", width, height, 0);
+  const candidateSequence = writeViewerMotionSequence(dir, "viewer-candidate-seq", width, height, 4);
 
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const referenceArtifact = join(dir, "viewer-reference.capture.json");
   const candidateArtifact = join(dir, "viewer-candidate.capture.json");
-  writeFileSync(referenceArtifact, `${JSON.stringify(makeSelfTestArtifact("R0", referencePng, maskPath), null, 2)}\n`);
-  writeFileSync(candidateArtifact, `${JSON.stringify(makeSelfTestArtifact("R1", candidatePng, maskPath), null, 2)}\n`);
+  writeFileSync(referenceArtifact, `${JSON.stringify(makeSelfTestArtifact("R0", referencePng, maskPath, referenceSequence), null, 2)}\n`);
+  writeFileSync(candidateArtifact, `${JSON.stringify(makeSelfTestArtifact("R1", candidatePng, maskPath, candidateSequence), null, 2)}\n`);
   return {
     referenceArtifact,
     candidateArtifact
@@ -210,6 +218,67 @@ function renderBaselineViewer(path, report) {
     ])),
     section("Raw Baseline", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
+}
+
+function measureTemporalSafely(referenceRecord, candidateRecord) {
+  try {
+    return measureTemporal(
+      readArtifactFrameSequence(referenceRecord),
+      readArtifactFrameSequence(candidateRecord)
+    );
+  } catch (error) {
+    return {
+      schema_version: "1.2.0",
+      kind: "g4_temporal_report",
+      gate: "G4",
+      status: "fail",
+      failures: [`G4_TEMPORAL_UNREADABLE:${error.message}`],
+      metrics: {}
+    };
+  }
+}
+
+function temporalSummary(report) {
+  return [
+    table([
+      ["status", report.status],
+      ["failures", (report.failures ?? []).join(", ")],
+      ["reference_trajectory", report.trajectory?.reference_sha256 ?? ""],
+      ["candidate_trajectory", report.trajectory?.candidate_sha256 ?? ""],
+      ["byte_identical_source", report.trajectory?.byte_identical_source ?? ""],
+      ["reference_frames", report.frame_counts?.reference ?? ""],
+      ["candidate_frames", report.frame_counts?.candidate ?? ""]
+    ]),
+    metricTable(report.metrics ?? {})
+  ].join("");
+}
+
+function writeViewerMotionSequence(dir, prefix, width, height, staticBias) {
+  const positions = [4, 14, 14, 14, 14, 14];
+  const paths = [];
+  for (let index = 0; index < positions.length; index += 1) {
+    const pixels = Buffer.alloc(width * height * 4);
+    const centerX = positions[index];
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const offset = (y * width + x) * 4;
+        const background = 38 + staticBias + x * 2 + y;
+        const insideMotion = Math.abs(x - centerX) <= 2 && Math.abs(y - 9) <= 3;
+        pixels[offset] = insideMotion ? 226 : Math.min(255, background);
+        pixels[offset + 1] = insideMotion ? 232 : Math.min(255, background + 18);
+        pixels[offset + 2] = insideMotion ? 238 : Math.min(255, background + 42);
+        pixels[offset + 3] = 255;
+      }
+    }
+    const path = join(dir, `${prefix}-${String(index).padStart(2, "0")}.png`);
+    writePng(path, width, height, pixels);
+    paths.push(path);
+  }
+
+  return {
+    paths,
+    timestamps_ms: [0, 16.67, 33.33, 50, 66.67, 83.33]
+  };
 }
 
 function page(title, bodyParts) {
@@ -399,7 +468,7 @@ pre { margin:0; overflow:auto; max-height:56vh; padding:12px; background:#050607
 `;
 }
 
-function makeSelfTestArtifact(rigId, pngPath, maskPath) {
+function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
   return {
     schema_version: "1.2.0",
     id: `viewer-self-test-${rigId}`,
@@ -442,6 +511,9 @@ function makeSelfTestArtifact(rigId, pngPath, maskPath) {
     frame_pack: {
       base_png_sha256: sha256File(pngPath),
       base_png_path: pngPath,
+      sequence_paths: sequence.paths,
+      sequence_timestamps_ms: sequence.timestamps_ms,
+      trajectory_source_sha256: s03PressTrajectorySha256,
       mask_pack_sha256: sha256File(maskPath),
       mask_pack_path: maskPath,
       touch_phase: "rest",

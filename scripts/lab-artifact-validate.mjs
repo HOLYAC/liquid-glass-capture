@@ -152,6 +152,22 @@ function validateFramePack(errors, framePack, artifactDir) {
   requireNumber(errors, "frame_pack.animation_t", framePack.animation_t);
   verifyPathHash(errors, artifactDir, "frame_pack.base_png", framePack.base_png_path, framePack.base_png_sha256);
   verifyPathHash(errors, artifactDir, "frame_pack.mask_pack", framePack.mask_pack_path, framePack.mask_pack_sha256);
+
+  if (framePack.sequence_timestamps_ms !== undefined) {
+    if (!Array.isArray(framePack.sequence_timestamps_ms)) {
+      errors.push("frame_pack.sequence_timestamps_ms must be an array when present");
+    } else if (!framePack.sequence_timestamps_ms.every((value) => typeof value === "number" && Number.isFinite(value))) {
+      errors.push("frame_pack.sequence_timestamps_ms must contain only finite numbers");
+    }
+  }
+
+  if (Array.isArray(framePack.sequence_paths) && Array.isArray(framePack.sequence_timestamps_ms)) {
+    requireValue(
+      errors,
+      framePack.sequence_paths.length === framePack.sequence_timestamps_ms.length,
+      "frame_pack.sequence_paths and frame_pack.sequence_timestamps_ms must have the same length"
+    );
+  }
 }
 
 function validateIntegrity(errors, integrity) {
@@ -284,4 +300,3 @@ function requireValue(errors, condition, message) {
 function looksLikeSimulator(modelIdentifier) {
   return typeof modelIdentifier === "string" && /simulator|x86|arm64-sim/i.test(modelIdentifier);
 }
-

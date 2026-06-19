@@ -109,6 +109,7 @@ export interface CaptureArtifact {
     base_png_sha256: string;
     base_png_path: string;
     sequence_paths?: string[];
+    sequence_timestamps_ms?: number[];
     mask_pack_sha256: string;
     mask_pack_path: string;
     touch_phase: TouchPhase;
@@ -161,4 +162,3 @@ export interface CaptureArtifact {
 }
 
 export const captureArtifactSchemaVersion = "1.2.0" as const;
-

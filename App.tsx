@@ -40,6 +40,7 @@ const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
 const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge_overlap", "morph_tall"] as const;
 const tints = ["none", "cyan", "amber", "red"] as const;
 const repeatCounts = [3, 10, 24, 50, 300] as const;
+const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
 
 type Choice = readonly string[];
 
@@ -96,6 +97,10 @@ function touchPhaseFor(phase: string): "rest" | "press" | "drag" | "morph" {
   if (phase.startsWith("drag")) return "drag";
   if (phase.startsWith("merge") || phase.startsWith("morph")) return "morph";
   return "rest";
+}
+
+function trajectoryShaFor(sceneId: string): string | undefined {
+  return sceneId === "S03_PRESS" ? s03PressTrajectorySha256 : undefined;
 }
 
 function Chip({
@@ -179,11 +184,13 @@ export default function App() {
     }
 
     try {
-      const metadata = {
+      const sceneId = sceneIdFor(substrate, phase);
+      const stateId = stateIdFor(substrate, phase);
+      const metadata: Record<string, unknown> = {
         schemaVersion: "1.2.0",
         labPlan: "apple_glass_parity_execution_plan_v1_2",
-        sceneId: sceneIdFor(substrate, phase),
-        stateId: stateIdFor(substrate, phase),
+        sceneId,
+        stateId,
         rigId: rig,
         captureKind: "layer_snapshot",
         invalidReason: mode === "substrate_only" && substrate.startsWith("s00_") ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID",
@@ -192,6 +199,10 @@ export default function App() {
         controls,
         capturedFrom: "bottom_bar"
       };
+      const trajectorySourceSha256 = trajectoryShaFor(sceneId);
+      if (trajectorySourceSha256) {
+        metadata["trajectorySourceSha256"] = trajectorySourceSha256;
+      }
 
       if (handle.captureLabArtifactAsync) {
         const artifact: LiquidGlassCaptureLabArtifact = await handle.captureLabArtifactAsync("manual", metadata);
@@ -228,11 +239,13 @@ export default function App() {
         }
         setCaptureStatus(String(payload.jsonPath ?? payload.sessionDir ?? "compositor stopped"));
       } else {
-        const metadata = {
+        const sceneId = sceneIdFor(substrate, phase);
+        const stateId = stateIdFor(substrate, phase);
+        const metadata: Record<string, unknown> = {
           schemaVersion: "1.2.0",
           labPlan: "apple_glass_parity_execution_plan_v1_2",
-          sceneId: sceneIdFor(substrate, phase),
-          stateId: stateIdFor(substrate, phase),
+          sceneId,
+          stateId,
           rigId: rig,
           captureKind: "compositor",
           touchPhase: touchPhaseFor(phase),
@@ -241,6 +254,10 @@ export default function App() {
           appearance: "dark",
           contentSeed: contentSeedFor(substrate)
         };
+        const trajectorySourceSha256 = trajectoryShaFor(sceneId);
+        if (trajectorySourceSha256) {
+          metadata["trajectorySourceSha256"] = trajectorySourceSha256;
+        }
         const payload = await handle.startCompositorCaptureAsync("compositor", metadata);
         setCompositorActive(true);
         setCaptureStatus(String(payload.sessionDir ?? "compositor started"));
@@ -269,7 +286,7 @@ export default function App() {
     const sceneId = sceneIdFor(substrate, phase);
     const stateId = stateIdFor(substrate, phase);
     const baselineClass = repeatCount >= 300 ? "prod_p99" : repeatCount === 24 ? "sustained" : "mvl";
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       schemaVersion: "1.2.0",
       labPlan: "apple_glass_parity_execution_plan_v1_2",
       sceneId,
@@ -284,6 +301,10 @@ export default function App() {
       appearance: "dark",
       contentSeed: contentSeedFor(substrate)
     };
+    const trajectorySourceSha256 = trajectoryShaFor(sceneId);
+    if (trajectorySourceSha256) {
+      metadata["trajectorySourceSha256"] = trajectorySourceSha256;
+    }
 
     try {
       setBatchActive(true);

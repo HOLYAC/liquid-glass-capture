@@ -262,6 +262,20 @@ private final class ReplayKitCaptureSession {
     let stateId = metadata["stateId"] as? String ?? "compositor"
     let jsonURL = sessionDir.appendingPathComponent("\(id).capture.json")
     let touchPhase = metadata["touchPhase"] as? String ?? "rest"
+    var framePack: [String: Any] = [
+      "base_png_sha256": baseSha,
+      "base_png_path": basePath,
+      "sequence_paths": frames.compactMap { $0["png"] as? String },
+      "sequence_timestamps_ms": Self.sequenceTimestampsMS(frames),
+      "mask_pack_sha256": Self.sha256Hex(maskData),
+      "mask_pack_path": maskURL.path,
+      "touch_phase": touchPhase,
+      "animation_t": 0,
+      "sustained_duration_ms": Int(Date().timeIntervalSince(startedAt) * 1000)
+    ]
+    if let trajectorySourceSHA256 = metadata["trajectorySourceSha256"] as? String {
+      framePack["trajectory_source_sha256"] = trajectorySourceSHA256
+    }
 
     var artifact: [String: Any] = [
       "schema_version": "1.2.0",
@@ -303,16 +317,7 @@ private final class ReplayKitCaptureSession {
         "stored_transfer": "srgb-transfer",
         "white_point": "D65"
       ],
-      "frame_pack": [
-        "base_png_sha256": baseSha,
-        "base_png_path": basePath,
-        "sequence_paths": frames.compactMap { $0["png"] as? String },
-        "mask_pack_sha256": Self.sha256Hex(maskData),
-        "mask_pack_path": maskURL.path,
-        "touch_phase": touchPhase,
-        "animation_t": 0,
-        "sustained_duration_ms": Int(Date().timeIntervalSince(startedAt) * 1000)
-      ],
+      "frame_pack": framePack,
       "shader": [
         "pipeline": Self.shaderPipeline(rigId: rigId, mode: props["mode"] as? String)
       ],
@@ -407,6 +412,14 @@ private final class ReplayKitCaptureSession {
 
   private static func sha256Hex(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func sequenceTimestampsMS(_ frames: [[String: Any]]) -> [Double] {
+    let seconds = frames.compactMap { $0["ptsSeconds"] as? Double }
+    guard let first = seconds.first else {
+      return []
+    }
+    return seconds.map { ($0 - first) * 1000.0 }
   }
 
   private static func displayP3ICCSHA256() -> String? {

@@ -192,6 +192,17 @@ public final class LiquidGlassCaptureView: ExpoView {
     let stateId = metadata["stateId"] as? String ?? model.substrate.rawValue
     let artifactId = "\(rigId)-\(sceneId)-\(stateId)-\(stamp)"
     let invalidReason = sceneId == "S00_NULL" ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID"
+    var framePack: [String: Any] = [
+      "base_png_sha256": Self.sha256Hex(pngData),
+      "base_png_path": pngURL.path,
+      "mask_pack_sha256": Self.sha256Hex(maskData),
+      "mask_pack_path": maskURL.path,
+      "touch_phase": Self.touchPhase(for: model.phase),
+      "animation_t": 0
+    ]
+    if let trajectorySourceSHA256 = metadata["trajectorySourceSha256"] as? String {
+      framePack["trajectory_source_sha256"] = trajectorySourceSHA256
+    }
 
     var artifact: [String: Any] = [
       "schema_version": "1.2.0",
@@ -235,14 +246,7 @@ public final class LiquidGlassCaptureView: ExpoView {
         "stored_transfer": "srgb-transfer",
         "white_point": "D65"
       ],
-      "frame_pack": [
-        "base_png_sha256": Self.sha256Hex(pngData),
-        "base_png_path": pngURL.path,
-        "mask_pack_sha256": Self.sha256Hex(maskData),
-        "mask_pack_path": maskURL.path,
-        "touch_phase": Self.touchPhase(for: model.phase),
-        "animation_t": 0
-      ],
+      "frame_pack": framePack,
       "shader": [
         "pipeline": Self.shaderPipeline(for: model.rig, mode: model.mode)
       ],
