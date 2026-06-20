@@ -82,15 +82,16 @@ Steps:
 gh workflow run build-unsigned-ios-ipa.yml --ref <branch>
 ```
 
-4. Download the latest successful unsigned IPA artifact for the current branch:
+4. Prepare the launch packet for the current branch:
 
 ```bash
-npm run ipa:download -- --out-dir ./artifacts/unsigned-ipa
+npm run proof:prepare
 ```
 
-The command also verifies that the downloaded `.ipa` has a `Payload/*.app`
-bundle and an embedded `main.jsbundle`, so this downloaded IPA launches as a
-standalone app after sideloading.
+This downloads the latest successful unsigned IPA, verifies that it was built
+from the current `HEAD`, verifies that the `.ipa` has a `Payload/*.app` bundle
+and an embedded `main.jsbundle`, writes the one-repeat proof plan, and writes
+`./artifacts/proof-doctor/proof-doctor.report.json`.
 
 5. On Windows, install
    `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa` to iPhone using
@@ -102,7 +103,7 @@ This path uses GitHub's `macos-26` runner because the native module needs iOS 26
 
 After installing the downloaded unsigned IPA, open **Liquid Glass Capture**
 directly on the iPhone. No Metro server is required for that route because
-`npm run ipa:download` verifies the embedded `main.jsbundle`.
+`npm run proof:prepare` verifies the embedded `main.jsbundle`.
 
 Use a local dev server only for a separate development-client build:
 
@@ -117,21 +118,20 @@ Then scan the QR code with that development client.
 Use this first. It is the shortest end-to-end proof that the installed iPhone
 app can produce the raw pixel evidence this lab was built for.
 
-1. Download the latest successful unsigned IPA artifact, then sideload it:
+1. Prepare the launch packet:
 
 ```bash
-npm run ipa:download -- --out-dir ./artifacts/unsigned-ipa
+npm run proof:prepare
 ```
 
-2. Open the installed **Liquid Glass Capture** app on the iPhone.
+`PASS_READY_FOR_PHONE` means the local repo, IPA, embedded JS bundle, app
+defaults, and one-repeat proof plan agree. The report lives at
+`./artifacts/proof-doctor/proof-doctor.report.json`.
 
-3. Generate the one-repeat proof plan:
+2. Sideload `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa`, then
+   open **Liquid Glass Capture** on the iPhone.
 
-```bash
-npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --out ./artifacts/ios-max-fidelity-proof.plan.json
-```
-
-4. The app opens with the proof defaults:
+3. The app opens with the proof defaults:
 
 ```text
 scene=S01_SEARCH
@@ -145,29 +145,29 @@ Press `B`. The status line prints the generated repeat-manifest path. If you
 changed the app state earlier, press `2` to show controls and restore those
 values before pressing `B`.
 
-5. Copy the app Documents folder `LiquidGlassCaptures` to this repo under
+4. Copy the app Documents folder `LiquidGlassCaptures` to this repo under
    `./artifacts/iphone/LiquidGlassCaptures`. File sharing is enabled in
    `app.json` (`UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace`),
    so the folder is reachable through Files/iTunes/Sideloadly-style file
    browsers.
 
-6. Verify the newest copied manifest. The command finds the latest
+5. Verify the newest copied manifest. The command finds the latest
    `LiquidGlassCaptures/Series/*.repeat-manifest.json` by the manifest's
    `finished_at_ns` / `started_at_ns`, then follows its sibling
    `../Sessions/...` artifact paths:
 
 ```bash
-npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --capture-root ./artifacts/iphone/LiquidGlassCaptures --out ./artifacts/ios-max-fidelity-proof.verify.json
+npm run proof:doctor -- --capture-root ./artifacts/iphone/LiquidGlassCaptures
 ```
 
-`PASS` here means the verifier read the repeat manifest, every capture JSON,
-`frame_manifest.json`, every `.source.raw`, every `.display.rgba`, and checked
-their SHA-256 hashes. A missing raw file or hash mismatch is a failure. On pass,
-the command also prints an `INSPECT ...` line for the newest capture.
+`PASS_VERIFIED_CAPTURE` here means the verifier read the repeat manifest, every
+capture JSON, `frame_manifest.json`, every `.source.raw`, every `.display.rgba`,
+and checked their SHA-256 hashes. A missing raw file or hash mismatch is a
+failure. On pass, the command also prints an `INSPECT ...` line for the newest
+capture.
 
-7. Open the capture with the printed command, or read
-   `next.inspect_command` from `./artifacts/ios-max-fidelity-proof.verify.json`.
-   It has this shape:
+6. Open the capture with the printed command, or read `next.inspect` from
+   `./artifacts/proof-doctor/proof-doctor.report.json`. It has this shape:
 
 ```bash
 npm run glass:inspect -- ./artifacts/iphone/LiquidGlassCaptures/Sessions/<capture-id>/<capture-id>.capture.json --out ./artifacts/viewer/max-fidelity.inspect.html
