@@ -32,6 +32,12 @@ export function validateMaterialProbe(probe) {
       if (!nonEmpty(state.shape)) failures.push(`${pair}:SHAPE_REQUIRED`);
       if (!nonEmpty(state.phase)) failures.push(`${pair}:PHASE_REQUIRED`);
       if (!nonEmpty(state.touch_phase)) failures.push(`${pair}:TOUCH_PHASE_REQUIRED`);
+      if (!nonEmpty(state.geometry_pack_id)) failures.push(`${pair}:GEOMETRY_PACK_ID_REQUIRED`);
+      if (!nonEmpty(state.geometry_id)) failures.push(`${pair}:GEOMETRY_ID_REQUIRED`);
+      if (!sha256ish(state.geometry_pack_sha256)) failures.push(`${pair}:GEOMETRY_PACK_SHA256_REQUIRED`);
+      if (!nonEmpty(state.capture_timeline_pack_id)) failures.push(`${pair}:CAPTURE_TIMELINE_PACK_ID_REQUIRED`);
+      if (!nonEmpty(state.capture_timeline_id)) failures.push(`${pair}:CAPTURE_TIMELINE_ID_REQUIRED`);
+      if (!sha256ish(state.capture_timeline_sha256)) failures.push(`${pair}:CAPTURE_TIMELINE_SHA256_REQUIRED`);
       if (!nonEmpty(state.content_seed) && !nonEmpty(state.background_asset_hash)) {
         failures.push(`${pair}:CONTENT_SEED_OR_BACKGROUND_HASH_REQUIRED`);
       }
@@ -82,6 +88,12 @@ export function sceneDefaultsById(probe) {
       touchPhase: defaultState?.touch_phase,
       contentSeed: defaultState?.content_seed,
       backgroundAssetHash: defaultState?.background_asset_hash,
+      geometryPackId: defaultState?.geometry_pack_id,
+      geometryId: defaultState?.geometry_id,
+      geometryPackSha256: defaultState?.geometry_pack_sha256,
+      captureTimelinePackId: defaultState?.capture_timeline_pack_id,
+      captureTimelineId: defaultState?.capture_timeline_id,
+      captureTimelineSha256: defaultState?.capture_timeline_sha256,
       trajectorySourceSha256: scene.trajectory_source_sha256,
       defaultStateId: defaultState?.state_id
     });
@@ -119,6 +131,12 @@ export function metadataForSceneState(probe, { sceneId, stateId }) {
   };
   if (state.content_seed) metadata.contentSeed = state.content_seed;
   if (state.background_asset_hash) metadata.backgroundAssetHash = state.background_asset_hash;
+  if (state.geometry_pack_id) metadata.geometryPackId = state.geometry_pack_id;
+  if (state.geometry_id) metadata.geometryId = state.geometry_id;
+  if (state.geometry_pack_sha256) metadata.geometryPackSha256 = state.geometry_pack_sha256;
+  if (state.capture_timeline_pack_id) metadata.captureTimelinePackId = state.capture_timeline_pack_id;
+  if (state.capture_timeline_id) metadata.captureTimelineId = state.capture_timeline_id;
+  if (state.capture_timeline_sha256) metadata.captureTimelineSha256 = state.capture_timeline_sha256;
   if (scene.trajectory_source_sha256) metadata.trajectorySourceSha256 = scene.trajectory_source_sha256;
   return metadata;
 }
@@ -131,6 +149,10 @@ export function deepFreeze(value) {
 
 function nonEmpty(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function sha256ish(value) {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
 }
 
 function unique(values) {

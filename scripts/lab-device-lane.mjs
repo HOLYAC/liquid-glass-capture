@@ -3,6 +3,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
+import {
+  glassCaptureTimelineBySceneState,
+  glassGeometryBySceneState
+} from "../packages/material-glass/src/index.mjs";
+import { sceneStateKey } from "../packages/scene-contract/src/index.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -91,15 +96,34 @@ function writeSelfTestFixture(outPath) {
     manifests: [{ path: layerSnapshotManifestPath, manifest: JSON.parse(readFileSync(layerSnapshotManifestPath, "utf8")) }]
   });
 
+  const badSceneContractArtifact = writeCaptureArtifact(dir, "bad-contract", "iPhone16,2", "compositor", "pass");
+  const badSceneContract = JSON.parse(readFileSync(badSceneContractArtifact, "utf8"));
+  delete badSceneContract.environment.geometry_pack_id;
+  delete badSceneContract.frame_pack.capture_timeline_id;
+  writeJson(badSceneContractArtifact, badSceneContract);
+  const badSceneContractManifestPath = writeRepeatManifest({
+    dir,
+    name: "bad-scene-contract.repeat-manifest.json",
+    artifactPaths: [badSceneContractArtifact]
+  });
+  const badSceneContractReport = verifyPhysicalDeviceLane({
+    plan,
+    manifests: [{ path: badSceneContractManifestPath, manifest: JSON.parse(readFileSync(badSceneContractManifestPath, "utf8")) }]
+  });
+
   const out = outPath ? resolve(outPath) : join(dir, "physical-device-lane.report.json");
   const selfTestReport = {
     schema_version: "1.2.0",
     kind: "physical_device_lane_self_test_report",
-    status: report.status === "pass" && badReport.status !== "pass" && layerSnapshotReport.status !== "pass" ? "pass" : "fail",
+    status: report.status === "pass" &&
+      badReport.status !== "pass" &&
+      layerSnapshotReport.status !== "pass" &&
+      badSceneContractReport.status !== "pass" ? "pass" : "fail",
     plan_path: planPath,
     positive_report: report,
     simulator_negative_report: badReport,
-    layer_snapshot_negative_report: layerSnapshotReport
+    layer_snapshot_negative_report: layerSnapshotReport,
+    scene_contract_negative_report: badSceneContractReport
   };
   writeJson(out, selfTestReport);
 
@@ -108,11 +132,12 @@ function writeSelfTestFixture(outPath) {
     report,
     badReport,
     layerSnapshotReport,
+    badSceneContractReport,
     selfTestReport
   };
 }
 
-function assertDeviceLaneGuardRails({ report, badReport, layerSnapshotReport, selfTestReport }) {
+function assertDeviceLaneGuardRails({ report, badReport, layerSnapshotReport, badSceneContractReport, selfTestReport }) {
   if (selfTestReport.status !== "pass") {
     throw new Error("device-lane self-test report did not pass");
   }
@@ -128,9 +153,18 @@ function assertDeviceLaneGuardRails({ report, badReport, layerSnapshotReport, se
   if (!layerSnapshotReport.failures.some((failure) => failure.includes("CAPTURE_PATH_INVALID"))) {
     throw new Error("device-lane self-test failed to reject layer_snapshot artifact");
   }
+  if (!badSceneContractReport.failures.some((failure) => failure.includes("GEOMETRY_PACK_ID_MISMATCH"))) {
+    throw new Error("device-lane self-test failed to reject missing geometry contract");
+  }
+  if (!badSceneContractReport.failures.some((failure) => failure.includes("CAPTURE_TIMELINE_ID_MISMATCH"))) {
+    throw new Error("device-lane self-test failed to reject missing capture timeline contract");
+  }
 }
 
 function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQualification) {
+  const contractKey = sceneStateKey("S01_SEARCH", "rest");
+  const geometry = glassGeometryBySceneState[contractKey];
+  const timeline = glassCaptureTimelineBySceneState[contractKey];
   const pngPath = join(dir, `frame-${index}.png`);
   writePng(pngPath, 6, 6, makePixels(6, 6, Number.isFinite(Number(index)) ? Number(index) : 0));
   const maskPath = join(dir, "mask-pack.json");
@@ -167,6 +201,9 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       reduce_transparency: false,
       reduce_motion: false,
       content_seed: "device-lane-self-test",
+      geometry_pack_id: geometry.geometry_pack_id,
+      geometry_id: geometry.geometry_id,
+      geometry_pack_sha256: geometry.geometry_pack_sha256,
       viewport_px: { width: 6, height: 6 },
       capture_timestamp_ns: String(index)
     },
@@ -186,7 +223,10 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       mask_pack_path: maskPath,
       touch_phase: "rest",
       animation_t: 0,
-      sustained_duration_ms: 10_000
+      sustained_duration_ms: 10_000,
+      capture_timeline_pack_id: timeline.capture_timeline_pack_id,
+      capture_timeline_id: timeline.capture_timeline_id,
+      capture_timeline_sha256: timeline.capture_timeline_sha256
     },
     shader: {
       pipeline: "passthrough"

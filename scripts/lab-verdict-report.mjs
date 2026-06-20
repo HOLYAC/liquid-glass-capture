@@ -6,7 +6,13 @@ import { readCaptureArtifact } from "./lib/lab-artifact.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
-import { glassDegeneracySceneIds, glassTrajectoryShaByScene } from "../packages/material-glass/src/index.mjs";
+import {
+  glassCaptureTimelineBySceneState,
+  glassDegeneracySceneIds,
+  glassGeometryBySceneState,
+  glassTrajectoryShaByScene
+} from "../packages/material-glass/src/index.mjs";
+import { sceneStateKey } from "../packages/scene-contract/src/index.mjs";
 import { readArtifactStoreIndex, writeArtifactStore } from "../packages/artifact-store/src/index.mjs";
 import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
@@ -123,6 +129,9 @@ function makePixels(width, height) {
 }
 
 function makeCandidateArtifact(pngPath, maskPath) {
+  const contractKey = sceneStateKey("S03_PRESS", "press");
+  const geometry = glassGeometryBySceneState[contractKey];
+  const timeline = glassCaptureTimelineBySceneState[contractKey];
   return {
     schema_version: "1.2.0",
     id: "self-test-c1-g8-verdict",
@@ -150,6 +159,9 @@ function makeCandidateArtifact(pngPath, maskPath) {
       reduce_transparency: false,
       reduce_motion: false,
       content_seed: "g8-verdict-self-test",
+      geometry_pack_id: geometry.geometry_pack_id,
+      geometry_id: geometry.geometry_id,
+      geometry_pack_sha256: geometry.geometry_pack_sha256,
       viewport_px: { width: 10, height: 10 },
       capture_timestamp_ns: "0"
     },
@@ -168,7 +180,10 @@ function makeCandidateArtifact(pngPath, maskPath) {
       touch_phase: "press",
       animation_t: 1,
       sustained_duration_ms: 60_000,
-      trajectory_source_sha256: s03PressTrajectorySha256
+      trajectory_source_sha256: s03PressTrajectorySha256,
+      capture_timeline_pack_id: timeline.capture_timeline_pack_id,
+      capture_timeline_id: timeline.capture_timeline_id,
+      capture_timeline_sha256: timeline.capture_timeline_sha256
     },
     shader: {
       pipeline: "baked_verdict",
@@ -298,6 +313,9 @@ function assertVerdictGuardRails(fixture, passReport) {
   }
   if (passReport.physical_device_lane?.status !== "pass" || passReport.physical_device_lane.hashes_verified !== true) {
     throw new Error("G8 guardrail failed: physical-device lane evidence missing from verdict");
+  }
+  if (passReport.physical_device_lane.scene_contract_verified !== true) {
+    throw new Error("G8 guardrail failed: scene-contract evidence missing from verdict");
   }
 
   const gateReports = fixture.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));

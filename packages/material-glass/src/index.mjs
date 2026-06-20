@@ -7,8 +7,17 @@ import {
   stateById,
   validateSceneState
 } from "../../material-core/src/index.mjs";
+import {
+  captureTimelineIdFor,
+  geometryIdFor,
+  glassCaptureTimelinePackId,
+  glassGeometryPackId,
+  sceneContractMaps
+} from "../../scene-contract/src/index.mjs";
 
 export const glassMaskPackId = "glass_core_mask_pack_v1";
+export const glassGeometryPackSha256 = "a7fa221f4cef5ee74492be403aa2dbe7a153f18cf0d41f84dbb43703d64c3425";
+export const glassCaptureTimelinePackSha256 = "61c15338f00fce2349bcbcc05103643664fd248e28d7411772131e1796babd13";
 export const s02LoupeTrajectorySha256 = "33a896a5ee2615762df4248ce2f3a327fe036d8a7df43deea316641118796f5c";
 export const s03PressTrajectorySha256 = "f3f1fb6f521cc525cdf5957a2c96682ec6e9098f34a1708c0621ce50a8fee376";
 export const s04MorphTrajectorySha256 = "2d56ff34315a85689661f74b5ea3d0a70144bf36c77546a1ffe9fb9e9cf3b5bd";
@@ -137,6 +146,9 @@ export const glassSceneDefaults = sceneDefaultsById(glassMaterialProbe);
 export const glassSceneIds = Object.freeze(glassMaterialProbe.scenes.map((entry) => entry.scene_id));
 export const glassDegeneracySceneIds = glassMaterialProbe.degeneracy_scene_ids;
 export const glassDegeneracyScenePrefixes = Object.freeze(glassDegeneracySceneIds.map((sceneId) => sceneId.slice(0, 3)));
+export const glassSceneContractMaps = sceneContractMaps(glassMaterialProbe);
+export const glassGeometryBySceneState = glassSceneContractMaps.geometry;
+export const glassCaptureTimelineBySceneState = glassSceneContractMaps.timeline;
 export const glassTrajectoryShaByScene = deepFreeze(Object.fromEntries(
   glassMaterialProbe.scenes
     .filter((entry) => entry.trajectory_source_sha256)
@@ -169,7 +181,7 @@ function scene(scene_id, class_id, states, extras = {}) {
     scene_id,
     class_id,
     mask_pack_id: glassMaskPackId,
-    states,
+    states: states.map((entry) => bindSceneContract(scene_id, entry)),
     ...extras
   };
 }
@@ -188,5 +200,17 @@ function state(state_id, substrate, shape, phase, touch_phase, content_seed, ext
     autoplay: extras.autoplay === true,
     default: extras.default === true,
     ...(extras.background_asset_hash ? { background_asset_hash: extras.background_asset_hash } : {})
+  };
+}
+
+function bindSceneContract(sceneId, stateEntry) {
+  return {
+    ...stateEntry,
+    geometry_pack_id: glassGeometryPackId,
+    geometry_id: geometryIdFor(sceneId, stateEntry),
+    geometry_pack_sha256: glassGeometryPackSha256,
+    capture_timeline_pack_id: glassCaptureTimelinePackId,
+    capture_timeline_id: captureTimelineIdFor(sceneId, stateEntry),
+    capture_timeline_sha256: glassCaptureTimelinePackSha256
   };
 }

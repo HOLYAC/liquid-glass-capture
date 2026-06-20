@@ -280,6 +280,15 @@ private final class ReplayKitCaptureSession {
     if let trajectorySourceSHA256 = metadata["trajectorySourceSha256"] as? String {
       framePack["trajectory_source_sha256"] = trajectorySourceSHA256
     }
+    if let captureTimelinePackId = metadata["captureTimelinePackId"] as? String {
+      framePack["capture_timeline_pack_id"] = captureTimelinePackId
+    }
+    if let captureTimelineId = metadata["captureTimelineId"] as? String {
+      framePack["capture_timeline_id"] = captureTimelineId
+    }
+    if let captureTimelineSHA256 = metadata["captureTimelineSha256"] as? String {
+      framePack["capture_timeline_sha256"] = captureTimelineSHA256
+    }
 
     var environment: [String: Any] = [
       "appearance": metadata["appearance"] as? String ?? "dark",
@@ -291,6 +300,15 @@ private final class ReplayKitCaptureSession {
     ]
     if let backgroundAssetHash = metadata["backgroundAssetHash"] as? String {
       environment["background_asset_hash"] = backgroundAssetHash
+    }
+    if let geometryPackId = metadata["geometryPackId"] as? String {
+      environment["geometry_pack_id"] = geometryPackId
+    }
+    if let geometryId = metadata["geometryId"] as? String {
+      environment["geometry_id"] = geometryId
+    }
+    if let geometryPackSHA256 = metadata["geometryPackSha256"] as? String {
+      environment["geometry_pack_sha256"] = geometryPackSHA256
     }
 
     var artifact: [String: Any] = [

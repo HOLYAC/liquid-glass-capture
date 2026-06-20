@@ -95,6 +95,9 @@ export interface CaptureArtifact {
     reduce_motion: boolean;
     content_seed?: string;
     background_asset_hash?: string;
+    geometry_pack_id?: string;
+    geometry_id?: string;
+    geometry_pack_sha256?: string;
     viewport_px: { width: number; height: number };
     capture_timestamp_ns: string;
   };
@@ -116,6 +119,9 @@ export interface CaptureArtifact {
     animation_t: number;
     sustained_duration_ms?: number;
     trajectory_source_sha256?: string;
+    capture_timeline_pack_id?: string;
+    capture_timeline_id?: string;
+    capture_timeline_sha256?: string;
   };
   shader?: {
     pipeline: ShaderPipeline;

@@ -49,6 +49,10 @@ const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
 const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge_overlap", "morph_tall"] as const;
 const tints = ["none", "cyan", "amber", "red"] as const;
 const repeatCounts = [3, 10, 24, 50, 300] as const;
+const geometryPackId = "glass_geometry_pack_v1";
+const geometryPackSha256 = "a7fa221f4cef5ee74492be403aa2dbe7a153f18cf0d41f84dbb43703d64c3425";
+const captureTimelinePackId = "glass_capture_timeline_pack_v1";
+const captureTimelinePackSha256 = "61c15338f00fce2349bcbcc05103643664fd248e28d7411772131e1796babd13";
 const s02LoupeTrajectorySha256 = "33a896a5ee2615762df4248ce2f3a327fe036d8a7df43deea316641118796f5c";
 const s03PressTrajectorySha256 = "f3f1fb6f521cc525cdf5957a2c96682ec6e9098f34a1708c0621ce50a8fee376";
 const s04MorphTrajectorySha256 = "2d56ff34315a85689661f74b5ea3d0a70144bf36c77546a1ffe9fb9e9cf3b5bd";
@@ -291,8 +295,22 @@ function trajectoryShaFor(sceneId: SceneId): string | undefined {
   return trajectoryShaByScene[sceneId];
 }
 
+function geometryIdFor(scene: SceneSpec): string {
+  return `${scene.sceneId}__${scene.stateId}__${scene.shape}__${scene.phase}__geometry_v1`;
+}
+
+function captureTimelineIdFor(scene: SceneSpec): string {
+  return `${scene.sceneId}__${scene.stateId}__${scene.touchPhase}__timeline_v1`;
+}
+
 function addSceneMetadata(metadata: Record<string, unknown>, scene: SceneSpec) {
   metadata["contentSeed"] = scene.contentSeed;
+  metadata["geometryPackId"] = geometryPackId;
+  metadata["geometryId"] = geometryIdFor(scene);
+  metadata["geometryPackSha256"] = geometryPackSha256;
+  metadata["captureTimelinePackId"] = captureTimelinePackId;
+  metadata["captureTimelineId"] = captureTimelineIdFor(scene);
+  metadata["captureTimelineSha256"] = captureTimelinePackSha256;
   if (scene.backgroundAssetHash) {
     metadata["backgroundAssetHash"] = scene.backgroundAssetHash;
   }

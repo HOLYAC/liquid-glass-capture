@@ -102,6 +102,9 @@
         "reduce_motion": { "type": "boolean" },
         "content_seed": { "type": "string" },
         "background_asset_hash": { "type": "string" },
+        "geometry_pack_id": { "type": "string", "minLength": 1 },
+        "geometry_id": { "type": "string", "minLength": 1 },
+        "geometry_pack_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
         "viewport_px": {
           "type": "object",
           "additionalProperties": false,
@@ -151,7 +154,10 @@
         "touch_phase": { "enum": ["rest", "press", "drag", "release", "morph", "sustained"] },
         "animation_t": { "type": "number" },
         "sustained_duration_ms": { "type": "number", "minimum": 0 },
-        "trajectory_source_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+        "trajectory_source_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "capture_timeline_pack_id": { "type": "string", "minLength": 1 },
+        "capture_timeline_id": { "type": "string", "minLength": 1 },
+        "capture_timeline_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
       }
     },
     "shader": { "type": "object" },

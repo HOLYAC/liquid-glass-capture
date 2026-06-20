@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "geometry_pack",
+  "geometry_pack_id": "glass_geometry_pack_v1",
+  "coordinate_space": "normalized_stage_formula",
+  "native_formula_symbol": "ProbeMetrics",
+  "native_formula_version": "ProbeMetrics.v1",
+  "source": "modules/liquid-glass-capture/ios/LiquidGlassCaptureView.swift",
+  "formula": {
+    "center_x_base": 0.5,
+    "center_y_base": 0.56,
+    "phase_modifiers": {
+      "rest": { "scale": 1, "squash_x": 1, "squash_y": 1, "center_dx": 0, "center_dy": 0 },
+      "press": { "squash_x": "1.12 + animated * 0.06", "squash_y": "0.88 - animated * 0.04" },
+      "drag_left": { "center_dx": "-stage_width * (0.16 + animated * 0.04)" },
+      "drag_right": { "center_dx": "stage_width * (0.16 + animated * 0.04)" },
+      "merge_near": { "scale": 0.98 },
+      "merge_overlap": { "scale": 1.04, "squash_x": 1.08 },
+      "morph_tall": { "squash_x": 0.76, "squash_y": 1.24, "center_dy": "-stage_height * 0.05" }
+    },
+    "shapes": {
+      "circle": { "diameter": "min(stage_width, stage_height) * 0.26 * scale * max(squash_x, squash_y)" },
+      "capsule": { "width": "min(stage_width * 0.70, 820) * scale * squash_x", "height": "min(max(stage_height * 0.12, 74), 120) * scale * squash_y" },
+      "rounded_rect": { "width": "min(stage_width * 0.48, 560) * scale * squash_x", "height": "min(max(stage_height * 0.24, 140), 230) * scale * squash_y", "corner_radius": "height * 0.22" },
+      "twin_capsules": { "single_width": "min(stage_width * 0.20, 220) * scale", "single_height": "min(max(stage_height * 0.11, 64), 96) * scale" }
+    }
+  },
+  "scene_geometry": [
+    { "scene_id": "S00_NULL", "state_id": "s00_flat_grey", "geometry_id": "S00_NULL__s00_flat_grey__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S00_NULL", "state_id": "s00_hard_edge", "geometry_id": "S00_NULL__s00_hard_edge__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S00_NULL", "state_id": "s00_p3_ramp", "geometry_id": "S00_NULL__s00_p3_ramp__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S00_NULL", "state_id": "s00_smooth_gradient", "geometry_id": "S00_NULL__s00_smooth_gradient__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S01_SEARCH", "state_id": "rest", "geometry_id": "S01_SEARCH__rest__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S02_LOUPE", "state_id": "drag", "geometry_id": "S02_LOUPE__drag__circle__drag_right__geometry_v1", "shape": "circle", "phase": "drag_right" },
+    { "scene_id": "S03_PRESS", "state_id": "press", "geometry_id": "S03_PRESS__press__capsule__press__geometry_v1", "shape": "capsule", "phase": "press" },
+    { "scene_id": "S04_MORPH", "state_id": "morph", "geometry_id": "S04_MORPH__morph__twin_capsules__morph_tall__geometry_v1", "shape": "twin_capsules", "phase": "morph_tall" },
+    { "scene_id": "S05_FLOATING_BAR", "state_id": "floating_rest", "geometry_id": "S05_FLOATING_BAR__floating_rest__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S06_TINY_GLASS", "state_id": "tiny_rest", "geometry_id": "S06_TINY_GLASS__tiny_rest__circle__rest__geometry_v1", "shape": "circle", "phase": "rest" },
+    { "scene_id": "S07_BUSY_PHOTO", "state_id": "busy_photo_rest", "geometry_id": "S07_BUSY_PHOTO__busy_photo_rest__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S08_P3_GRADIENT", "state_id": "p3_gradient_rest", "geometry_id": "S08_P3_GRADIENT__p3_gradient_rest__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S09_NEAR_WHITE", "state_id": "near_white_rest", "geometry_id": "S09_NEAR_WHITE__near_white_rest__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S10_NEAR_BLACK", "state_id": "near_black_rest", "geometry_id": "S10_NEAR_BLACK__near_black_rest__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S11_VIDEO_FRAME", "state_id": "video_frame_rest", "geometry_id": "S11_VIDEO_FRAME__video_frame_rest__capsule__rest__geometry_v1", "shape": "capsule", "phase": "rest" },
+    { "scene_id": "S12_SYSTEM_MATERIAL_ADJACENCY", "state_id": "system_material_rest", "geometry_id": "S12_SYSTEM_MATERIAL_ADJACENCY__system_material_rest__twin_capsules__merge_near__geometry_v1", "shape": "twin_capsules", "phase": "merge_near" }
+  ]
+}

@@ -130,6 +130,12 @@ function validateEnvironment(errors, environment) {
   if (!environment.content_seed && !environment.background_asset_hash) {
     errors.push("environment requires content_seed or background_asset_hash");
   }
+  for (const key of ["geometry_pack_id", "geometry_id"]) {
+    if (environment[key] !== undefined) requireString(errors, `environment.${key}`, environment[key]);
+  }
+  if (environment.geometry_pack_sha256 !== undefined) {
+    requireSha256(errors, "environment.geometry_pack_sha256", environment.geometry_pack_sha256);
+  }
 }
 
 function validateColor(errors, color) {
@@ -170,6 +176,12 @@ function validateFramePack(errors, framePack, artifactDir) {
       framePack.sequence_paths.length === framePack.sequence_timestamps_ms.length,
       "frame_pack.sequence_paths and frame_pack.sequence_timestamps_ms must have the same length"
     );
+  }
+  for (const key of ["capture_timeline_pack_id", "capture_timeline_id"]) {
+    if (framePack[key] !== undefined) requireString(errors, `frame_pack.${key}`, framePack[key]);
+  }
+  if (framePack.capture_timeline_sha256 !== undefined) {
+    requireSha256(errors, "frame_pack.capture_timeline_sha256", framePack.capture_timeline_sha256);
   }
 }
 
@@ -349,6 +361,9 @@ function makeSelfTestArtifact(pngPath, maskPath) {
       reduce_transparency: false,
       reduce_motion: false,
       content_seed: "s00-flat-p3-grey-v1",
+      geometry_pack_id: "glass_geometry_pack_v1",
+      geometry_id: "S00_NULL__s00_flat_grey__capsule__rest__geometry_v1",
+      geometry_pack_sha256: "a7fa221f4cef5ee74492be403aa2dbe7a153f18cf0d41f84dbb43703d64c3425",
       viewport_px: { width: 4, height: 4 },
       capture_timestamp_ns: "0"
     },
@@ -365,7 +380,10 @@ function makeSelfTestArtifact(pngPath, maskPath) {
       mask_pack_sha256: sha256File(maskPath),
       mask_pack_path: maskPath,
       touch_phase: "rest",
-      animation_t: 0
+      animation_t: 0,
+      capture_timeline_pack_id: "glass_capture_timeline_pack_v1",
+      capture_timeline_id: "S00_NULL__s00_flat_grey__rest__timeline_v1",
+      capture_timeline_sha256: "61c15338f00fce2349bcbcc05103643664fd248e28d7411772131e1796babd13"
     },
     integrity: {
       artifact_sha256: "self-test-pending",
@@ -377,6 +395,12 @@ function makeSelfTestArtifact(pngPath, maskPath) {
 function requireString(errors, label, value) {
   if (typeof value !== "string" || value.length === 0) {
     errors.push(`${label} must be a non-empty string`);
+  }
+}
+
+function requireSha256(errors, label, value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/i.test(value)) {
+    errors.push(`${label} must be a 64-character SHA-256 hex string`);
   }
 }
 

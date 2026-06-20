@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "capture_timeline_pack",
+  "capture_timeline_pack_id": "glass_capture_timeline_pack_v1",
+  "clock": "capture_relative_ms",
+  "source": "C:/Users/ZAEBA/Downloads/apple_glass_parity_execution_plan_v1_2.md",
+  "policy": {
+    "static_rest": "single stable compositor sample at t=0",
+    "gesture": "sample times mirror the single-source trajectory timestamps",
+    "video_like": "short fixed high-frequency sweep for temporal/background stress"
+  },
+  "timelines": [
+    { "scene_id": "S00_NULL", "state_id": "s00_flat_grey", "capture_timeline_id": "S00_NULL__s00_flat_grey__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S00_NULL", "state_id": "s00_hard_edge", "capture_timeline_id": "S00_NULL__s00_hard_edge__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S00_NULL", "state_id": "s00_p3_ramp", "capture_timeline_id": "S00_NULL__s00_p3_ramp__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S00_NULL", "state_id": "s00_smooth_gradient", "capture_timeline_id": "S00_NULL__s00_smooth_gradient__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S01_SEARCH", "state_id": "rest", "capture_timeline_id": "S01_SEARCH__rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S02_LOUPE", "state_id": "drag", "capture_timeline_id": "S02_LOUPE__drag__drag__timeline_v1", "touch_phase": "drag", "duration_ms": 340, "sample_times_ms": [0, 120, 240, 340], "animation_t": [0, 0.352941, 0.705882, 1] },
+    { "scene_id": "S03_PRESS", "state_id": "press", "capture_timeline_id": "S03_PRESS__press__press__timeline_v1", "touch_phase": "press", "duration_ms": 220, "sample_times_ms": [0, 120, 220], "animation_t": [0, 0.545455, 1] },
+    { "scene_id": "S04_MORPH", "state_id": "morph", "capture_timeline_id": "S04_MORPH__morph__morph__timeline_v1", "touch_phase": "morph", "duration_ms": 520, "sample_times_ms": [0, 160, 340, 520], "animation_t": [0, 0.307692, 0.653846, 1] },
+    { "scene_id": "S05_FLOATING_BAR", "state_id": "floating_rest", "capture_timeline_id": "S05_FLOATING_BAR__floating_rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S06_TINY_GLASS", "state_id": "tiny_rest", "capture_timeline_id": "S06_TINY_GLASS__tiny_rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S07_BUSY_PHOTO", "state_id": "busy_photo_rest", "capture_timeline_id": "S07_BUSY_PHOTO__busy_photo_rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S08_P3_GRADIENT", "state_id": "p3_gradient_rest", "capture_timeline_id": "S08_P3_GRADIENT__p3_gradient_rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S09_NEAR_WHITE", "state_id": "near_white_rest", "capture_timeline_id": "S09_NEAR_WHITE__near_white_rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S10_NEAR_BLACK", "state_id": "near_black_rest", "capture_timeline_id": "S10_NEAR_BLACK__near_black_rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 0, "sample_times_ms": [0], "animation_t": [0] },
+    { "scene_id": "S11_VIDEO_FRAME", "state_id": "video_frame_rest", "capture_timeline_id": "S11_VIDEO_FRAME__video_frame_rest__rest__timeline_v1", "touch_phase": "rest", "duration_ms": 1000, "sample_times_ms": [0, 200, 400, 600, 800, 1000], "animation_t": [0, 0.2, 0.4, 0.6, 0.8, 1] },
+    { "scene_id": "S12_SYSTEM_MATERIAL_ADJACENCY", "state_id": "system_material_rest", "capture_timeline_id": "S12_SYSTEM_MATERIAL_ADJACENCY__system_material_rest__morph__timeline_v1", "touch_phase": "morph", "duration_ms": 420, "sample_times_ms": [0, 210, 420], "animation_t": [0, 0.5, 1] }
+  ]
+}

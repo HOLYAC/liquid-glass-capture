@@ -2,10 +2,13 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import {
+  glassCaptureTimelineBySceneState,
   glassDefaultDeviceLaneTasks,
+  glassGeometryBySceneState,
   glassSceneStateMatrix,
   glassTrajectoryShaByScene
 } from "../../material-glass/src/index.mjs";
+import { sceneStateKey } from "../../scene-contract/src/index.mjs";
 
 export const physicalDeviceLanePolicy = Object.freeze({
   schema_version: "1.2.0",
@@ -21,6 +24,8 @@ export const physicalDeviceLanePolicy = Object.freeze({
   scene_state_matrix: glassSceneStateMatrix,
   default_tasks: glassDefaultDeviceLaneTasks,
   trajectory_sha_by_scene: glassTrajectoryShaByScene,
+  geometry_by_scene_state: glassGeometryBySceneState,
+  capture_timeline_by_scene_state: glassCaptureTimelineBySceneState,
   derivation: "v1.2 physical truth: collected artifacts must be physical, compositor/framebuffer, hash-checked, nominal-thermal, and gate-backed"
 });
 
@@ -116,6 +121,7 @@ export function verifyPhysicalDeviceLane({
       layer_snapshot_forbidden: true,
       nominal_thermal_required: true,
       low_power_mode_forbidden: true,
+      scene_contract_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.scene_contract_verified)),
       hashes_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.hashes_verified))
     }
   };
@@ -131,6 +137,9 @@ function normalizeTask(task, index, lanePolicy, policy) {
   const validStates = policy.scene_state_matrix?.[sceneId];
   if (!validStates) throw new Error(`task ${index}: unsupported scene ${sceneId}`);
   if (!validStates.includes(stateId)) throw new Error(`task ${index}: state ${stateId} is not valid for ${sceneId}`);
+  const sceneState = sceneStateKey(sceneId, stateId);
+  const geometry = policy.geometry_by_scene_state?.[sceneState] ?? null;
+  const timeline = policy.capture_timeline_by_scene_state?.[sceneState] ?? null;
   return {
     schema_version: "1.2.0",
     kind: "physical_device_lane_task",
@@ -145,7 +154,13 @@ function normalizeTask(task, index, lanePolicy, policy) {
     requires_nominal_thermal_start: true,
     requires_low_power_mode_off: true,
     requires_null_qualification_pass: true,
-    required_trajectory_source_sha256: policy.trajectory_sha_by_scene[sceneId] ?? null
+    required_trajectory_source_sha256: policy.trajectory_sha_by_scene[sceneId] ?? null,
+    required_geometry_pack_id: geometry?.geometry_pack_id ?? null,
+    required_geometry_id: geometry?.geometry_id ?? null,
+    required_geometry_pack_sha256: geometry?.geometry_pack_sha256 ?? null,
+    required_capture_timeline_pack_id: timeline?.capture_timeline_pack_id ?? null,
+    required_capture_timeline_id: timeline?.capture_timeline_id ?? null,
+    required_capture_timeline_sha256: timeline?.capture_timeline_sha256 ?? null
   };
 }
 
@@ -236,6 +251,7 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
   ) {
     failures.push(`${task.lane_task_id}:ARTIFACT_${index}_TRAJECTORY_SOURCE_MISMATCH`);
   }
+  failures.push(...verifySceneContractFields(task, artifact, index));
 
   const hashFailures = verifyFrameHashes(artifact, artifactPath, index, task.lane_task_id);
   failures.push(...hashFailures);
@@ -251,9 +267,28 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
     capture_kind: artifact.capture_kind,
     null_qualification: artifact.null_qualification ?? "not_recorded",
     device_key: deviceKey(artifact.device_info),
+    scene_contract_verified: !failures.some((failure) => failure.includes("_GEOMETRY_") || failure.includes("_CAPTURE_TIMELINE_")),
     hashes_verified: hashFailures.length === 0,
     failures
   };
+}
+
+function verifySceneContractFields(task, artifact, index) {
+  const failures = [];
+  const environment = artifact.environment ?? {};
+  const framePack = artifact.frame_pack ?? {};
+  verifyContractValue(failures, task, index, "GEOMETRY_PACK_ID", environment.geometry_pack_id, task.required_geometry_pack_id);
+  verifyContractValue(failures, task, index, "GEOMETRY_ID", environment.geometry_id, task.required_geometry_id);
+  verifyContractValue(failures, task, index, "GEOMETRY_PACK_SHA256", environment.geometry_pack_sha256, task.required_geometry_pack_sha256);
+  verifyContractValue(failures, task, index, "CAPTURE_TIMELINE_PACK_ID", framePack.capture_timeline_pack_id, task.required_capture_timeline_pack_id);
+  verifyContractValue(failures, task, index, "CAPTURE_TIMELINE_ID", framePack.capture_timeline_id, task.required_capture_timeline_id);
+  verifyContractValue(failures, task, index, "CAPTURE_TIMELINE_SHA256", framePack.capture_timeline_sha256, task.required_capture_timeline_sha256);
+  return failures;
+}
+
+function verifyContractValue(failures, task, index, label, actual, expected) {
+  if (!expected) return;
+  if (actual !== expected) failures.push(`${task.lane_task_id}:ARTIFACT_${index}_${label}_MISMATCH`);
 }
 
 function verifyFrameHashes(artifact, artifactPath, index, taskId) {
