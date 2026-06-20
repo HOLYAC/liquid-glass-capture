@@ -35,6 +35,9 @@ function main() {
 }
 
 function writeCapturePlan(request) {
+  const baselineClass = request.repeat >= 300 ? "prod_p99" : request.repeat === 24 ? "sustained" : "mvl";
+  const captureDurationMs = baselineClass === "sustained" ? 60_000 : 900;
+  const cooldownMs = baselineClass === "sustained" ? 60_000 : 750;
   const plan = {
     schema_version: "1.2.0",
     kind: "ios_capture_plan",
@@ -45,7 +48,9 @@ function writeCapturePlan(request) {
     state_id: request.state,
     capture_kind: request.capture,
     repeat_count_requested: request.repeat,
-    baseline_class: request.repeat >= 300 ? "prod_p99" : request.repeat === 24 ? "sustained" : "mvl",
+    baseline_class: baselineClass,
+    capture_duration_ms: captureDurationMs,
+    cooldown_ms: cooldownMs,
     on_device_app_action: {
       open_controls: true,
       set_rig: request.rig,
@@ -60,13 +65,15 @@ function writeCapturePlan(request) {
       stateId: request.state,
       rigId: request.rig,
       captureKind: request.capture,
-      baselineClass: request.repeat >= 300 ? "prod_p99" : request.repeat === 24 ? "sustained" : "mvl",
-      requiresNominalThermal: true
+      baselineClass,
+      requiresNominalThermal: true,
+      captureDurationMs,
+      cooldownMs
     },
     output_contract: {
       manifest_kind: "repeat_capture_manifest",
       use_after_capture: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --manifest <repeat-manifest.json>`,
-      baseline_command: `npm run metrics:baseline -- --ref-manifest <r0-repeat-manifest.json> --probe-manifest <r1-repeat-manifest.json> --class ${request.repeat >= 300 ? "prod_p99" : "mvl"} --repeat ${request.repeat} --out ./baselines/current.json`
+      baseline_command: `npm run metrics:baseline -- --ref-manifest <r0-repeat-manifest.json> --probe-manifest <r1-repeat-manifest.json> --class ${baselineClass} --repeat ${request.repeat} --out ./baselines/current.json`
     }
   };
 

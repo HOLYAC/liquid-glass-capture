@@ -7,6 +7,8 @@ import { sha256File, writePng } from "./lab-png.mjs";
 import { compareMetricImages } from "../../packages/metric-stack/src/index.mjs";
 import { measureOptics } from "../../packages/metric-stack/src/optics.mjs";
 import { measureTemporal } from "../../packages/metric-stack/src/temporal.mjs";
+import { measureRuntime } from "../../packages/metric-stack/src/runtime.mjs";
+import { measureEnergy } from "../../packages/energy-stack/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
@@ -102,6 +104,8 @@ export function renderDiffViewer(referencePath, candidatePath) {
   const report = compareMetricImages(referenceRecord.png, candidateRecord.png);
   const opticsReport = measureOptics(referenceRecord.png, candidateRecord.png);
   const temporalReport = measureTemporalSafely(referenceRecord, candidateRecord);
+  const runtimeReport = measureRuntimeSafely(candidateRecord);
+  const energyReport = measureEnergySafely(candidateRecord);
   const reference = referenceRecord.artifact;
   const candidate = candidateRecord.artifact;
   const referenceUri = dataUri(referenceRecord.png_path, "image/png");
@@ -112,6 +116,8 @@ export function renderDiffViewer(referencePath, candidatePath) {
       statusPill("G2", report.status),
       statusPill("G3", opticsReport.status),
       statusPill("G4", temporalReport.status),
+      statusPill("G5", runtimeReport.status),
+      statusPill("G6", energyReport.status),
       statusPill("ref null", reference.null_qualification ?? "unknown"),
       statusPill("cand null", candidate.null_qualification ?? "unknown")
     ]),
@@ -125,6 +131,8 @@ export function renderDiffViewer(referencePath, candidatePath) {
     section("Metric Summary", metricTable(report.metrics ?? {})),
     section("Optics Summary", metricTable(opticsReport.metrics ?? {})),
     section("Temporal Summary", temporalSummary(temporalReport)),
+    section("Runtime Summary", runtimeSummary(runtimeReport)),
+    section("Energy Summary", energySummary(energyReport)),
     section("Reference", table([
       ["id", reference.id],
       ["rig", reference.rig_id],
@@ -220,6 +228,37 @@ function renderBaselineViewer(path, report) {
   ]);
 }
 
+function measureRuntimeSafely(candidateRecord) {
+  try {
+    return measureRuntime(candidateRecord);
+  } catch (error) {
+    return {
+      schema_version: "1.2.0",
+      kind: "g5_runtime_report",
+      gate: "G5",
+      status: "fail",
+      failures: [`G5_RUNTIME_UNREADABLE:${error.message}`],
+      metrics: {}
+    };
+  }
+}
+
+function measureEnergySafely(candidateRecord) {
+  try {
+    return measureEnergy(candidateRecord);
+  } catch (error) {
+    return {
+      schema_version: "1.2.0",
+      kind: "g6_energy_report",
+      gate: "G6",
+      status: "fail",
+      failures: [`G6_ENERGY_UNREADABLE:${error.message}`],
+      warnings: [],
+      metrics: {}
+    };
+  }
+}
+
 function measureTemporalSafely(referenceRecord, candidateRecord) {
   try {
     return measureTemporal(
@@ -236,6 +275,30 @@ function measureTemporalSafely(referenceRecord, candidateRecord) {
       metrics: {}
     };
   }
+}
+
+function runtimeSummary(report) {
+  return [
+    table([
+      ["status", report.status],
+      ["failures", (report.failures ?? []).join(", ")],
+      ["source", report.policy?.source_note ?? ""],
+      ["full_frame_p95_ceiling_ms", report.policy?.full_frame_p95_ceiling_ms ?? ""]
+    ]),
+    metricTable(report.metrics ?? {})
+  ].join("");
+}
+
+function energySummary(report) {
+  return [
+    table([
+      ["status", report.status],
+      ["failures", (report.failures ?? []).join(", ")],
+      ["warnings", (report.warnings ?? []).join(", ")],
+      ["require_energy_trace", report.policy?.require_energy_trace ?? ""]
+    ]),
+    metricTable(report.metrics ?? {})
+  ].join("");
 }
 
 function temporalSummary(report) {
@@ -491,6 +554,7 @@ function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
       screen_scale: 3,
       refresh_hz: 60,
       thermal_state_start: "nominal",
+      thermal_state_end: "nominal",
       low_power_mode: false
     },
     environment: {
@@ -517,7 +581,8 @@ function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
       mask_pack_sha256: sha256File(maskPath),
       mask_pack_path: maskPath,
       touch_phase: "rest",
-      animation_t: 0
+      animation_t: 0,
+      sustained_duration_ms: 10_000
     },
     shader: {
       pipeline: rigId === "R0" ? "passthrough" : "dom_css",
@@ -528,6 +593,14 @@ function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
     },
     energy: {
       trace_available: false
+    },
+    perf: {
+      measurement_source: "artifact-viewer-self-test",
+      full_frame_ms_p95: 14.2,
+      frame_interval_ms_p95: 16.67,
+      compositor_frame_ms_p95: 16.67,
+      dropped_frames: 0,
+      sustained_degradation_pct: 0.4
     },
     integrity: {
       artifact_sha256: "self-test-pending",

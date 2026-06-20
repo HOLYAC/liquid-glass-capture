@@ -91,6 +91,8 @@ function validateArtifact(artifact, artifactDir) {
   validateEnvironment(errors, artifact.environment);
   validateColor(errors, artifact.color);
   validateFramePack(errors, artifact.frame_pack, artifactDir);
+  validatePerf(errors, artifact.perf);
+  validateEnergy(errors, artifact.energy);
   validateIntegrity(errors, artifact.integrity);
   return errors;
 }
@@ -177,6 +179,57 @@ function validateIntegrity(errors, integrity) {
   }
   requireString(errors, "integrity.artifact_sha256", integrity.artifact_sha256);
   requireString(errors, "integrity.producer_version", integrity.producer_version);
+}
+
+function validatePerf(errors, perf) {
+  if (perf === undefined) return;
+  if (!perf || typeof perf !== "object") {
+    errors.push("perf must be an object when present");
+    return;
+  }
+
+  for (const key of [
+    "cpu_frame_ms_p95",
+    "gpu_frame_ms_p95",
+    "compositor_frame_ms_p95",
+    "full_frame_ms_p95",
+    "frame_interval_ms_p95",
+    "sustained_degradation_pct",
+    "memory_mb_p95",
+    "refresh_budget_ms"
+  ]) {
+    if (perf[key] !== undefined) {
+      requireNumber(errors, `perf.${key}`, perf[key]);
+    }
+  }
+  if (perf.dropped_frames !== undefined) {
+    requireNumber(errors, "perf.dropped_frames", perf.dropped_frames);
+  }
+}
+
+function validateEnergy(errors, energy) {
+  if (energy === undefined) return;
+  if (!energy || typeof energy !== "object") {
+    errors.push("energy must be an object when present");
+    return;
+  }
+
+  requireValue(errors, typeof energy.trace_available === "boolean", "energy.trace_available must be boolean");
+  if (energy.trace_status !== undefined) {
+    requireEnum(errors, "energy.trace_status", energy.trace_status, ["available", "trace_unavailable"]);
+  }
+  if (energy.trace_tool !== undefined) {
+    requireEnum(errors, "energy.trace_tool", energy.trace_tool, [
+      "instruments_power_profiler",
+      "metrickit",
+      "validated_powermetrics_aux"
+    ]);
+  }
+  for (const key of ["energy_mj_per_10s", "average_power_mw", "thermal_onset_ms"]) {
+    if (energy[key] !== undefined) {
+      requireNumber(errors, `energy.${key}`, energy[key]);
+    }
+  }
 }
 
 function verifyPathHash(errors, artifactDir, label, rawPath, expectedHash) {

@@ -125,6 +125,7 @@ export interface CaptureArtifact {
     identifiability?: Record<string, IdentifiabilityTag>;
   };
   perf?: {
+    measurement_source?: string;
     cpu_frame_ms_p95?: number;
     gpu_frame_ms_p95?: number;
     compositor_frame_ms_p95?: number;
@@ -133,9 +134,12 @@ export interface CaptureArtifact {
     dropped_frames?: number;
     sustained_degradation_pct?: number;
     memory_mb_p95?: number;
+    refresh_budget_ms?: number;
   };
   energy?: {
     trace_available: boolean;
+    trace_status?: "available" | "trace_unavailable";
+    measurement_source?: string;
     trace_tool?:
       | "instruments_power_profiler"
       | "metrickit"

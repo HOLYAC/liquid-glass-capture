@@ -286,6 +286,8 @@ export default function App() {
     const sceneId = sceneIdFor(substrate, phase);
     const stateId = stateIdFor(substrate, phase);
     const baselineClass = repeatCount >= 300 ? "prod_p99" : repeatCount === 24 ? "sustained" : "mvl";
+    const captureDurationMs = baselineClass === "sustained" ? 60_000 : 900;
+    const cooldownMs = baselineClass === "sustained" ? 60_000 : 750;
     const metadata: Record<string, unknown> = {
       schemaVersion: "1.2.0",
       labPlan: "apple_glass_parity_execution_plan_v1_2",
@@ -297,7 +299,7 @@ export default function App() {
       nullQualification: sceneId === "S00_NULL" ? "pass" : "fail",
       baselineClass,
       requiresNominalThermal: true,
-      maxFrames: 90,
+      maxFrames: baselineClass === "sustained" ? 900 : 90,
       appearance: "dark",
       contentSeed: contentSeedFor(substrate)
     };
@@ -314,8 +316,8 @@ export default function App() {
         "baseline-repeat",
         metadata,
         repeatCount,
-        900,
-        750
+        captureDurationMs,
+        cooldownMs
       );
       const manifestPath = typeof payload.jsonPath === "string" ? payload.jsonPath : "repeat manifest written";
       setCaptureStatus(manifestPath);

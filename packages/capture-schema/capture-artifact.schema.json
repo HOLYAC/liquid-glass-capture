@@ -155,8 +155,34 @@
       }
     },
     "shader": { "type": "object" },
-    "perf": { "type": "object" },
-    "energy": { "type": "object" },
+    "perf": {
+      "type": "object",
+      "properties": {
+        "measurement_source": { "type": "string" },
+        "cpu_frame_ms_p95": { "type": "number" },
+        "gpu_frame_ms_p95": { "type": "number" },
+        "compositor_frame_ms_p95": { "type": "number" },
+        "full_frame_ms_p95": { "type": "number" },
+        "frame_interval_ms_p95": { "type": "number" },
+        "dropped_frames": { "type": "number" },
+        "sustained_degradation_pct": { "type": "number" },
+        "memory_mb_p95": { "type": "number" },
+        "refresh_budget_ms": { "type": "number" }
+      }
+    },
+    "energy": {
+      "type": "object",
+      "required": ["trace_available"],
+      "properties": {
+        "trace_available": { "type": "boolean" },
+        "trace_status": { "enum": ["available", "trace_unavailable"] },
+        "measurement_source": { "type": "string" },
+        "trace_tool": { "enum": ["instruments_power_profiler", "metrickit", "validated_powermetrics_aux"] },
+        "energy_mj_per_10s": { "type": "number" },
+        "average_power_mw": { "type": "number" },
+        "thermal_onset_ms": { "type": "number" }
+      }
+    },
     "review": { "type": "object" },
     "integrity": {
       "type": "object",

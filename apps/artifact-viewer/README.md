@@ -23,6 +23,8 @@ null qualification status
 G2 static metric summary
 G3 optics summary
 G4 temporal summary
+G5 runtime summary
+G6 energy/thermal summary
 debug heatmap
 energy summary when present
 identifiability tags when present

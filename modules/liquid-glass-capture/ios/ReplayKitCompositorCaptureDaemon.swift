@@ -161,6 +161,7 @@ private final class ReplayKitCaptureSession {
   private var errors: [String] = []
   private let maxFrames: Int
   private let startedAt = Date()
+  private let initialThermalState = ProcessInfo.processInfo.thermalState
 
   let id: String
   let sessionDir: URL
@@ -262,6 +263,9 @@ private final class ReplayKitCaptureSession {
     let stateId = metadata["stateId"] as? String ?? "compositor"
     let jsonURL = sessionDir.appendingPathComponent("\(id).capture.json")
     let touchPhase = metadata["touchPhase"] as? String ?? "rest"
+    let sustainedDurationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+    let refreshHz = Double(UIScreen.main.maximumFramesPerSecond)
+    let finalThermalState = Self.thermalStateString(ProcessInfo.processInfo.thermalState)
     var framePack: [String: Any] = [
       "base_png_sha256": baseSha,
       "base_png_path": basePath,
@@ -271,7 +275,7 @@ private final class ReplayKitCaptureSession {
       "mask_pack_path": maskURL.path,
       "touch_phase": touchPhase,
       "animation_t": 0,
-      "sustained_duration_ms": Int(Date().timeIntervalSince(startedAt) * 1000)
+      "sustained_duration_ms": sustainedDurationMs
     ]
     if let trajectorySourceSHA256 = metadata["trajectorySourceSha256"] as? String {
       framePack["trajectory_source_sha256"] = trajectorySourceSHA256
@@ -297,9 +301,9 @@ private final class ReplayKitCaptureSession {
         "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
         "sdk_build": Bundle.main.infoDictionary?["DTSDKBuild"] as? String ?? "runtime-unknown",
         "screen_scale": Double(UIScreen.main.scale),
-        "refresh_hz": Double(UIScreen.main.maximumFramesPerSecond),
-        "thermal_state_start": Self.thermalStateString(ProcessInfo.processInfo.thermalState),
-        "thermal_state_end": Self.thermalStateString(ProcessInfo.processInfo.thermalState),
+        "refresh_hz": refreshHz,
+        "thermal_state_start": Self.thermalStateString(initialThermalState),
+        "thermal_state_end": finalThermalState,
         "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
       ],
       "environment": [
@@ -321,9 +325,8 @@ private final class ReplayKitCaptureSession {
       "shader": [
         "pipeline": Self.shaderPipeline(rigId: rigId, mode: props["mode"] as? String)
       ],
-      "perf": [
-        "dropped_frames": 0
-      ],
+      "perf": Self.perfBlock(frames: frames, refreshHz: refreshHz),
+      "energy": Self.energyBlock(),
       "integrity": [
         "artifact_sha256": "pending",
         "producer_version": "ReplayKitCompositorCaptureDaemon.v1"
@@ -420,6 +423,94 @@ private final class ReplayKitCaptureSession {
       return []
     }
     return seconds.map { ($0 - first) * 1000.0 }
+  }
+
+  private static func perfBlock(frames: [[String: Any]], refreshHz: Double) -> [String: Any] {
+    let intervals = frameIntervalsMS(frames)
+    var block: [String: Any] = [
+      "measurement_source": "replaykit_sample_buffer_pts_proxy",
+      "dropped_frames": droppedFrameEstimate(intervals)
+    ]
+
+    if !intervals.isEmpty {
+      let p95 = quantile(intervals, 0.95)
+      block["frame_interval_ms_p95"] = p95
+      block["full_frame_ms_p95"] = p95
+      block["compositor_frame_ms_p95"] = p95
+      if let degradation = sustainedDegradationPct(intervals) {
+        block["sustained_degradation_pct"] = degradation
+      }
+    }
+    if refreshHz > 0 {
+      block["refresh_budget_ms"] = 1000.0 / refreshHz
+    }
+    return block
+  }
+
+  private static func energyBlock() -> [String: Any] {
+    [
+      "trace_available": false,
+      "trace_status": "trace_unavailable",
+      "measurement_source": "thermal_state_only_no_power_trace"
+    ]
+  }
+
+  private static func frameIntervalsMS(_ frames: [[String: Any]]) -> [Double] {
+    let seconds = frames.compactMap { $0["ptsSeconds"] as? Double }.sorted()
+    guard seconds.count >= 2 else {
+      return []
+    }
+    var intervals: [Double] = []
+    for index in 1..<seconds.count {
+      intervals.append((seconds[index] - seconds[index - 1]) * 1000.0)
+    }
+    return intervals
+  }
+
+  private static func droppedFrameEstimate(_ intervals: [Double]) -> Int {
+    guard !intervals.isEmpty else {
+      return 0
+    }
+    let median = quantile(intervals, 0.5)
+    guard median > 0 else {
+      return 0
+    }
+    return intervals.filter { $0 > median * 1.5 }.count
+  }
+
+  private static func sustainedDegradationPct(_ intervals: [Double]) -> Double? {
+    guard intervals.count >= 6 else {
+      return nil
+    }
+    let bucketSize = max(1, intervals.count / 3)
+    let first = mean(Array(intervals.prefix(bucketSize)))
+    let last = mean(Array(intervals.suffix(bucketSize)))
+    guard first > 0 else {
+      return nil
+    }
+    return max(0, (last - first) / first * 100.0)
+  }
+
+  private static func quantile(_ values: [Double], _ q: Double) -> Double {
+    guard !values.isEmpty else {
+      return 0
+    }
+    let sorted = values.sorted()
+    let position = Double(sorted.count - 1) * q
+    let lower = Int(floor(position))
+    let upper = Int(ceil(position))
+    if lower == upper {
+      return sorted[lower]
+    }
+    let weight = position - Double(lower)
+    return sorted[lower] * (1 - weight) + sorted[upper] * weight
+  }
+
+  private static func mean(_ values: [Double]) -> Double {
+    guard !values.isEmpty else {
+      return 0
+    }
+    return values.reduce(0, +) / Double(values.count)
   }
 
   private static func displayP3ICCSHA256() -> String? {
