@@ -145,13 +145,20 @@ Press `B`. The status line prints the generated repeat-manifest path. If you
 changed the app state earlier, press `2` to show controls and restore those
 values before pressing `B`.
 
-4. Copy the app Documents folder into this repo under `./artifacts/iphone/`.
+4. Start the watcher, then copy the app Documents folder into this repo under
+   `./artifacts/iphone/`:
+
+```bash
+npm run proof:watch
+```
+
    File sharing is enabled in `app.json` (`UIFileSharingEnabled` +
    `LSSupportsOpeningDocumentsInPlace`), so the folder is reachable through
    Files/iTunes/Sideloadly-style file browsers. The doctor accepts either
    `./artifacts/iphone/LiquidGlassCaptures` or a parent folder such as
    `./artifacts/iphone/Documents`; it auto-discovers the newest nested
-   `LiquidGlassCaptures`.
+   `LiquidGlassCaptures`. `proof:watch` waits up to 15 minutes and continues
+   verification as soon as the folder appears.
 
 5. Verify the newest copied manifest. The command finds the latest
    `LiquidGlassCaptures/Series/*.repeat-manifest.json` by the manifest's

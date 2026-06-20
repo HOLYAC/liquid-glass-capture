@@ -11,6 +11,8 @@ const defaultCaptureRoot = join(repoRoot, "artifacts", "iphone", "LiquidGlassCap
 const proofPlanPath = join(repoRoot, "artifacts", "ios-max-fidelity-proof.plan.json");
 const proofVerifyPath = join(defaultOutDir, "ios-max-fidelity-proof.verify.json");
 const proofDoctorReportPath = join(defaultOutDir, "proof-doctor.report.json");
+const defaultWaitMs = 15 * 60 * 1000;
+const defaultPollMs = 2500;
 
 const proofArgs = [
   "--rig",
@@ -40,7 +42,7 @@ function main() {
   }
 
   const request = normalizeRequest(args);
-  const report = runDoctor(request);
+  const report = request.waitMs > 0 ? runDoctorAfterWait(request) : runDoctor(request);
   writeJson(request.out, report);
   printSummary(report);
   if (report.status === "fail") process.exit(1);
@@ -54,6 +56,14 @@ function normalizeRequest(args) {
   const captureRootResolution = resolveCaptureRoot(captureRootInput);
   const captureRoot = captureRootResolution.resolved_path ?? captureRootInput;
   const verifyOut = resolve(repoRoot, args.verifyOut ?? proofVerifyPath);
+  const waitMs = args.waitMs ?? 0;
+  const pollMs = args.pollMs ?? defaultPollMs;
+  if (!Number.isFinite(waitMs) || waitMs < 0) {
+    throw new Error("--wait-ms must be a non-negative number");
+  }
+  if (!Number.isFinite(pollMs) || pollMs < 1) {
+    throw new Error("--poll-ms must be a positive number");
+  }
   return {
     out,
     ipaReport,
@@ -63,7 +73,56 @@ function normalizeRequest(args) {
     captureRoot,
     verifyOut,
     refreshIpa: Boolean(args.refreshIpa),
-    verifyCapture: Boolean(args.verifyCapture || args.captureRoot)
+    verifyCapture: Boolean(args.verifyCapture || args.captureRoot || args.waitMs),
+    waitMs,
+    pollMs
+  };
+}
+
+function runDoctorAfterWait(request) {
+  const startedAt = Date.now();
+  const deadline = startedAt + request.waitMs;
+  let lastCheck = null;
+  while (Date.now() <= deadline) {
+    const resolution = resolveCaptureRoot(request.captureRootInput);
+    const resolvedPath = resolution.resolved_path ?? request.captureRootInput;
+    const check = inspectCopiedCaptureRoot(resolvedPath, resolution);
+    lastCheck = check;
+    if (check.status === "pass") {
+      return runDoctor({
+        ...request,
+        captureRootResolution: resolution,
+        captureRoot: resolvedPath,
+        verifyCapture: true
+      });
+    }
+    sleepMs(request.pollMs);
+  }
+
+  const report = runDoctor({
+    ...request,
+    waitMs: 0,
+    verifyCapture: false
+  });
+  const timeoutCheck = {
+    name: "wait_for_copied_capture_root",
+    status: "fail",
+    summary: `timed out after ${request.waitMs}ms waiting for LiquidGlassCaptures`,
+    evidence: {
+      waited_ms: Date.now() - startedAt,
+      poll_ms: request.pollMs,
+      last_copied_capture_root_check: lastCheck
+    }
+  };
+  return {
+    ...report,
+    status: "fail",
+    checks: [...report.checks, timeoutCheck],
+    next: nextSteps({
+      failedChecks: [timeoutCheck],
+      ipaPath: report.artifacts.ipa_path,
+      captureRoot: request.captureRootInput
+    })
   };
 }
 
@@ -298,13 +357,21 @@ function nextSteps({ readyForPhone, verifiedCapture, failedChecks = [], ipaPath,
       verify: `npm run proof:doctor -- --capture-root ./artifacts/iphone`
     };
   }
+  if (failedChecks.some((check) => check.name === "wait_for_copied_capture_root")) {
+    return {
+      state: "awaiting_copied_capture",
+      copy_back: `Copy LiquidGlassCaptures or the whole app Documents folder under ./artifacts/iphone.`,
+      watch: `npm run proof:watch`
+    };
+  }
   if (readyForPhone) {
     return {
       state: "ready_for_phone",
       install: `Install ${ipaPath} with Sideloadly or AltStore.`,
       on_phone: "Open Liquid Glass Capture and press B. Defaults are S01_SEARCH/R0/mvl_primary/repeat=1/max-fidelity=true.",
       copy_back: `Copy the app Documents/LiquidGlassCaptures folder to ${captureRoot}, or copy the whole Documents folder under ./artifacts/iphone and let proof:doctor find LiquidGlassCaptures inside it.`,
-      verify: `npm run proof:doctor -- --capture-root ./artifacts/iphone`
+      verify: `npm run proof:doctor -- --capture-root ./artifacts/iphone`,
+      watch: `npm run proof:watch`
     };
   }
   return {
@@ -460,6 +527,7 @@ function printSummary(report) {
   if (report.status === "pass_ready_for_phone") {
     console.log(`INSTALL ${report.artifacts.ipa_path}`);
     console.log(`PHONE ${report.next.on_phone}`);
+    if (report.next.watch) console.log(`WATCH ${report.next.watch}`);
     console.log(`VERIFY ${report.next.verify}`);
   } else if (report.status === "pass_verified_capture") {
     console.log(`INSPECT ${report.next.inspect}`);
@@ -470,6 +538,7 @@ function printSummary(report) {
     }
     if (report.next.copy_back) console.log(`NEXT ${report.next.copy_back}`);
     if (report.next.verify) console.log(`VERIFY ${report.next.verify}`);
+    if (report.next.watch) console.log(`WATCH ${report.next.watch}`);
     if (report.next.prepare) console.log(`NEXT ${report.next.prepare}`);
   }
 }
@@ -481,6 +550,9 @@ function parseArgs(argv) {
     if (token === "--self-test") args.selfTest = true;
     else if (token === "--refresh-ipa") args.refreshIpa = true;
     else if (token === "--verify-capture") args.verifyCapture = true;
+    else if (token === "--wait") args.waitMs = defaultWaitMs;
+    else if (token === "--wait-ms") args.waitMs = Number(readNext(argv, ++index, token));
+    else if (token === "--poll-ms") args.pollMs = Number(readNext(argv, ++index, token));
     else if (token === "--out") args.out = readNext(argv, ++index, token);
     else if (token === "--ipa-report") args.ipaReport = readNext(argv, ++index, token);
     else if (token === "--plan-out") args.planOut = readNext(argv, ++index, token);
@@ -489,6 +561,10 @@ function parseArgs(argv) {
     else throw new Error(`Unknown argument: ${token}`);
   }
   return args;
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function readNext(argv, index, flag) {
@@ -560,6 +636,23 @@ function runSelfTest() {
   const newestResolution = resolveCaptureRoot(copiedParent);
   if (newestResolution.resolved_path !== nestedCaptureRoot || newestResolution.candidate_count < 2) {
     throw new Error("proof-doctor self-test failed to pick newest nested LiquidGlassCaptures");
+  }
+
+  const timeoutReport = runDoctorAfterWait({
+    out: join(dir, "timeout.report.json"),
+    ipaReport: reportPath,
+    planOut: join(dir, "timeout.plan.json"),
+    captureRootInput: join(dir, "timeout-root"),
+    captureRootResolution: resolveCaptureRoot(join(dir, "timeout-root")),
+    captureRoot: join(dir, "timeout-root"),
+    verifyOut: join(dir, "timeout.verify.json"),
+    refreshIpa: false,
+    verifyCapture: true,
+    waitMs: 1,
+    pollMs: 1
+  });
+  if (timeoutReport.status !== "fail" || !timeoutReport.checks.some((check) => check.name === "wait_for_copied_capture_root")) {
+    throw new Error("proof-doctor self-test failed to report wait timeout");
   }
 
   const staleVerifyOut = join(dir, "stale.verify.json");
