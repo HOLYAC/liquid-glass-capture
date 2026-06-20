@@ -372,7 +372,9 @@ public final class LiquidGlassCaptureView: ExpoView {
     let startedAtNs = UInt64(Date().timeIntervalSince1970 * 1_000_000_000)
     var artifacts: [[String: Any]] = []
     var failures: [String] = []
-    var runIteration: ((Int) -> Void)!
+    var retryEvents: [[String: Any]] = []
+    let maxNoFrameRetries = (metadata["maxFidelity"] as? Bool ?? false) ? 3 : 1
+    var runIteration: ((Int, Int) -> Void)!
 
     CaptureDiagnostics.log("repeat.start", details: [
       "seriesId": seriesId,
@@ -383,6 +385,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "maxFidelity": metadata["maxFidelity"] as? Bool ?? false,
       "captureRawFrames": metadata["captureRawFrames"] as? Bool ?? false,
       "captureRawPixels": metadata["captureRawPixels"] as? Bool ?? false,
+      "maxNoFrameRetries": maxNoFrameRetries,
       "maxFrames": Self.intValue(metadata["maxFrames"]) ?? -1,
       "metadataKeys": metadata.keys.sorted().joined(separator: ",")
     ])
@@ -392,7 +395,8 @@ public final class LiquidGlassCaptureView: ExpoView {
         "seriesId": seriesId,
         "status": status,
         "artifacts": artifacts.count,
-        "failures": failures.count
+        "failures": failures.count,
+        "retryEvents": retryEvents.count
       ])
       do {
         let payload = try Self.writeRepeatManifest(
@@ -406,7 +410,9 @@ public final class LiquidGlassCaptureView: ExpoView {
           startedAtNs: startedAtNs,
           initialThermalState: Self.thermalStateString(initialThermalState),
           artifacts: artifacts,
-          failures: failures
+          failures: failures,
+          retryEvents: retryEvents,
+          maxNoFrameRetries: maxNoFrameRetries
         )
         CaptureDiagnostics.log("repeat.finish.resolved", details: [
           "seriesId": seriesId,
@@ -424,7 +430,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       }
     }
 
-    runIteration = { [weak self] index in
+    runIteration = { [weak self] index, attempt in
       guard let self else {
         failures.append("VIEW_DEALLOCATED")
         CaptureDiagnostics.log("repeat.view.deallocated", details: ["seriesId": seriesId])
@@ -452,6 +458,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       var iterationMetadata = metadata
       iterationMetadata["captureSeriesId"] = seriesId
       iterationMetadata["repeatIndex"] = index
+      iterationMetadata["repeatAttempt"] = attempt
       iterationMetadata["repeatCount"] = boundedRepeatCount
       iterationMetadata["requiresNominalThermal"] = requiresNominalThermal
       iterationMetadata["captureDurationMs"] = boundedCaptureDurationMs
@@ -464,6 +471,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       CaptureDiagnostics.log("repeat.iteration.start", details: [
         "seriesId": seriesId,
         "index": index,
+        "attempt": attempt,
         "iterationLabel": iterationLabel
       ])
       self.compositorCapture.start(
@@ -479,23 +487,55 @@ public final class LiquidGlassCaptureView: ExpoView {
               DispatchQueue.main.async {
                 switch stopResult {
                 case .success(let artifact):
-                  artifacts.append(artifact)
+                  var artifactRecord = artifact
+                  artifactRecord["repeatAttempt"] = attempt
+                  artifacts.append(artifactRecord)
                   CaptureDiagnostics.log("repeat.iteration.stop.success", details: [
                     "seriesId": seriesId,
                     "index": index,
+                    "attempt": attempt,
                     "artifactId": artifact["id"] as? String ?? "",
                     "frameCount": artifact["frameCount"] as? Int ?? -1,
                     "sessionDir": artifact["sessionDir"] as? String ?? ""
                   ])
                   DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(boundedCooldownMs)) {
-                    runIteration(index + 1)
+                    runIteration(index + 1, 0)
                   }
                 case .failure(let error):
-                  failures.append("STOP_FAILED_\(index): \(error.localizedDescription)")
+                  let errorText = error.localizedDescription
+                  if Self.isReplayKitNoFrameError(error), attempt < maxNoFrameRetries {
+                    let retryDelayMs = Self.retryDelayMs(
+                      cooldownMs: boundedCooldownMs,
+                      attempt: attempt
+                    )
+                    let retryEvent: [String: Any] = [
+                      "index": index,
+                      "attempt": attempt,
+                      "next_attempt": attempt + 1,
+                      "error": errorText,
+                      "retry_delay_ms": retryDelayMs
+                    ]
+                    retryEvents.append(retryEvent)
+                    CaptureDiagnostics.log("repeat.iteration.retry", details: [
+                      "seriesId": seriesId,
+                      "index": index,
+                      "attempt": attempt,
+                      "nextAttempt": attempt + 1,
+                      "retryDelayMs": retryDelayMs,
+                      "error": errorText
+                    ])
+                    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(retryDelayMs)) {
+                      runIteration(index, attempt + 1)
+                    }
+                    return
+                  }
+
+                  failures.append("STOP_FAILED_\(index): \(errorText)")
                   CaptureDiagnostics.log("repeat.iteration.stop.error", details: [
                     "seriesId": seriesId,
                     "index": index,
-                    "error": error.localizedDescription
+                    "attempt": attempt,
+                    "error": errorText
                   ])
                   finish(status: "aborted")
                 }
@@ -507,6 +547,7 @@ public final class LiquidGlassCaptureView: ExpoView {
           CaptureDiagnostics.log("repeat.iteration.start.error", details: [
             "seriesId": seriesId,
             "index": index,
+            "attempt": attempt,
             "error": error.localizedDescription
           ])
           finish(status: "aborted")
@@ -514,7 +555,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       }
     }
 
-    runIteration(0)
+    runIteration(0, 0)
   }
 
   private static func metrics(for image: UIImage) -> [String: Any] {
@@ -630,7 +671,9 @@ public final class LiquidGlassCaptureView: ExpoView {
     startedAtNs: UInt64,
     initialThermalState: String,
     artifacts: [[String: Any]],
-    failures: [String]
+    failures: [String],
+    retryEvents: [[String: Any]],
+    maxNoFrameRetries: Int
   ) throws -> [String: Any] {
     CaptureDiagnostics.log("repeat.manifest.enter", details: [
       "seriesId": seriesId,
@@ -673,7 +716,8 @@ public final class LiquidGlassCaptureView: ExpoView {
         "jsonPath_device": jsonPathDevice,
         "sessionDir": sessionDir,
         "sessionDir_device": sessionDirDevice,
-        "frameCount": Self.intValue(artifact["frameCount"]) ?? 0
+        "frameCount": Self.intValue(artifact["frameCount"]) ?? 0,
+        "repeatAttempt": Self.intValue(artifact["repeatAttempt"]) ?? 0
       ] as [String: Any]
     }
     CaptureDiagnostics.log("repeat.manifest.summaries-built", details: [
@@ -717,6 +761,8 @@ public final class LiquidGlassCaptureView: ExpoView {
       ],
       "policy": [
         "partial_is_not_verdict": true,
+        "retry_replaykit_no_frame": true,
+        "max_no_frame_retries": maxNoFrameRetries,
         "mvl_repeat_n": 50,
         "prod_p99_repeat_n": 300,
         "sustained_repeat_n": 24
@@ -724,6 +770,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "artifact_json_paths": artifactJsonPaths,
       "artifact_json_paths_device": artifactJsonPathsDevice,
       "artifacts": artifactSummaries,
+      "retry_events": retryEvents,
       "failures": failures
     ]
 
@@ -782,6 +829,15 @@ public final class LiquidGlassCaptureView: ExpoView {
     @unknown default:
       return "fair"
     }
+  }
+
+  private static func isReplayKitNoFrameError(_ error: Error) -> Bool {
+    let description = error.localizedDescription
+    return description.range(of: "no video frames", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+  }
+
+  private static func retryDelayMs(cooldownMs: Int, attempt: Int) -> Int {
+    max(2_500, min(10_000, cooldownMs * (attempt + 2)))
   }
 
   private static func intValue(_ value: Any?) -> Int? {

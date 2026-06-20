@@ -3,7 +3,7 @@
     "name": "Liquid Glass Capture",
     "slug": "liquid-glass-capture",
     "scheme": "liquidglasscapture",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "platforms": [
       "ios"
     ],
@@ -13,7 +13,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zaeba.liquidglasscapture",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "requireFullScreen": true,
       "infoPlist": {
         "UIRequiresFullScreen": true,
