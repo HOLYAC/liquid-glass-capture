@@ -8,6 +8,11 @@ import {
   metadataForGlassSceneState,
   validateGlassSceneState
 } from "../packages/material-glass/src/index.mjs";
+import {
+  canonicalArtifactHashMethod,
+  finalizeCaptureArtifactIntegrity,
+  validateCaptureArtifactIntegrity
+} from "../packages/capture-schema/src/integrity.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const validRigs = new Set(["R0", "R1", "C0", "C1", "DOM_C"]);
@@ -186,6 +191,7 @@ function verifyManifest(request) {
     status: failures.length === 0 ? "pass" : "fail",
     manifest_path: manifestPath,
     capture_root: request.captureRoot ?? null,
+    capture_count: resolvedArtifactJsonPaths.length,
     request: {
       rig_id: request.rig,
       scene_id: request.scene,
@@ -230,6 +236,13 @@ function verifyArtifactRawManifest(failures, manifestDir, artifactJsonPath, inde
   } catch (error) {
     failures.push(`${artifactLabel}_JSON_INVALID:${error.message}`);
     return;
+  }
+
+  for (const integrityFailure of validateCaptureArtifactIntegrity(artifact)) {
+    failures.push(`${artifactLabel}_${integrityFailure}`);
+  }
+  if (artifact.integrity?.artifact_hash_method !== canonicalArtifactHashMethod) {
+    failures.push(`${artifactLabel}_INTEGRITY_CANONICAL_HASH_METHOD_MISSING`);
   }
 
   const framePack = artifact.frame_pack ?? {};
@@ -296,11 +309,23 @@ function verifyRawFileRef(failures, artifactDir, label, raw) {
     failures.push(`${label}_SHA_MISSING`);
     return;
   }
-  verifyFileHash(failures, label, resolveMaybe(artifactDir, raw.path), raw.sha256);
+  if (typeof raw.byteCount !== "number" || !Number.isFinite(raw.byteCount) || raw.byteCount <= 0) {
+    failures.push(`${label}_BYTE_COUNT_INVALID`);
+    return;
+  }
+  verifyFileHash(failures, label, resolveMaybe(artifactDir, raw.path), raw.sha256, raw.byteCount);
 }
 
-function verifyFileHash(failures, label, path, expectedSHA256) {
+function verifyFileHash(failures, label, path, expectedSHA256, expectedByteCount = null) {
   try {
+    const stats = statSync(path);
+    if (!stats.isFile()) {
+      failures.push(`${label}_NOT_FILE`);
+      return;
+    }
+    if (expectedByteCount !== null && stats.size !== expectedByteCount) {
+      failures.push(`${label}_BYTE_COUNT_MISMATCH`);
+    }
     const actualSHA256 = sha256File(path);
     if (actualSHA256.toLowerCase() !== String(expectedSHA256).toLowerCase()) {
       failures.push(`${label}_SHA_MISMATCH`);
@@ -517,7 +542,7 @@ function assertRawManifestVerification() {
     frames: [frame]
   });
   const artifactPath = join(dir, "a.capture.json");
-  writeJson(artifactPath, {
+  writeArtifactJson(artifactPath, {
     schema_version: "1.2.0",
     frame_pack: {
       frame_manifest_path: "frame_manifest.json",
@@ -560,6 +585,9 @@ function assertRawManifestVerification() {
   if (passReport.status !== "pass") {
     throw new Error(`ios-capture raw manifest self-test should pass: ${passReport.failures.join(", ")}`);
   }
+  if (passReport.capture_count !== 1) {
+    throw new Error("ios-capture raw manifest self-test failed to report capture_count");
+  }
 
   const badFrameManifestPath = join(dir, "frame_manifest_missing_display.json");
   const badFrame = JSON.parse(JSON.stringify(frame));
@@ -569,7 +597,7 @@ function assertRawManifestVerification() {
     frame_count: 1,
     frames: [badFrame]
   });
-  writeJson(artifactPath, {
+  writeArtifactJson(artifactPath, {
     schema_version: "1.2.0",
     frame_pack: {
       frame_manifest_path: "frame_manifest_missing_display.json",
@@ -579,6 +607,26 @@ function assertRawManifestVerification() {
   const failReport = verifyManifest(baseRequest);
   if (failReport.status !== "fail" || !failReport.failures.includes("ARTIFACT_0_FRAME_0_RAW_DISPLAY_MISSING")) {
     throw new Error("ios-capture raw manifest self-test failed to catch missing display raw");
+  }
+
+  const badSizeFrameManifestPath = join(dir, "frame_manifest_bad_raw_size.json");
+  const badSizeFrame = JSON.parse(JSON.stringify(frame));
+  badSizeFrame.raw.byteCount = 999;
+  writeJson(badSizeFrameManifestPath, {
+    schema_version: "1.0.0",
+    frame_count: 1,
+    frames: [badSizeFrame]
+  });
+  writeArtifactJson(artifactPath, {
+    schema_version: "1.2.0",
+    frame_pack: {
+      frame_manifest_path: "frame_manifest_bad_raw_size.json",
+      frame_manifest_sha256: sha256File(badSizeFrameManifestPath)
+    }
+  });
+  const badSizeReport = verifyManifest(baseRequest);
+  if (badSizeReport.status !== "fail" || !badSizeReport.failures.includes("ARTIFACT_0_FRAME_0_RAW_BYTE_COUNT_MISMATCH")) {
+    throw new Error("ios-capture raw manifest self-test failed to catch raw byteCount mismatch");
   }
 }
 
@@ -646,7 +694,7 @@ function assertCaptureRootDiscovery() {
     ]
   });
   const artifactPath = join(sessionDir, "latest.capture.json");
-  writeJson(artifactPath, {
+  writeArtifactJson(artifactPath, {
     schema_version: "1.2.0",
     frame_pack: {
       frame_manifest_path: "frame_manifest.json",
@@ -715,6 +763,11 @@ function assertAppProofDefaults() {
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeArtifactJson(path, value) {
+  finalizeCaptureArtifactIntegrity(value);
+  writeJson(path, value);
 }
 
 function assertPlan(plan, expected) {

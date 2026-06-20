@@ -11,7 +11,10 @@ import {
 } from "../../material-glass/src/index.mjs";
 import { sceneStateKey } from "../../scene-contract/src/index.mjs";
 import { validateMaskPack } from "../../mask-core/src/index.mjs";
-import { validateCaptureArtifactIntegrity } from "../../capture-schema/src/integrity.mjs";
+import {
+  canonicalArtifactHashMethod,
+  validateCaptureArtifactIntegrity
+} from "../../capture-schema/src/integrity.mjs";
 
 const productionDeviceMatrixRoles = Object.freeze(["weakest_supported", "target", "latest_pro"]);
 
@@ -340,6 +343,9 @@ function verifyArtifactForTask(task, artifactPath, index, policy, requiresRawFra
   for (const integrityFailure of validateCaptureArtifactIntegrity(artifact)) {
     failures.push(`${task.lane_task_id}:ARTIFACT_${index}_${integrityFailure}`);
   }
+  if (artifact.integrity?.artifact_hash_method !== canonicalArtifactHashMethod) {
+    failures.push(`${task.lane_task_id}:ARTIFACT_${index}_INTEGRITY_CANONICAL_HASH_METHOD_MISSING`);
+  }
 
   const hashFailures = verifyFrameHashes(artifact, artifactPath, index, task.lane_task_id);
   failures.push(...hashFailures);
@@ -472,7 +478,7 @@ function verifyRawFrameManifest(
     if (typeof frame.raw?.path !== "string" || frame.raw.path.length === 0) {
       failures.push(`${frameLabel}_RAW_PATH_MISSING`);
     } else {
-      verifyHash(failures, `${frameLabel}_RAW`, artifactDir, frame.raw.path, frame.raw.sha256);
+      verifyHash(failures, `${frameLabel}_RAW`, artifactDir, frame.raw.path, frame.raw.sha256, frame.raw.byteCount);
     }
     if (typeof frame.raw?.sha256 !== "string" || frame.raw.sha256.length === 0) {
       failures.push(`${frameLabel}_RAW_SHA_MISSING`);
@@ -503,10 +509,20 @@ function verifyRawFrameManifest(
             failures.push(`${frameLabel}_DISPLAY_REQUIRED`);
           }
         } else {
-          verifyHash(failures, `${frameLabel}_DISPLAY`, artifactDir, frame.raw.display.path, frame.raw.display.sha256);
+          verifyHash(
+            failures,
+            `${frameLabel}_DISPLAY`,
+            artifactDir,
+            frame.raw.display.path,
+            frame.raw.display.sha256,
+            frame.raw.display.byteCount
+          );
         }
         if (typeof frame.raw.display?.sha256 !== "string" || frame.raw.display.sha256.length === 0) {
           failures.push(`${frameLabel}_DISPLAY_SHA_MISSING`);
+        }
+        if (typeof frame.raw.display?.byteCount !== "number" || frame.raw.display.byteCount <= 0) {
+          failures.push(`${frameLabel}_DISPLAY_BYTE_COUNT_INVALID`);
         }
       }
     } else if (requiresRawDisplay) {
@@ -656,7 +672,7 @@ function verifyMaskPackContract(failures, label, baseDir, rawPath, artifact) {
   }
 }
 
-function verifyHash(failures, label, baseDir, rawPath, expected) {
+function verifyHash(failures, label, baseDir, rawPath, expected, expectedByteCount = undefined) {
   if (!rawPath || !expected) {
     failures.push(`${label}_HASH_CONTRACT_MISSING`);
     return;
@@ -666,9 +682,17 @@ function verifyHash(failures, label, baseDir, rawPath, expected) {
     failures.push(`${label}_MISSING`);
     return;
   }
-  if (!statSync(path).isFile()) {
+  const stats = statSync(path);
+  if (!stats.isFile()) {
     failures.push(`${label}_NOT_FILE`);
     return;
+  }
+  if (
+    typeof expectedByteCount === "number" &&
+    Number.isFinite(expectedByteCount) &&
+    stats.size !== expectedByteCount
+  ) {
+    failures.push(`${label}_BYTE_COUNT_MISMATCH`);
   }
   const actual = sha256File(path);
   if (actual !== String(expected).toLowerCase()) failures.push(`${label}_SHA256_MISMATCH`);

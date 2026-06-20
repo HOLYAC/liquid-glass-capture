@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
@@ -46,6 +46,7 @@ function main() {
     assertEnergyTraceHashRejected(artifact);
     assertFrameManifestValidated(artifact);
     assertFrameManifestRawHashMismatchRejected(artifact);
+    assertFrameManifestRawByteCountMismatchRejected(artifact);
     console.log(`PASS ${artifact}`);
     return;
   }
@@ -286,7 +287,8 @@ function validateFrameManifest(errors, artifactDir, framePack) {
           artifactDir,
           "frame_pack.frame_manifest.frames[].raw.path",
           raw.path,
-          raw.sha256
+          raw.sha256,
+          raw.byteCount
         );
       }
       if (raw.sourceFormat !== undefined) {
@@ -313,7 +315,8 @@ function validateFrameManifest(errors, artifactDir, framePack) {
             artifactDir,
             "frame_pack.frame_manifest.frames[].raw.display.path",
             raw.display.path,
-            raw.display.sha256
+            raw.display.sha256,
+            raw.display.byteCount
           );
         }
       }
@@ -528,13 +531,25 @@ function validateReview(errors, review) {
   }
 }
 
-function verifyPathHash(errors, artifactDir, label, rawPath, expectedHash) {
+function verifyPathHash(errors, artifactDir, label, rawPath, expectedHash, expectedByteCount = undefined) {
   requireString(errors, `${label}_path`, rawPath);
   requireString(errors, `${label}_sha256`, expectedHash);
   if (!rawPath || !expectedHash) return;
 
   const path = isAbsolute(rawPath) ? rawPath : resolve(artifactDir, rawPath);
   try {
+    const stats = statSync(path);
+    if (!stats.isFile()) {
+      errors.push(`${label} is not a file: ${path}`);
+      return;
+    }
+    if (
+      typeof expectedByteCount === "number" &&
+      Number.isFinite(expectedByteCount) &&
+      stats.size !== expectedByteCount
+    ) {
+      errors.push(`${label}_byteCount mismatch: expected ${expectedByteCount}, got ${stats.size}`);
+    }
     const actual = sha256File(path);
     if (actual.toLowerCase() !== String(expectedHash).toLowerCase()) {
       errors.push(`${label}_sha256 mismatch: expected ${expectedHash}, got ${actual}`);
@@ -791,6 +806,25 @@ function assertFrameManifestRawHashMismatchRejected(artifactPath) {
   const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
   if (!errors.some((error) => error.includes("frame_pack.frame_manifest.frames[].raw.path_sha256 mismatch"))) {
     throw new Error("artifact validator self-test failed to reject frame manifest raw hash mismatch");
+  }
+}
+
+function assertFrameManifestRawByteCountMismatchRejected(artifactPath) {
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  const manifestPath = resolve(dirname(artifactPath), artifact.frame_pack.frame_manifest_path);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const frame = manifest.frames[0];
+  frame.raw.byteCount += 1;
+  const badManifestPath = join(dirname(manifestPath), "frame_manifest_bad_raw_byte_count.json");
+  writeFileSync(
+    badManifestPath,
+    JSON.stringify(manifest, null, 2)
+  );
+  artifact.frame_pack.frame_manifest_path = badManifestPath;
+  artifact.frame_pack.frame_manifest_sha256 = sha256File(badManifestPath);
+  const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
+  if (!errors.some((error) => error.includes("frame_pack.frame_manifest.frames[].raw.path_byteCount mismatch"))) {
+    throw new Error("artifact validator self-test failed to reject frame manifest raw byteCount mismatch");
   }
 }
 

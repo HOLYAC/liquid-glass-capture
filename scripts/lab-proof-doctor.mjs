@@ -343,14 +343,22 @@ function checkVerifyReport(reportPath) {
   const evidence = { path: reportPath };
   try {
     const report = readJson(reportPath);
+    const inferredCaptureCount = Array.isArray(report.observed?.artifact_json_paths_resolved)
+      ? report.observed.artifact_json_paths_resolved.length
+      : Array.isArray(report.observed?.artifact_json_paths)
+        ? report.observed.artifact_json_paths.length
+        : undefined;
+    const captureCount = Number.isFinite(report.capture_count)
+      ? report.capture_count
+      : inferredCaptureCount;
     evidence.status = report.status;
     evidence.manifest_path = report.manifest_path;
-    evidence.capture_count = report.capture_count;
+    evidence.capture_count = captureCount;
     evidence.inspect_command = report.next?.inspect_command;
     const ok =
       report.status === "pass" &&
-      Number.isFinite(report.capture_count) &&
-      report.capture_count >= 1 &&
+      Number.isFinite(captureCount) &&
+      captureCount >= 1 &&
       typeof report.next?.inspect_command === "string";
     return {
       name: "max_fidelity_capture_verification_report",
@@ -836,6 +844,32 @@ function runSelfTest() {
       inspect_command: "stale-inspect-command"
     }
   });
+  const compatibleVerify = join(dir, "compatible.verify.json");
+  writeJson(compatibleVerify, {
+    status: "pass",
+    observed: {
+      artifact_json_paths_resolved: [join(dir, "one.capture.json")]
+    },
+    next: {
+      inspect_command: "inspect-compatible"
+    }
+  });
+  const compatibleVerifyCheck = checkVerifyReport(compatibleVerify);
+  if (compatibleVerifyCheck.status !== "pass" || compatibleVerifyCheck.evidence.capture_count !== 1) {
+    throw new Error("proof-doctor self-test failed to infer capture_count from ios-capture observed paths");
+  }
+
+  const missingCountVerify = join(dir, "missing-count.verify.json");
+  writeJson(missingCountVerify, {
+    status: "pass",
+    next: {
+      inspect_command: "inspect-missing-count"
+    }
+  });
+  if (checkVerifyReport(missingCountVerify).status !== "fail") {
+    throw new Error("proof-doctor self-test accepted verify report without capture_count evidence");
+  }
+
   const missingRootReport = runDoctor({
     out: join(dir, "stale-trap.report.json"),
     ipaReport: reportPath,

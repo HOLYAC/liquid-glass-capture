@@ -642,11 +642,8 @@ private final class ReplayKitCaptureSession {
       ]
     ]
 
-    var jsonData = try JSONSerialization.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
-    var integrity = artifact["integrity"] as? [String: Any] ?? [:]
-    integrity["artifact_sha256"] = Self.sha256Hex(jsonData)
-    artifact["integrity"] = integrity
-    jsonData = try JSONSerialization.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
+    try CaptureArtifactIntegrity.finalizeArtifact(&artifact)
+    let jsonData = try JSONSerialization.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
     try jsonData.write(to: jsonURL, options: .atomic)
 
     artifact["status"] = "stopped"
