@@ -381,6 +381,8 @@ function renderBaselineViewer(path, report) {
     ]),
     section("Namespace", table(rows)),
     section("Baseline Identity", table(objectRows(report.baseline_identity ?? {}))),
+    section("Approval", table(objectRows(report.baseline_approval ?? {}))),
+    section("Freeze", table(objectRows(report.baseline_freeze ?? {}))),
     section("Instrument Noise", metricSummaryTable(report.instrument_noise?.metrics ?? {})),
     section("Candidate Gap", metricSummaryTable(report.candidate_gap?.metrics ?? {})),
     section("Thresholds", thresholdSummaryTable(report.threshold_derivation?.metric_thresholds ?? {})),

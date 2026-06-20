@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
-import { sha256File, writePng } from "./lib/lab-png.mjs";
+import { sha256Buffer, sha256File, writePng } from "./lib/lab-png.mjs";
 import {
   compareMetricImages,
   flattenMetricReport,
@@ -48,6 +48,22 @@ const thresholdPolicy = Object.freeze({
   shader_threshold_never_borrows_webkit_gap: true,
   owner: "lab-metrics",
   derivation: "v1.2 baseline math: C1 shader gates against R0 instrument noise only; WebKit gap remains observable but cannot loosen shader thresholds."
+});
+const baselineApprovalPolicy = Object.freeze({
+  policy_id: "baseline_owner_approval_policy_v1",
+  complete_baseline_requires_owner_approval: true,
+  threshold_drift_requires_owner_approval: true,
+  approval_id_required_for_complete_baseline: true,
+  owner_placeholder: "unassigned",
+  derivation: "A complete baseline can change thresholds; plan v1.2 requires baseline owner approval before it becomes final evidence."
+});
+const baselineFreezePolicy = Object.freeze({
+  policy_id: "baseline_freeze_policy_v1",
+  hash_algorithm: "sha256",
+  hash_scope: "canonical_json_without_baseline_freeze",
+  retention_class: "baseline",
+  immutable: true,
+  derivation: "Baseline JSON is frozen by a canonical content hash before it is stored or compared."
 });
 const defaultSlack = Object.freeze({
   shader: {
@@ -95,12 +111,14 @@ function main() {
     assertOutlierPolicySelfTest();
     assertThresholdPolicySelfTest(report);
     assertBaselineIdentitySelfTest(report);
+    assertBaselineApprovalSelfTest(fixture);
+    assertBaselineFreezeSelfTest(report);
     console.log(`${report.baseline_status.toUpperCase()} ${fixture.out}`);
     return;
   }
 
   if (args.refs.length < 2) {
-    console.error("usage: node scripts/lab-metrics-baseline.mjs --ref <capture.json> --ref <capture.json> [--probe <capture.json> ...] [--class mvl|prod_p99|sustained] [--out baseline.json]");
+    console.error("usage: node scripts/lab-metrics-baseline.mjs --ref <capture.json> --ref <capture.json> [--probe <capture.json> ...] [--class mvl|prod_p99|sustained] [--owner name --approval id] [--out baseline.json]");
     console.error("       node scripts/lab-metrics-baseline.mjs --self-test [--out baseline.json]");
     process.exit(2);
   }
@@ -109,7 +127,7 @@ function main() {
   console.log(`${report.baseline_status.toUpperCase()} ${args.out ?? ""}`.trim());
 }
 
-export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", repeatOverride }) {
+export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", repeatOverride, owner, approvalId }) {
   const referenceRecords = refs.map((path) => readCaptureArtifact(path));
   const probeRecords = probes.map((path) => readCaptureArtifact(path));
   const referenceReports = [];
@@ -151,16 +169,26 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
     referenceSamples: referenceReports,
     candidateSamples: candidateReports
   });
+  const initialBaselineStatus = referenceRecords.length >= requested ? "complete" : "partial";
+  const baselineApproval = makeBaselineApproval({
+    baselineStatus: initialBaselineStatus,
+    baselineClass,
+    owner,
+    approvalId
+  });
+  const failures = [
+    ...infrastructureHealth.failures,
+    ...baselineApproval.failures
+  ];
+  const baselineStatus = failures.length > 0 ? "invalid" : initialBaselineStatus;
   const report = {
     schema_version: "1.2.0",
     kind: "baseline_metric_report",
     baseline_namespace: namespace,
     baseline_identity: baselineIdentity,
     baseline_class: baselineClass,
-    baseline_status: infrastructureHealth.status === "fail"
-      ? "invalid"
-      : referenceRecords.length >= requested ? "complete" : "partial",
-    failures: infrastructureHealth.failures,
+    baseline_status: baselineStatus,
+    failures,
     repeat_n_requested: requested,
     repeat_n_observed: referenceRecords.length,
     repeat_policy: {
@@ -183,9 +211,12 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
       outlier_policy: outlierPolicy,
       bootstrap_policy: bootstrapPolicy,
       threshold_policy: thresholdPolicy,
+      approval_policy: baselineApprovalPolicy,
+      freeze_policy: baselineFreezePolicy,
       infrastructure_health: infrastructureHealth
     },
     threshold_derivation: thresholdDerivation,
+    baseline_approval: baselineApproval,
     raw_report_counts: {
       reference_pair_count: referenceReports.length,
       candidate_pair_count: candidateReports.length
@@ -198,15 +229,16 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
       outlier_rejection: outlierPolicy.policy_id,
       bootstrap_ci: bootstrapPolicy.policy_id,
       threshold_policy: thresholdPolicy.policy_id,
-      baseline_owner: "unassigned"
+      baseline_owner: baselineApproval.owner
     }
   };
+  const frozenReport = freezeBaselineReport(report);
 
   if (out) {
     mkdirSync(dirname(resolve(out)), { recursive: true });
-    writeFileSync(resolve(out), `${JSON.stringify(report, null, 2)}\n`);
+    writeFileSync(resolve(out), `${JSON.stringify(frozenReport, null, 2)}\n`);
   }
-  return report;
+  return frozenReport;
 }
 
 function compareRecords(reference, candidate) {
@@ -419,6 +451,83 @@ function assessInfrastructureHealth(summary) {
   };
 }
 
+function makeBaselineApproval({ baselineStatus, baselineClass, owner, approvalId }) {
+  const normalizedOwner = normalizedApprovalText(owner) ?? baselineApprovalPolicy.owner_placeholder;
+  const normalizedApprovalId = normalizedApprovalText(approvalId);
+  const approvalRequired = baselineStatus === "complete";
+  const approved = normalizedOwner !== baselineApprovalPolicy.owner_placeholder && Boolean(normalizedApprovalId);
+  const failures = approvalRequired && !approved ? ["BASELINE_OWNER_APPROVAL_REQUIRED"] : [];
+  return {
+    policy_id: baselineApprovalPolicy.policy_id,
+    owner: normalizedOwner,
+    approval_id: normalizedApprovalId,
+    approval_required: approvalRequired,
+    approval_status: approvalRequired
+      ? approved ? "approved" : "missing_required_approval"
+      : approved ? "approved_partial" : "partial_unapproved",
+    threshold_drift_requires_owner_approval: baselineApprovalPolicy.threshold_drift_requires_owner_approval,
+    baseline_class: baselineClass,
+    failures
+  };
+}
+
+function normalizedApprovalText(value) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function freezeBaselineReport(report) {
+  const contentSha256 = baselineContentSha256(report);
+  return {
+    ...report,
+    baseline_freeze: {
+      policy_id: baselineFreezePolicy.policy_id,
+      hash_algorithm: baselineFreezePolicy.hash_algorithm,
+      hash_scope: baselineFreezePolicy.hash_scope,
+      content_sha256: contentSha256,
+      retention_class: baselineFreezePolicy.retention_class,
+      immutable: baselineFreezePolicy.immutable
+    },
+    immutability: {
+      ...report.immutability,
+      frozen_by_hash: true,
+      baseline_content_sha256: contentSha256,
+      baseline_retention_class: baselineFreezePolicy.retention_class
+    }
+  };
+}
+
+function baselineContentSha256(report) {
+  return sha256Buffer(Buffer.from(canonicalJson(baselineFreezePayload(report)), "utf8"));
+}
+
+function baselineFreezePayload(report) {
+  const payload = { ...report };
+  delete payload.baseline_freeze;
+  if (payload.immutability && typeof payload.immutability === "object") {
+    payload.immutability = { ...payload.immutability };
+    delete payload.immutability.frozen_by_hash;
+    delete payload.immutability.baseline_content_sha256;
+    delete payload.immutability.baseline_retention_class;
+  }
+  return payload;
+}
+
+function canonicalJson(value) {
+  return JSON.stringify(canonicalize(value));
+}
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value;
+  const result = {};
+  for (const key of Object.keys(value).sort()) {
+    if (value[key] !== undefined) result[key] = canonicalize(value[key]);
+  }
+  return result;
+}
+
 function buildThresholdDerivation({ referenceSamples, candidateSamples }) {
   const metricIds = Object.keys(referenceSamples[0]?.metrics ?? {})
     .filter((metricId) => metricThresholdPolicies[metricId]);
@@ -601,6 +710,56 @@ function assertBaselineIdentitySelfTest(report) {
     if (!report.baseline_namespace.includes(safePart(value))) {
       throw new Error(`baseline namespace self-test missing ${value}`);
     }
+  }
+}
+
+function assertBaselineApprovalSelfTest(fixture) {
+  const partialReport = buildBaselineReport({
+    refs: readRepeatManifestPaths(fixture.refManifest),
+    probes: readRepeatManifestPaths(fixture.probeManifest),
+    baselineClass: "mvl",
+    repeatOverride: 50
+  });
+  if (partialReport.baseline_status !== "partial" ||
+      partialReport.baseline_approval?.approval_status !== "partial_unapproved") {
+    throw new Error("baseline approval self-test failed partial evidence policy");
+  }
+
+  const unapprovedComplete = buildBaselineReport({
+    refs: readRepeatManifestPaths(fixture.refManifest),
+    probes: readRepeatManifestPaths(fixture.probeManifest),
+    baselineClass: "mvl",
+    repeatOverride: 3
+  });
+  if (unapprovedComplete.baseline_status !== "invalid" ||
+      !unapprovedComplete.failures.includes("BASELINE_OWNER_APPROVAL_REQUIRED")) {
+    throw new Error("baseline approval self-test failed to block complete unapproved baseline");
+  }
+
+  const approvedComplete = buildBaselineReport({
+    refs: readRepeatManifestPaths(fixture.refManifest),
+    probes: readRepeatManifestPaths(fixture.probeManifest),
+    baselineClass: "mvl",
+    repeatOverride: 3,
+    owner: "lab-owner",
+    approvalId: "approval-self-test"
+  });
+  if (approvedComplete.baseline_status !== "complete" ||
+      approvedComplete.baseline_approval?.approval_status !== "approved") {
+    throw new Error("baseline approval self-test failed approved complete baseline");
+  }
+}
+
+function assertBaselineFreezeSelfTest(report) {
+  const freeze = report.baseline_freeze ?? {};
+  if (freeze.content_sha256 !== baselineContentSha256(report)) {
+    throw new Error("baseline freeze self-test content hash mismatch");
+  }
+  if (freeze.immutable !== true || report.immutability?.frozen_by_hash !== true) {
+    throw new Error("baseline freeze self-test missing immutable flags");
+  }
+  if (report.immutability?.baseline_retention_class !== "baseline") {
+    throw new Error("baseline freeze self-test missing baseline retention class");
   }
 }
 
@@ -872,6 +1031,8 @@ function parseArgs(args) {
     else if (arg === "--ref-manifest") parsed.refs.push(...readRepeatManifestPaths(args[++index]));
     else if (arg === "--probe-manifest") parsed.probes.push(...readRepeatManifestPaths(args[++index]));
     else if (arg === "--class") parsed.baselineClass = args[++index];
+    else if (arg === "--owner") parsed.owner = args[++index];
+    else if (arg === "--approval") parsed.approvalId = args[++index];
     else if (arg === "--repeat") {
       parsed.repeatOverride = Number(args[++index]);
       if (!Number.isFinite(parsed.repeatOverride) || parsed.repeatOverride < 1) {

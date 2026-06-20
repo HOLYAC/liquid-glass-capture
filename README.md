@@ -257,6 +257,10 @@ Baseline namespace is derived from an explicit `baseline_identity` block:
 scene/state/rig, device model and identifier, iOS version/build, SDK build,
 capture daemon version, renderer lockfile SHA, observable WebKit build or
 `not_observable`, and null/pipeline qualification status.
+Complete baselines require `--owner` plus `--approval`; otherwise they are
+marked `invalid` with `BASELINE_OWNER_APPROVAL_REQUIRED`. Partial baselines can
+remain unapproved evidence. Every baseline report is frozen by a canonical
+`baseline_freeze.content_sha256` and carries baseline retention metadata.
 
 ## Production / TestFlight
 
