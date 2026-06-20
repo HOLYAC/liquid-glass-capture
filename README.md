@@ -178,8 +178,10 @@ scene/state contract does not match.
 
 Current G2/G3 mask scope is fixture-defined: `glass_core_mask_pack_v1`
 contains scene/state mask regions and the metric stack rasterizes them before
-scoring. Reports name the exact mask id (`core`, `edge_band`, etc.) so prototype
-numbers cannot silently fall back to whole-frame or residual-selected regions.
+scoring. Reports and viewers name the exact mask id (`core`, `edge_band`,
+`highlight`, `text`, `text_halo`, `background_control`, `motion_path`,
+`compositor_region`, `product_focus`) so prototype numbers cannot silently fall
+back to whole-frame or residual-selected regions.
 
 Current G4 temporal scope is sequence-based and gateable only when both
 artifacts carry the same `frame_pack.trajectory_source_sha256`. Gesture scenes

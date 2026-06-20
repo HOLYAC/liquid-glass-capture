@@ -7,6 +7,7 @@ import {
   writeViewerHtml,
   writeViewerSelfTestArtifacts
 } from "./lib/lab-artifact-viewer.mjs";
+import { requiredGlassMaskIds } from "../packages/mask-core/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -69,6 +70,8 @@ function assertInspectViewerContract(path) {
   for (const required of [
     'id="energy-trace-panel"',
     'id="energy-trace-link"',
+    'id="mask-overlay"',
+    ...requiredGlassMaskIds,
     "instruments_power_profiler",
     "sha256_tree_v1",
     "hash_match",

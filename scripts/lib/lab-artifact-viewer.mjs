@@ -10,7 +10,7 @@ import { measureOptics } from "../../packages/metric-stack/src/optics.mjs";
 import { measureTemporal } from "../../packages/metric-stack/src/temporal.mjs";
 import { measureRuntime } from "../../packages/metric-stack/src/runtime.mjs";
 import { measureEnergy } from "../../packages/energy-stack/src/index.mjs";
-import { maskIndexesFor } from "../../packages/mask-core/src/index.mjs";
+import { maskContainsPointFor, requiredGlassMaskIds } from "../../packages/mask-core/src/index.mjs";
 import { makeReviewPacketSeed } from "../../packages/review-stack/src/index.mjs";
 import { glassTrajectoryShaByScene } from "../../packages/material-glass/src/index.mjs";
 import { sha256TracePath } from "./lab-trace-hash.mjs";
@@ -111,6 +111,7 @@ export function renderInspectViewer(inputPath) {
         ${imageUri ? `<img class="frame" src="${imageUri}" alt="capture frame">` : `<div class="missing">no frame png</div>`}
       </div>
     `),
+    section("Mask Overlay", maskOverlay(record)),
     section("Identity", table(rows)),
     section("Color Pipeline", table(objectRows(artifact.color))),
     section("Device", table(objectRows(identity.device ?? {}))),
@@ -692,7 +693,7 @@ function maskOverlay(record) {
   const maskPack = record.mask_pack;
   const width = record.png?.width ?? artifact.environment?.viewport_px?.width ?? 0;
   const height = record.png?.height ?? artifact.environment?.viewport_px?.height ?? 0;
-  const maskIds = ["core", "edge_band", "text", "motion_path", "background_control"];
+  const maskIds = requiredGlassMaskIds;
   if (!maskPack || !width || !height) {
     return `<div id="mask-overlay" class="missing">mask overlay unavailable</div>`;
   }
@@ -702,25 +703,32 @@ function maskOverlay(record) {
   const colors = {
     core: "rgba(78, 220, 255, 0.36)",
     edge_band: "rgba(255, 228, 114, 0.42)",
+    highlight: "rgba(255, 255, 160, 0.48)",
     text: "rgba(255, 255, 255, 0.38)",
+    text_halo: "rgba(188, 148, 255, 0.34)",
+    background_control: "rgba(120, 255, 150, 0.16)",
     motion_path: "rgba(255, 96, 180, 0.22)",
-    background_control: "rgba(120, 255, 150, 0.16)"
+    compositor_region: "rgba(124, 184, 255, 0.13)",
+    product_focus: "rgba(255, 142, 96, 0.30)"
   };
   const panels = maskIds.map((maskId) => {
-    const indexes = new Set(maskIndexesFor(maskPack, {
-      sceneId: artifact.scene_id,
-      stateId: artifact.state_id,
-      maskId,
-      width,
-      height
-    }));
     const rects = [];
+    let sampleCount = 0;
     for (let y = 0; y < gridHeight; y += 1) {
       for (let x = 0; x < gridWidth; x += 1) {
         const px = Math.min(width - 1, Math.floor((x + 0.5) * width / gridWidth));
         const py = Math.min(height - 1, Math.floor((y + 0.5) * height / gridHeight));
-        if (indexes.has(py * width + px)) {
-          rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${colors[maskId]}"/>`);
+        if (maskContainsPointFor(maskPack, {
+          sceneId: artifact.scene_id,
+          stateId: artifact.state_id,
+          maskId,
+          x: px + 0.5,
+          y: py + 0.5,
+          width,
+          height
+        })) {
+          sampleCount += 1;
+          rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${colors[maskId] ?? "rgba(255,255,255,0.28)"}"/>`);
         }
       }
     }
@@ -729,7 +737,7 @@ function maskOverlay(record) {
         <rect x="0" y="0" width="${gridWidth}" height="${gridHeight}" fill="#050607"/>
         ${rects.join("")}
       </svg>
-      <figcaption>${escapeHtml(maskId)} samples=${indexes.size}</figcaption>
+      <figcaption>${escapeHtml(maskId)} grid_samples=${sampleCount}</figcaption>
     </figure>`;
   });
 

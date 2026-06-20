@@ -150,6 +150,23 @@ export function maskIndexesFor(maskPack, {
   return indexesForRegion(region, width, height);
 }
 
+export function maskContainsPointFor(maskPack, {
+  sceneId,
+  stateId,
+  maskId,
+  x,
+  y,
+  width,
+  height
+}) {
+  const entry = (maskPack.scene_masks ?? []).find((candidate) =>
+    candidate.scene_id === sceneId && candidate.state_id === stateId
+  );
+  const region = entry?.masks?.[maskId];
+  if (!region) return false;
+  return containsRegion(region, x, y, width, height);
+}
+
 export function maskScopeBlock(maskPack, {
   sceneId,
   stateId,

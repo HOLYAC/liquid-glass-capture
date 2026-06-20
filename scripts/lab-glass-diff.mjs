@@ -7,6 +7,7 @@ import {
   writeViewerHtml,
   writeViewerSelfTestArtifacts
 } from "./lib/lab-artifact-viewer.mjs";
+import { requiredGlassMaskIds } from "../packages/mask-core/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -58,6 +59,7 @@ function assertDiffViewerContract(path) {
   for (const required of [
     'id="heatmap"',
     'id="mask-overlay"',
+    ...requiredGlassMaskIds,
     'id="temporal-phase-plot"',
     'id="frame-budget-timeline"',
     'id="energy-trace-panel"',
