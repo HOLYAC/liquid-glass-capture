@@ -159,7 +159,7 @@ function runDoctor(request) {
 
   let verifyReportPath = null;
   let inspectCommand = null;
-  const shouldVerifyCapture = request.verifyCapture || copiedCaptureCheck.status === "pass";
+  const shouldVerifyCapture = request.verifyCapture;
   if (shouldVerifyCapture && copiedCaptureCheck.status !== "pass") {
     checks.push({
       name: "capture_root_ready_for_verify",
@@ -812,6 +812,42 @@ function runSelfTest() {
   const copied = inspectCopiedCaptureRoot(captureRoot);
   if (copied.status !== "pass") {
     throw new Error("proof-doctor self-test failed to recognize copied capture root");
+  }
+
+  const currentHeadSha = runGit(["rev-parse", "HEAD"]).trim();
+  const currentHeadIpaReport = join(dir, "current-head-ipa.report.json");
+  writeJson(currentHeadIpaReport, {
+    status: "pass",
+    workflow_run: {
+      conclusion: "success",
+      head_sha: currentHeadSha,
+      url: "https://example.test/current-run"
+    },
+    ipa_path: ipaPath,
+    ipa_size_bytes: statSync(ipaPath).size,
+    ipa_inspection: {
+      has_payload_app: true,
+      has_main_js_bundle: true,
+      standalone_js_bundle: true,
+      main_js_bundle_path: "Payload/LiquidGlassCapture.app/main.jsbundle"
+    }
+  });
+  const prepareWithExistingCapture = runDoctor({
+    out: join(dir, "prepare-existing-capture.report.json"),
+    ipaReport: currentHeadIpaReport,
+    planOut: join(dir, "prepare-existing-capture.plan.json"),
+    captureRootInput: captureRoot,
+    captureRootResolution: resolveCaptureRoot(captureRoot),
+    captureRoot,
+    verifyOut: join(dir, "prepare-existing-capture.verify.json"),
+    refreshIpa: false,
+    verifyCapture: false,
+    waitMs: 0,
+    pollMs: 1
+  });
+  if (prepareWithExistingCapture.checks.some((check) => check.name === "verify_copied_max_fidelity_capture") ||
+      prepareWithExistingCapture.checks.some((check) => check.name === "max_fidelity_capture_verification_report")) {
+    throw new Error("proof-doctor self-test failed to keep prepare mode from verifying existing captures");
   }
 
   const copiedParent = join(dir, "CopiedDocuments");
