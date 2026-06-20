@@ -311,6 +311,9 @@ function captureTimelineIdFor(scene: SceneSpec): string {
 
 function addSceneMetadata(metadata: Record<string, unknown>, scene: SceneSpec) {
   metadata["contentSeed"] = scene.contentSeed;
+  metadata["shape"] = scene.shape;
+  metadata["phase"] = scene.phase;
+  metadata["touchPhase"] = scene.touchPhase;
   metadata["backgroundPackId"] = backgroundPackId;
   metadata["backgroundId"] = backgroundIdFor(scene);
   metadata["backgroundPackSha256"] = backgroundPackSha256;
