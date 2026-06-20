@@ -4,12 +4,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateMaterialProbe } from "../packages/material-core/src/index.mjs";
 import {
-  glassMaskPack,
   glassMaterialProbe,
+  glassMaskPackSha256,
   glassNullLadderManifest,
+  glassSceneMaskPack,
   glassSceneStateMatrix,
   metadataForGlassSceneState
 } from "../packages/material-glass/src/index.mjs";
+import { validateMaskPack } from "../packages/mask-core/src/index.mjs";
+import { sha256File } from "./lib/lab-png.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -35,8 +38,13 @@ function runSelfTest() {
   failures.push(...validateMaterialProbe(glassMaterialProbe));
 
   const fixtureMaskPack = JSON.parse(readFileSync(join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json"), "utf8"));
+  const fixtureMaskPackSha256 = sha256File(join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json"));
   const fixtureNullLadder = JSON.parse(readFileSync(join(repoRoot, "fixtures", "backgrounds", "S00_NULL.manifest.json"), "utf8"));
-  failures.push(...compareMaskPack(fixtureMaskPack, glassMaskPack));
+  if (fixtureMaskPackSha256 !== glassMaskPackSha256) failures.push("MASK_FIXTURE_SHA_MISMATCH");
+  failures.push(...compareMaskPack(fixtureMaskPack, glassSceneMaskPack));
+  failures.push(...validateMaskPack(fixtureMaskPack, {
+    sceneStates: sceneStatesForProbe(glassMaterialProbe)
+  }));
   failures.push(...compareNullLadder(fixtureNullLadder, glassNullLadderManifest));
 
   for (const [sceneId, states] of Object.entries(glassSceneStateMatrix)) {
@@ -58,7 +66,8 @@ function runSelfTest() {
     status: failures.length === 0 ? "pass" : "fail",
     scene_count: glassMaterialProbe.scenes.length,
     scene_state_matrix: glassSceneStateMatrix,
-    mask_pack_id: glassMaskPack.mask_pack_id,
+    mask_pack_id: glassSceneMaskPack.mask_pack_id,
+    mask_pack_sha256: fixtureMaskPackSha256,
     null_ladder_rungs: glassNullLadderManifest.rungs.map((rung) => rung.id),
     failures: [...new Set(failures)]
   };
@@ -74,7 +83,20 @@ function compareMaskPack(fixture, expected) {
   const fixtureIds = (fixture.masks ?? []).map((mask) => mask.id).sort();
   const expectedIds = expected.masks.map((mask) => mask.id).sort();
   if (JSON.stringify(fixtureIds) !== JSON.stringify(expectedIds)) failures.push("MASK_FIXTURE_IDS_MISMATCH");
+  if (JSON.stringify(fixture.scene_masks ?? []) !== JSON.stringify(expected.scene_masks ?? [])) {
+    failures.push("MASK_FIXTURE_SCENE_MASKS_MISMATCH");
+  }
   return failures;
+}
+
+function sceneStatesForProbe(probe) {
+  return (probe.scenes ?? []).flatMap((scene) =>
+    (scene.states ?? []).map((state) => ({
+      scene_id: scene.scene_id,
+      state_id: state.state_id,
+      shape: state.shape
+    }))
+  );
 }
 
 function compareNullLadder(fixture, expected) {

@@ -125,7 +125,7 @@ function makeArtifact(pngPath, maskPath) {
     id: "self-test-color-normalize",
     rig_id: "R0",
     scene_id: "S00_NULL",
-    state_id: "flat_p3_grey",
+    state_id: "s00_flat_grey",
     git_commit: "self-test",
     capture_kind: "compositor",
     device_info: {

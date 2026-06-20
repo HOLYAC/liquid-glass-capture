@@ -177,12 +177,7 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
   const timeline = glassCaptureTimelineBySceneState[contractKey];
   const pngPath = join(dir, `frame-${index}.png`);
   writePng(pngPath, 6, 6, makePixels(6, 6, Number.isFinite(Number(index)) ? Number(index) : 0));
-  const maskPath = join(dir, "mask-pack.json");
-  writeJson(maskPath, {
-    schema_version: "1.2.0",
-    mask_pack_id: "device_lane_self_test_masks",
-    masks: [{ id: "core" }]
-  });
+  const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const artifactPath = join(dir, `r0-s01-rest-${index}.capture.json`);
   writeJson(artifactPath, {
     schema_version: "1.2.0",

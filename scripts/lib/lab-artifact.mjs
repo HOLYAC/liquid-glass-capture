@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import { readPng, sha256File } from "./lab-png.mjs";
 import { validateArtifactColorContract } from "../../packages/color-pipeline/src/index.mjs";
+import { validateMaskPack } from "../../packages/mask-core/src/index.mjs";
 
 export function readCaptureArtifact(path, options = {}) {
   const absolute = resolve(path);
@@ -42,10 +43,20 @@ export function readCaptureArtifact(path, options = {}) {
       ? framePack.mask_pack_path
       : resolve(dirname(absolute), framePack.mask_pack_path)
     : undefined;
+  let maskPack;
   if (!maskPath) {
     failures.push("MASK_PACK_PATH_MISSING");
   } else {
     verifyHash(failures, "MASK_PACK_SHA256_MISMATCH", maskPath, framePack.mask_pack_sha256);
+    try {
+      maskPack = JSON.parse(readFileSync(maskPath, "utf8"));
+      failures.push(...validateMaskPack(maskPack, {
+        sceneId: artifact.scene_id,
+        stateId: artifact.state_id
+      }));
+    } catch (error) {
+      failures.push(`MASK_PACK_JSON_INVALID:${error.message}`);
+    }
   }
 
   if (failures.length > 0 && !options.allowInvalid) {
@@ -56,6 +67,8 @@ export function readCaptureArtifact(path, options = {}) {
     artifact_path: absolute,
     artifact,
     png_path: pngPath,
+    mask_pack_path: maskPath,
+    mask_pack: maskPack,
     png: pngPath ? readPng(pngPath) : undefined,
     preflight_failures: failures
   };

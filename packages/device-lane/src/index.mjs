@@ -10,6 +10,7 @@ import {
   glassTrajectoryShaByScene
 } from "../../material-glass/src/index.mjs";
 import { sceneStateKey } from "../../scene-contract/src/index.mjs";
+import { validateMaskPack } from "../../mask-core/src/index.mjs";
 
 export const physicalDeviceLanePolicy = Object.freeze({
   schema_version: "1.2.0",
@@ -310,11 +311,29 @@ function verifyFrameHashes(artifact, artifactPath, index, taskId) {
   const artifactDir = dirname(artifactPath);
   verifyHash(failures, `${taskId}:ARTIFACT_${index}_BASE_PNG`, artifactDir, framePack.base_png_path, framePack.base_png_sha256);
   verifyHash(failures, `${taskId}:ARTIFACT_${index}_MASK_PACK`, artifactDir, framePack.mask_pack_path, framePack.mask_pack_sha256);
+  verifyMaskPackContract(failures, `${taskId}:ARTIFACT_${index}_MASK_PACK`, artifactDir, framePack.mask_pack_path, artifact);
   for (const [frameIndex, rawPath] of (framePack.sequence_paths ?? []).entries()) {
     const path = resolveMaybe(artifactDir, rawPath);
     if (!existsSync(path)) failures.push(`${taskId}:ARTIFACT_${index}_SEQUENCE_FRAME_${frameIndex}_MISSING`);
   }
   return failures;
+}
+
+function verifyMaskPackContract(failures, label, baseDir, rawPath, artifact) {
+  if (!rawPath) return;
+  const path = resolveMaybe(baseDir, rawPath);
+  if (!existsSync(path) || !statSync(path).isFile()) return;
+  try {
+    const maskPack = JSON.parse(readFileSync(path, "utf8"));
+    for (const failure of validateMaskPack(maskPack, {
+      sceneId: artifact.scene_id,
+      stateId: artifact.state_id
+    })) {
+      failures.push(`${label}_${failure}`);
+    }
+  } catch (error) {
+    failures.push(`${label}_JSON_INVALID:${error.message}`);
+  }
 }
 
 function verifyHash(failures, label, baseDir, rawPath, expected) {

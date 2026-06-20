@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
+import { validateMaskPack } from "../packages/mask-core/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const valid = {
@@ -90,7 +91,7 @@ function validateArtifact(artifact, artifactDir) {
   validateDevice(errors, artifact.device_info);
   validateEnvironment(errors, artifact.environment);
   validateColor(errors, artifact.color);
-  validateFramePack(errors, artifact.frame_pack, artifactDir);
+  validateFramePack(errors, artifact.frame_pack, artifactDir, artifact);
   validatePerf(errors, artifact.perf);
   validateEnergy(errors, artifact.energy);
   validateReview(errors, artifact.review);
@@ -157,7 +158,7 @@ function validateColor(errors, color) {
   requireValue(errors, color.white_point === "D65", "color.white_point must be D65");
 }
 
-function validateFramePack(errors, framePack, artifactDir) {
+function validateFramePack(errors, framePack, artifactDir, artifact) {
   if (!framePack || typeof framePack !== "object") {
     errors.push("frame_pack is required");
     return;
@@ -167,6 +168,7 @@ function validateFramePack(errors, framePack, artifactDir) {
   requireNumber(errors, "frame_pack.animation_t", framePack.animation_t);
   verifyPathHash(errors, artifactDir, "frame_pack.base_png", framePack.base_png_path, framePack.base_png_sha256);
   verifyPathHash(errors, artifactDir, "frame_pack.mask_pack", framePack.mask_pack_path, framePack.mask_pack_sha256);
+  validateFrameMaskPack(errors, artifactDir, framePack, artifact);
 
   if (framePack.sequence_timestamps_ms !== undefined) {
     if (!Array.isArray(framePack.sequence_timestamps_ms)) {
@@ -188,6 +190,24 @@ function validateFramePack(errors, framePack, artifactDir) {
   }
   if (framePack.capture_timeline_sha256 !== undefined) {
     requireSha256(errors, "frame_pack.capture_timeline_sha256", framePack.capture_timeline_sha256);
+  }
+}
+
+function validateFrameMaskPack(errors, artifactDir, framePack, artifact) {
+  if (!framePack?.mask_pack_path) return;
+  const maskPath = isAbsolute(framePack.mask_pack_path)
+    ? framePack.mask_pack_path
+    : resolve(artifactDir, framePack.mask_pack_path);
+  try {
+    const maskPack = JSON.parse(readFileSync(maskPath, "utf8"));
+    for (const failure of validateMaskPack(maskPack, {
+      sceneId: artifact.scene_id,
+      stateId: artifact.state_id
+    })) {
+      errors.push(`frame_pack.mask_pack.${failure}`);
+    }
+  } catch (error) {
+    errors.push(`frame_pack.mask_pack JSON invalid: ${error.message}`);
   }
 }
 
@@ -343,7 +363,7 @@ function makeSelfTestArtifact(pngPath, maskPath) {
     id: "self-test-native-s00",
     rig_id: "R0",
     scene_id: "S00_NULL",
-    state_id: "flat_p3_grey",
+    state_id: "s00_flat_grey",
     git_commit: "self-test",
     technical_class: "INVALID",
     verdict_class: "INVALID",

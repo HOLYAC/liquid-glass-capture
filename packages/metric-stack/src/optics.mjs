@@ -41,7 +41,9 @@ export function measureOptics(reference, candidate, options = {}) {
     candOklab[pixel] = linearDisplayP3ToOklab(candP3);
   }
 
-  const edgeBand = inferEdgeBand(refLuma, residual, width, height, options);
+  const edgeBand = Array.isArray(options.edgeBandIndexes) && options.edgeBandIndexes.length > 0
+    ? fixedEdgeBand(options.edgeBandIndexes, refLuma, residual, width, height)
+    : inferEdgeBand(refLuma, residual, width, height, options);
   const lensing = measureLensing(refLuma, candLuma, edgeBand, width, height, options);
   const blur = measureBlurFalloff(refLuma, candLuma, edgeBand, width, height);
   const fringe = measureChromaticFringe(reference.pixels, candidate.pixels, edgeBand, width, height);
@@ -73,9 +75,14 @@ export function measureOptics(reference, candidate, options = {}) {
       width,
       height
     },
-    mask_scope: options.maskScope ?? "edge_band_inferred_from_residual_v0",
+    mask_scope: options.maskScope ?? {
+      source: "edge_band_inferred_from_residual_v0",
+      sample_count: edgeBand.sample_count
+    },
     method_notes: [
-      "Edge band is inferred from reference gradient and residual energy until pixel masks are exported.",
+      edgeBand.method === "fixed_scene_mask_pack_v1"
+        ? "Edge band is read from the fixed scene mask pack."
+        : "Edge band is inferred from reference gradient and residual energy because no fixed mask was provided.",
       "Blur radius is a high-frequency falloff proxy, not an optical PSF fit.",
       "Highlight metrics use SDR PNG data and report clip fraction."
     ],
@@ -88,6 +95,35 @@ export function measureOptics(reference, candidate, options = {}) {
       inner_shadow: innerShadow,
       alpha_tint_separation: alphaTint
     }
+  };
+}
+
+function fixedEdgeBand(indexes, refLuma, residual, width, height) {
+  let residualAbsSum = 0;
+  let gradientSum = 0;
+  const active = [...new Set(indexes)]
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < width * height)
+    .sort((left, right) => left - right);
+  for (const index of active) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    let gradient = 0;
+    if (x > 0 && y > 0 && x < width - 1 && y < height - 1) {
+      const gx = refLuma[index + 1] - refLuma[index - 1];
+      const gy = refLuma[index + width] - refLuma[index - width];
+      gradient = Math.hypot(gx, gy);
+    }
+    residualAbsSum += Math.abs(residual[index]);
+    gradientSum += gradient;
+  }
+  return {
+    method: "fixed_scene_mask_pack_v1",
+    sample_count: active.length,
+    coverage_ratio: active.length / (width * height),
+    threshold: null,
+    mean_reference_gradient: active.length === 0 ? 0 : gradientSum / active.length,
+    mean_abs_residual: active.length === 0 ? 0 : residualAbsSum / active.length,
+    indexes: active
   };
 }
 

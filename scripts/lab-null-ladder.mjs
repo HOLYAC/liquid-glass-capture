@@ -138,7 +138,7 @@ function makeArtifact(rigId, pngPath, maskPath) {
     id: `self-test-${rigId}-s00-flat`,
     rig_id: rigId,
     scene_id: "S00_NULL",
-    state_id: "flat_p3_grey",
+    state_id: "s00_flat_grey",
     git_commit: "self-test",
     technical_class: "INVALID",
     verdict_class: "INVALID",
@@ -201,4 +201,3 @@ function parseArgs(args) {
   }
   return parsed;
 }
-

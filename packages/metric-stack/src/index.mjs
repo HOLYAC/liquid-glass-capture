@@ -34,23 +34,26 @@ export function compareMetricImages(reference, candidate, options = {}) {
   const width = reference.width;
   const height = reference.height;
   const pixelCount = width * height;
+  const activeIndexes = normalizeMaskIndexes(options.maskIndexes, pixelCount);
+  const activeCount = activeIndexes.length;
   const refLuma = new Float64Array(pixelCount);
   const candLuma = new Float64Array(pixelCount);
   const oklabDeltas = new Float64Array(pixelCount);
-  const flipErrors = new Float64Array(pixelCount);
+  const activeOklabDeltas = new Float64Array(activeCount);
+  const activeFlipErrors = new Float64Array(activeCount);
 
   let maxAbsChannelDelta = 0;
   let sumAbsChannelDelta = 0;
   let sumOklabDelta = 0;
   let maxOklabDelta = 0;
 
+  const activeSet = new Set(activeIndexes);
+  let activeCursor = 0;
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
     const offset = pixel * 4;
     const dr = Math.abs(reference.pixels[offset] - candidate.pixels[offset]);
     const dg = Math.abs(reference.pixels[offset + 1] - candidate.pixels[offset + 1]);
     const db = Math.abs(reference.pixels[offset + 2] - candidate.pixels[offset + 2]);
-    maxAbsChannelDelta = Math.max(maxAbsChannelDelta, dr, dg, db);
-    sumAbsChannelDelta += dr + dg + db;
 
     const refP3 = rgbaByteToLinearDisplayP3(reference.pixels, offset);
     const candP3 = rgbaByteToLinearDisplayP3(candidate.pixels, offset);
@@ -59,8 +62,13 @@ export function compareMetricImages(reference, candidate, options = {}) {
 
     const delta = oklabDelta(linearDisplayP3ToOklab(refP3), linearDisplayP3ToOklab(candP3));
     oklabDeltas[pixel] = delta;
+    if (!activeSet.has(pixel)) continue;
+    maxAbsChannelDelta = Math.max(maxAbsChannelDelta, dr, dg, db);
+    sumAbsChannelDelta += dr + dg + db;
     sumOklabDelta += delta;
     maxOklabDelta = Math.max(maxOklabDelta, delta);
+    activeOklabDeltas[activeCursor] = delta;
+    activeCursor += 1;
   }
 
   let gradientResidualSum = 0;
@@ -68,41 +76,41 @@ export function compareMetricImages(reference, candidate, options = {}) {
   let flipSum = 0;
   let flipMax = 0;
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const pixel = y * width + x;
-      const gradientResidual = localGradientResidual(refLuma, candLuma, width, height, x, y);
-      const flipError = oklabDeltas[pixel] + 0.25 * gradientResidual;
-      flipErrors[pixel] = flipError;
-      flipSum += flipError;
-      flipMax = Math.max(flipMax, flipError);
+  for (let index = 0; index < activeIndexes.length; index += 1) {
+    const pixel = activeIndexes[index];
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    const gradientResidual = localGradientResidual(refLuma, candLuma, width, height, x, y);
+    const flipError = oklabDeltas[pixel] + 0.25 * gradientResidual;
+    activeFlipErrors[index] = flipError;
+    flipSum += flipError;
+    flipMax = Math.max(flipMax, flipError);
 
-      if (x + 1 < width) {
-        gradientResidualSum += Math.abs(
-          Math.abs(refLuma[pixel] - refLuma[pixel + 1]) -
-            Math.abs(candLuma[pixel] - candLuma[pixel + 1])
-        );
-        gradientResidualCount += 1;
-      }
-      if (y + 1 < height) {
-        gradientResidualSum += Math.abs(
-          Math.abs(refLuma[pixel] - refLuma[pixel + width]) -
-            Math.abs(candLuma[pixel] - candLuma[pixel + width])
-        );
-        gradientResidualCount += 1;
-      }
+    if (x + 1 < width && activeSet.has(pixel + 1)) {
+      gradientResidualSum += Math.abs(
+        Math.abs(refLuma[pixel] - refLuma[pixel + 1]) -
+          Math.abs(candLuma[pixel] - candLuma[pixel + 1])
+      );
+      gradientResidualCount += 1;
+    }
+    if (y + 1 < height && activeSet.has(pixel + width)) {
+      gradientResidualSum += Math.abs(
+        Math.abs(refLuma[pixel] - refLuma[pixel + width]) -
+          Math.abs(candLuma[pixel] - candLuma[pixel + width])
+      );
+      gradientResidualCount += 1;
     }
   }
 
-  const ssim = computeSsim(refLuma, candLuma);
-  const msSsim = computeMsSsim(refLuma, candLuma, width, height);
+  const ssim = computeSsim(refLuma, candLuma, activeIndexes);
+  const msSsim = options.maskIndexes ? ssim : computeMsSsim(refLuma, candLuma, width, height);
   const failures = [];
   if (ssim < (options.ssimFloor ?? 0.995)) failures.push("G2_SSIM_BELOW_FLOOR");
   if (msSsim < (options.msSsimFloor ?? 0.995)) failures.push("G2_MS_SSIM_BELOW_FLOOR");
-  if (sumOklabDelta / pixelCount > (options.oklabMeanCeiling ?? 0.003)) {
+  if (sumOklabDelta / activeCount > (options.oklabMeanCeiling ?? 0.003)) {
     failures.push("G2_OKLAB_MEAN_ABOVE_CEILING");
   }
-  if (flipSum / pixelCount > (options.flipMeanCeiling ?? 0.004)) {
+  if (flipSum / activeCount > (options.flipMeanCeiling ?? 0.004)) {
     failures.push("G2_FLIP_STYLE_MEAN_ABOVE_CEILING");
   }
 
@@ -117,16 +125,19 @@ export function compareMetricImages(reference, candidate, options = {}) {
       height
     },
     color_pipeline: makeColorPipelineBlock(options),
-    mask_scope: options.maskScope ?? "whole_frame_pending_pixel_masks",
+    mask_scope: options.maskScope ?? {
+      source: "whole_frame_fallback",
+      sample_count: activeCount
+    },
     metrics: {
       pixel_debug: {
         max_abs_channel_delta: maxAbsChannelDelta,
-        mean_abs_channel_delta: sumAbsChannelDelta / (pixelCount * 3)
+        mean_abs_channel_delta: sumAbsChannelDelta / (activeCount * 3)
       },
       color: {
-        oklab_delta_e_mean: sumOklabDelta / pixelCount,
-        oklab_delta_e_p95: percentile(oklabDeltas, 0.95),
-        oklab_delta_e_p99: percentile(oklabDeltas, 0.99),
+        oklab_delta_e_mean: sumOklabDelta / activeCount,
+        oklab_delta_e_p95: percentile(activeOklabDeltas, 0.95),
+        oklab_delta_e_p99: percentile(activeOklabDeltas, 0.99),
         oklab_delta_e_max: maxOklabDelta
       },
       structure: {
@@ -135,9 +146,9 @@ export function compareMetricImages(reference, candidate, options = {}) {
       },
       perception: {
         metric_id: "flip_style_linear_p3_v0",
-        flip_style_error_mean: flipSum / pixelCount,
-        flip_style_error_p95: percentile(flipErrors, 0.95),
-        flip_style_error_p99: percentile(flipErrors, 0.99),
+        flip_style_error_mean: flipSum / activeCount,
+        flip_style_error_p95: percentile(activeFlipErrors, 0.95),
+        flip_style_error_p99: percentile(activeFlipErrors, 0.99),
         flip_style_error_max: flipMax
       },
       gradient: {
@@ -210,21 +221,22 @@ function localGradientResidual(refLuma, candLuma, width, height, x, y) {
   return Math.abs(refMagnitude - candMagnitude);
 }
 
-function computeSsim(left, right) {
+function computeSsim(left, right, indexes = undefined) {
+  const active = indexes ?? [...left.keys()];
   let meanLeft = 0;
   let meanRight = 0;
-  for (let index = 0; index < left.length; index += 1) {
+  for (const index of active) {
     meanLeft += left[index];
     meanRight += right[index];
   }
-  meanLeft /= left.length;
-  meanRight /= right.length;
+  meanLeft /= active.length;
+  meanRight /= active.length;
 
   let varianceLeft = 0;
   let varianceRight = 0;
   let covariance = 0;
-  const denominator = Math.max(left.length - 1, 1);
-  for (let index = 0; index < left.length; index += 1) {
+  const denominator = Math.max(active.length - 1, 1);
+  for (const index of active) {
     const dl = left[index] - meanLeft;
     const dr = right[index] - meanRight;
     varianceLeft += dl * dl;
@@ -241,6 +253,18 @@ function computeSsim(left, right) {
   const contrastStructure = (2 * covariance + ssimConstants.c2) /
     (varianceLeft + varianceRight + ssimConstants.c2);
   return clamp01(luminance * contrastStructure);
+}
+
+function normalizeMaskIndexes(maskIndexes, pixelCount) {
+  if (!Array.isArray(maskIndexes) || maskIndexes.length === 0) {
+    return Array.from({ length: pixelCount }, (_, index) => index);
+  }
+  const normalized = [...new Set(maskIndexes)]
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < pixelCount)
+    .sort((left, right) => left - right);
+  return normalized.length > 0
+    ? normalized
+    : Array.from({ length: pixelCount }, (_, index) => index);
 }
 
 function computeMsSsim(left, right, width, height) {

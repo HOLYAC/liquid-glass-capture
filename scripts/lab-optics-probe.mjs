@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { measureOptics } from "../packages/metric-stack/src/optics.mjs";
+import { maskIndexesFor, maskScopeBlock } from "../packages/mask-core/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -38,7 +39,23 @@ function main() {
 export function probeOptics(referencePath, candidatePath, options = {}) {
   const reference = readCaptureArtifact(referencePath, options);
   const candidate = readCaptureArtifact(candidatePath, options);
-  const opticsReport = measureOptics(reference.png, candidate.png, options);
+  const edgeBandIndexes = maskIndexesFor(reference.mask_pack, {
+    sceneId: reference.artifact.scene_id,
+    stateId: reference.artifact.state_id,
+    maskId: "edge_band",
+    width: reference.png.width,
+    height: reference.png.height
+  });
+  const opticsReport = measureOptics(reference.png, candidate.png, {
+    ...options,
+    edgeBandIndexes,
+    maskScope: maskScopeBlock(reference.mask_pack, {
+      sceneId: reference.artifact.scene_id,
+      stateId: reference.artifact.state_id,
+      maskId: "edge_band",
+      sampleCount: edgeBandIndexes.length
+    })
+  });
   const report = {
     ...opticsReport,
     reference: artifactIdentity(reference),

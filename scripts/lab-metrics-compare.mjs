@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { compareMetricImages } from "../packages/metric-stack/src/index.mjs";
+import { maskIndexesFor, maskScopeBlock } from "../packages/mask-core/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -43,7 +44,23 @@ function main() {
 export function compareArtifacts(referencePath, candidatePath, options = {}) {
   const reference = readCaptureArtifact(referencePath, options);
   const candidate = readCaptureArtifact(candidatePath, options);
-  const metricReport = compareMetricImages(reference.png, candidate.png, options);
+  const maskIndexes = maskIndexesFor(reference.mask_pack, {
+    sceneId: reference.artifact.scene_id,
+    stateId: reference.artifact.state_id,
+    maskId: "core",
+    width: reference.png.width,
+    height: reference.png.height
+  });
+  const metricReport = compareMetricImages(reference.png, candidate.png, {
+    ...options,
+    maskIndexes,
+    maskScope: maskScopeBlock(reference.mask_pack, {
+      sceneId: reference.artifact.scene_id,
+      stateId: reference.artifact.state_id,
+      maskId: "core",
+      sampleCount: maskIndexes.length
+    })
+  });
   const report = {
     ...metricReport,
     reference: artifactIdentity(reference),
