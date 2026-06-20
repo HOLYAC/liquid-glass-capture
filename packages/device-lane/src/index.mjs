@@ -1,6 +1,11 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { createHash } from "node:crypto";
+import {
+  glassDefaultDeviceLaneTasks,
+  glassSceneStateMatrix,
+  glassTrajectoryShaByScene
+} from "../../material-glass/src/index.mjs";
 
 export const physicalDeviceLanePolicy = Object.freeze({
   schema_version: "1.2.0",
@@ -13,40 +18,9 @@ export const physicalDeviceLanePolicy = Object.freeze({
   required_gate_ids: Object.freeze(["G2", "G3", "G4", "G5", "G6"]),
   required_capture_kinds: Object.freeze(["compositor", "framebuffer"]),
   physical_rigs: Object.freeze(["R0", "R1", "C1", "DOM_C"]),
-  scene_state_matrix: Object.freeze({
-    S00_NULL: Object.freeze(["s00_flat_grey", "s00_hard_edge", "s00_p3_ramp", "s00_smooth_gradient"]),
-    S01_SEARCH: Object.freeze(["rest"]),
-    S02_LOUPE: Object.freeze(["drag"]),
-    S03_PRESS: Object.freeze(["press"]),
-    S04_MORPH: Object.freeze(["morph"]),
-    S05_FLOATING_BAR: Object.freeze(["floating_rest"]),
-    S06_TINY_GLASS: Object.freeze(["tiny_rest"]),
-    S07_BUSY_PHOTO: Object.freeze(["busy_photo_rest"]),
-    S08_P3_GRADIENT: Object.freeze(["p3_gradient_rest"]),
-    S09_NEAR_WHITE: Object.freeze(["near_white_rest"]),
-    S10_NEAR_BLACK: Object.freeze(["near_black_rest"]),
-    S11_VIDEO_FRAME: Object.freeze(["video_frame_rest"]),
-    S12_SYSTEM_MATERIAL_ADJACENCY: Object.freeze(["system_material_rest"])
-  }),
-  default_tasks: Object.freeze([
-    { rig_id: "R0", scene_id: "S01_SEARCH", state_id: "rest" },
-    { rig_id: "R1", scene_id: "S01_SEARCH", state_id: "rest" },
-    { rig_id: "C1", scene_id: "S03_PRESS", state_id: "press" },
-    { rig_id: "DOM_C", scene_id: "S01_SEARCH", state_id: "rest" },
-    { rig_id: "C1", scene_id: "S02_LOUPE", state_id: "drag" },
-    { rig_id: "C1", scene_id: "S04_MORPH", state_id: "morph" },
-    { rig_id: "C1", scene_id: "S05_FLOATING_BAR", state_id: "floating_rest" },
-    { rig_id: "C1", scene_id: "S06_TINY_GLASS", state_id: "tiny_rest" },
-    { rig_id: "C1", scene_id: "S07_BUSY_PHOTO", state_id: "busy_photo_rest" },
-    { rig_id: "C1", scene_id: "S08_P3_GRADIENT", state_id: "p3_gradient_rest" },
-    { rig_id: "C1", scene_id: "S09_NEAR_WHITE", state_id: "near_white_rest" },
-    { rig_id: "C1", scene_id: "S10_NEAR_BLACK", state_id: "near_black_rest" },
-    { rig_id: "C1", scene_id: "S11_VIDEO_FRAME", state_id: "video_frame_rest" },
-    { rig_id: "C1", scene_id: "S12_SYSTEM_MATERIAL_ADJACENCY", state_id: "system_material_rest" }
-  ]),
-  trajectory_sha_by_scene: Object.freeze({
-    S03_PRESS: "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd"
-  }),
+  scene_state_matrix: glassSceneStateMatrix,
+  default_tasks: glassDefaultDeviceLaneTasks,
+  trajectory_sha_by_scene: glassTrajectoryShaByScene,
   derivation: "v1.2 physical truth: collected artifacts must be physical, compositor/framebuffer, hash-checked, nominal-thermal, and gate-backed"
 });
 

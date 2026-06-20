@@ -6,6 +6,7 @@ import { readCaptureArtifact } from "./lib/lab-artifact.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
+import { glassDegeneracySceneIds } from "../packages/material-glass/src/index.mjs";
 import { readArtifactStoreIndex, writeArtifactStore } from "../packages/artifact-store/src/index.mjs";
 import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
@@ -257,7 +258,7 @@ function makeSolverReport() {
           runtime_cost_ms: 12.1,
           energy_cost: 1.9
         },
-        background_sweep: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_FRAME"].map((sceneId, index) => ({
+        background_sweep: glassDegeneracySceneIds.map((sceneId, index) => ({
           scene_id: sceneId,
           background_id: `${sceneId.toLowerCase()}_g8_self_test`,
           metrics: {

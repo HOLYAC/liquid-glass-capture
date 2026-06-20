@@ -1,6 +1,8 @@
+import { glassDegeneracyScenePrefixes } from "../../material-glass/src/index.mjs";
+
 export const solverPolicy = Object.freeze({
   schema_version: "1.2.0",
-  required_degeneracy_scene_ids: Object.freeze(["S07", "S08", "S09", "S10", "S11"]),
+  required_degeneracy_scene_ids: glassDegeneracyScenePrefixes,
   objective_weights: Object.freeze({
     loss_total: 0.45,
     runtime_cost_ms: 0.35,

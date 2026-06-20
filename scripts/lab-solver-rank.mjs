@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { glassDegeneracySceneIds } from "../packages/material-glass/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -145,7 +146,7 @@ function makeCandidate(id, { lossBias, runtime, energy, blurSensitivity }) {
       runtime_cost_ms: runtime,
       energy_cost: energy
     },
-    background_sweep: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_FRAME"].map((sceneId, index) => ({
+    background_sweep: glassDegeneracySceneIds.map((sceneId, index) => ({
       scene_id: sceneId,
       background_id: `${sceneId.toLowerCase()}_self_test`,
       metrics: {

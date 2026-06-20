@@ -2,25 +2,15 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  glassSceneDefaults,
+  metadataForGlassSceneState,
+  validateGlassSceneState
+} from "../packages/material-glass/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const validRigs = new Set(["R0", "R1", "C0", "C1", "DOM_C"]);
-const sceneDefaults = Object.freeze({
-  S00_NULL: Object.freeze({ states: ["s00_flat_grey", "s00_hard_edge", "s00_p3_ramp", "s00_smooth_gradient"], touchPhase: "rest", contentSeed: "s00-flat-p3-grey-v1" }),
-  S01_SEARCH: Object.freeze({ states: ["rest"], touchPhase: "rest", contentSeed: "s01-search-selection-v1" }),
-  S02_LOUPE: Object.freeze({ states: ["drag"], touchPhase: "drag", contentSeed: "s02-loupe-text-drag-v1" }),
-  S03_PRESS: Object.freeze({ states: ["press"], touchPhase: "press", contentSeed: "s03-press-control-v1", trajectorySourceSha256: "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd" }),
-  S04_MORPH: Object.freeze({ states: ["morph"], touchPhase: "morph", contentSeed: "s04-twin-capsule-morph-v1" }),
-  S05_FLOATING_BAR: Object.freeze({ states: ["floating_rest"], touchPhase: "rest", contentSeed: "s05-floating-bar-v1" }),
-  S06_TINY_GLASS: Object.freeze({ states: ["tiny_rest"], touchPhase: "rest", contentSeed: "s06-tiny-control-v1" }),
-  S07_BUSY_PHOTO: Object.freeze({ states: ["busy_photo_rest"], touchPhase: "rest", contentSeed: "s07-busy-photo-procedural-v1", backgroundAssetHash: "77238364440e942b31adefec365389a6f2c25a9b0a5561945db9468f8337f148" }),
-  S08_P3_GRADIENT: Object.freeze({ states: ["p3_gradient_rest"], touchPhase: "rest", contentSeed: "s08-p3-saturated-gradient-v1" }),
-  S09_NEAR_WHITE: Object.freeze({ states: ["near_white_rest"], touchPhase: "rest", contentSeed: "s09-near-white-v1" }),
-  S10_NEAR_BLACK: Object.freeze({ states: ["near_black_rest"], touchPhase: "rest", contentSeed: "s10-near-black-v1" }),
-  S11_VIDEO_FRAME: Object.freeze({ states: ["video_frame_rest"], touchPhase: "rest", contentSeed: "s11-video-high-frequency-procedural-v1", backgroundAssetHash: "e976e690f06f8b955a86ab8e49d2fcef51f942c220e975a03c30d414702998a5" }),
-  S12_SYSTEM_MATERIAL_ADJACENCY: Object.freeze({ states: ["system_material_rest"], touchPhase: "morph", contentSeed: "s12-system-material-adjacency-procedural-v1", backgroundAssetHash: "15cc42e8ad24fd0179d917962281292ea97ea735ceb12796f8eb681e92049fe6" })
-});
-const validScenes = new Set(Object.keys(sceneDefaults));
+const validScenes = new Set(Object.keys(glassSceneDefaults));
 const validCaptureKinds = new Set(["compositor"]);
 
 main();
@@ -53,23 +43,18 @@ function writeCapturePlan(request) {
   const baselineClass = request.repeat >= 300 ? "prod_p99" : request.repeat === 24 ? "sustained" : "mvl";
   const captureDurationMs = baselineClass === "sustained" ? 60_000 : 900;
   const cooldownMs = baselineClass === "sustained" ? 60_000 : 750;
-  const sceneDefault = sceneDefaults[request.scene];
+  const sceneMetadata = metadataForGlassSceneState(request.scene, request.state);
   const metadata = {
     schemaVersion: "1.2.0",
     labPlan: "apple_glass_parity_execution_plan_v1_2",
-    sceneId: request.scene,
-    stateId: request.state,
+    ...sceneMetadata,
     rigId: request.rig,
     captureKind: request.capture,
     baselineClass,
-    touchPhase: sceneDefault.touchPhase,
-    contentSeed: contentSeedFor(request, sceneDefault),
     requiresNominalThermal: true,
     captureDurationMs,
     cooldownMs
   };
-  if (sceneDefault.backgroundAssetHash) metadata.backgroundAssetHash = sceneDefault.backgroundAssetHash;
-  if (sceneDefault.trajectorySourceSha256) metadata.trajectorySourceSha256 = sceneDefault.trajectorySourceSha256;
 
   const plan = {
     schema_version: "1.2.0",
@@ -106,16 +91,6 @@ function writeCapturePlan(request) {
     ...plan,
     jsonPath: resolve(destination)
   };
-}
-
-function contentSeedFor(request, sceneDefault) {
-  if (request.scene !== "S00_NULL") return sceneDefault.contentSeed;
-  return ({
-    s00_flat_grey: "s00-flat-p3-grey-v1",
-    s00_hard_edge: "s00-hard-edge-v1",
-    s00_p3_ramp: "s00-p3-ramp-v1",
-    s00_smooth_gradient: "s00-smooth-gradient-v1"
-  })[request.state] ?? sceneDefault.contentSeed;
 }
 
 function verifyManifest(request) {
@@ -173,9 +148,8 @@ function normalizeRequest(args) {
 
   if (!validRigs.has(request.rig)) throw new Error(`Unsupported rig: ${request.rig}`);
   if (!validScenes.has(request.scene)) throw new Error(`Unsupported scene: ${request.scene}`);
-  if (!sceneDefaults[request.scene].states.includes(request.state)) {
-    throw new Error(`State ${request.state} is not valid for ${request.scene}`);
-  }
+  const sceneFailures = validateGlassSceneState(request.scene, request.state);
+  if (sceneFailures.length > 0) throw new Error(sceneFailures.join(", "));
   if (request.device !== "physical") throw new Error("Only --device physical is valid for parity capture");
   if (!validCaptureKinds.has(request.capture)) throw new Error("Only --capture compositor is implemented");
   if (!Number.isFinite(request.repeat) || request.repeat < 1) throw new Error("--repeat must be a positive number");

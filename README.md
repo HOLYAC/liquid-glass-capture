@@ -113,6 +113,7 @@ The on-device scene surface now exposes the full v1.2 matrix: `S00_NULL`,
 matching fixed `scene/state/substrate/gesture` bundle before pressing `B`.
 
 ```bash
+npm run material:probe -- --self-test
 npm run artifact:validate -- ./artifacts/sample.capture.json
 npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --out ./artifacts/ios-capture-plan.json
