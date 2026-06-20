@@ -12,12 +12,14 @@ import {
 import { sceneStateKey } from "../../scene-contract/src/index.mjs";
 import { validateMaskPack } from "../../mask-core/src/index.mjs";
 
+const productionDeviceMatrixRoles = Object.freeze(["weakest_supported", "target", "latest_pro"]);
+
 export const physicalDeviceLanePolicy = Object.freeze({
   schema_version: "1.2.0",
   lane_classes: Object.freeze({
     smoke: { repeat: 3, requires_gates: false },
     mvl: { repeat: 50, requires_gates: true },
-    prod_p99: { repeat: 300, requires_gates: true },
+    prod_p99: { repeat: 300, requires_gates: true, device_matrix_roles: productionDeviceMatrixRoles },
     sustained: { repeat: 24, requires_gates: true, sustained: true, capture_duration_ms: 60_000, cooldown_ms: 60_000 }
   }),
   required_gate_ids: Object.freeze(["G2", "G3", "G4", "G5", "G6"]),
@@ -55,15 +57,24 @@ export function buildPhysicalDeviceLanePlan({
     policy: {
       required_gate_ids: policy.required_gate_ids,
       required_capture_kinds: policy.required_capture_kinds,
+      production_device_matrix_roles: productionDeviceMatrixRoles,
       scene_state_matrix: policy.scene_state_matrix,
       derivation: policy.derivation
     },
     task_count: normalizedTasks.length,
     tasks: normalizedTasks,
-    operator_commands: normalizedTasks.map((task) =>
-      `npm run ios:capture -- --rig ${task.rig_id} --scene ${task.scene_id} --state ${task.state_id} --device physical --capture compositor --repeat ${task.repeat_count_requested} --out ./artifacts/device-lane/${task.lane_task_id}.plan.json`
+    operator_commands: normalizedTasks.flatMap((task) =>
+      commandMatrixForTask(task).map(({ role, suffix }) =>
+        `npm run ios:capture -- --rig ${task.rig_id} --scene ${task.scene_id} --state ${task.state_id} --device physical --capture compositor --repeat ${task.repeat_count_requested}${role ? ` --device-role ${role}` : ""} --out ./artifacts/device-lane/${task.lane_task_id}${suffix}.plan.json`
+      )
     )
   };
+}
+
+function commandMatrixForTask(task) {
+  const roles = task.required_device_matrix_roles ?? [];
+  if (roles.length === 0) return [{ role: null, suffix: "" }];
+  return roles.map((role) => ({ role, suffix: `__${role}` }));
 }
 
 export function verifyPhysicalDeviceLane({
@@ -80,8 +91,8 @@ export function verifyPhysicalDeviceLane({
   const failures = [];
   const taskReports = [];
   for (const task of plan.tasks ?? []) {
-    const manifestRecord = findManifestForTask(task, manifests);
-    if (!manifestRecord) {
+    const manifestRecords = findManifestsForTask(task, manifests);
+    if (manifestRecords.length === 0) {
       failures.push(`${task.lane_task_id}:PHYSICAL_LANE_MANIFEST_MISSING`);
       taskReports.push({
         lane_task_id: task.lane_task_id,
@@ -92,7 +103,7 @@ export function verifyPhysicalDeviceLane({
       continue;
     }
 
-    const taskReport = verifyTaskManifest(task, manifestRecord, policy);
+    const taskReport = verifyTaskManifests(task, manifestRecords, policy);
     failures.push(...taskReport.failures);
     taskReports.push(taskReport);
   }
@@ -126,7 +137,9 @@ export function verifyPhysicalDeviceLane({
       low_power_mode_forbidden: true,
       scene_contract_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.scene_contract_verified)),
       hashes_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.hashes_verified)),
-      sustained_contract_verified: plan.lane_class !== "sustained" || failures.length === 0
+      sustained_contract_verified: plan.lane_class !== "sustained" || failures.length === 0,
+      production_device_matrix_verified: plan.lane_class !== "prod_p99" ||
+        taskReports.every((task) => task.device_matrix?.verified === true)
     }
   };
 }
@@ -156,6 +169,7 @@ function normalizeTask(task, index, lanePolicy, policy) {
     device: "physical",
     repeat_count_requested: repeat,
     baseline_class: lanePolicy.sustained ? "sustained" : lanePolicy.repeat >= 300 ? "prod_p99" : lanePolicy.repeat === 50 ? "mvl" : "smoke",
+    required_device_matrix_roles: lanePolicy.device_matrix_roles ?? [],
     requires_sustained_capture: Boolean(lanePolicy.sustained),
     required_sustained_duration_ms: lanePolicy.sustained ? lanePolicy.capture_duration_ms : null,
     required_cooldown_ms: lanePolicy.sustained ? lanePolicy.cooldown_ms : null,
@@ -175,14 +189,36 @@ function normalizeTask(task, index, lanePolicy, policy) {
   };
 }
 
-function findManifestForTask(task, manifestRecords) {
-  return manifestRecords.find((record) => {
+function findManifestsForTask(task, manifestRecords) {
+  return manifestRecords.filter((record) => {
     const manifest = record.manifest ?? record;
     return manifest.rig_id === task.rig_id &&
       manifest.scene_id === task.scene_id &&
       manifest.state_id === task.state_id &&
       manifest.capture_kind === task.capture_kind;
   });
+}
+
+function verifyTaskManifests(task, manifestRecords, policy) {
+  const manifestReports = manifestRecords.map((manifestRecord) =>
+    verifyTaskManifest(task, manifestRecord, policy)
+  );
+  const matrix = verifyDeviceMatrix(task, manifestReports);
+  const failures = [
+    ...manifestReports.flatMap((report) => report.failures),
+    ...matrix.failures
+  ];
+  return {
+    lane_task_id: task.lane_task_id,
+    status: failures.length === 0 ? "pass" : "fail",
+    manifest_path: manifestReports.length === 1 ? manifestReports[0].manifest_path : null,
+    manifest_reports: manifestReports,
+    repeat_count_requested: task.repeat_count_requested,
+    repeat_count_observed: manifestReports.reduce((sum, report) => sum + report.repeat_count_observed, 0),
+    artifacts: manifestReports.flatMap((report) => report.artifacts),
+    device_matrix: matrix.summary,
+    failures
+  };
 }
 
 function verifyTaskManifest(task, manifestRecord, policy) {
@@ -211,6 +247,7 @@ function verifyTaskManifest(task, manifestRecord, policy) {
     lane_task_id: task.lane_task_id,
     status: failures.length === 0 ? "pass" : "fail",
     manifest_path: manifestRecord.path ?? null,
+    device_matrix_role: manifest.device_matrix_role ?? null,
     repeat_count_requested: task.repeat_count_requested,
     repeat_count_observed: manifest.repeat_count_observed ?? 0,
     artifacts: artifactReports,
@@ -279,6 +316,7 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
     state_id: artifact.state_id,
     capture_kind: artifact.capture_kind,
     null_qualification: artifact.null_qualification ?? "not_recorded",
+    device_matrix_role: artifact.device_info?.device_matrix_role ?? null,
     device_key: deviceKey(artifact.device_info),
     scene_contract_verified: !failures.some((failure) =>
       failure.includes("_BACKGROUND_") ||
@@ -287,6 +325,75 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
     ),
     hashes_verified: hashFailures.length === 0,
     failures
+  };
+}
+
+function verifyDeviceMatrix(task, manifestReports) {
+  const requiredRoles = task.required_device_matrix_roles ?? [];
+  if (requiredRoles.length === 0) {
+    return {
+      failures: [],
+      summary: {
+        required_roles: [],
+        observed_roles: [],
+        verified: true
+      }
+    };
+  }
+
+  const failures = [];
+  const observedRoles = unique(manifestReports.map((report) => report.device_matrix_role).filter(Boolean));
+  const reportsByRole = new Map();
+  for (const report of manifestReports) {
+    const role = report.device_matrix_role;
+    if (!role) {
+      failures.push(`${task.lane_task_id}:DEVICE_MATRIX_ROLE_MISSING`);
+      continue;
+    }
+    if (!requiredRoles.includes(role)) {
+      failures.push(`${task.lane_task_id}:DEVICE_MATRIX_ROLE_UNEXPECTED:${role}`);
+      continue;
+    }
+    if (!reportsByRole.has(role)) reportsByRole.set(role, []);
+    reportsByRole.get(role).push(report);
+  }
+
+  for (const role of requiredRoles) {
+    const roleReports = reportsByRole.get(role) ?? [];
+    if (roleReports.length === 0) {
+      failures.push(`${task.lane_task_id}:DEVICE_MATRIX_ROLE_${role.toUpperCase()}_MISSING`);
+      continue;
+    }
+    for (const report of roleReports) {
+      for (const artifact of report.artifacts) {
+        if (artifact.device_matrix_role !== role) {
+          failures.push(`${task.lane_task_id}:DEVICE_MATRIX_ARTIFACT_ROLE_MISMATCH:${role}`);
+        }
+      }
+    }
+  }
+
+  const roleDeviceKeys = Object.fromEntries(requiredRoles.map((role) => {
+    const keys = unique((reportsByRole.get(role) ?? [])
+      .flatMap((report) => report.artifacts.map((artifact) => artifact.device_key))
+      .filter(Boolean));
+    if (keys.length === 0) failures.push(`${task.lane_task_id}:DEVICE_MATRIX_ROLE_${role.toUpperCase()}_DEVICE_MISSING`);
+    if (keys.length > 1) failures.push(`${task.lane_task_id}:DEVICE_MATRIX_ROLE_${role.toUpperCase()}_DEVICE_DRIFT`);
+    return [role, keys[0] ?? null];
+  }));
+  const distinctKeys = unique(Object.values(roleDeviceKeys).filter(Boolean));
+  if (distinctKeys.length < requiredRoles.length) {
+    failures.push(`${task.lane_task_id}:DEVICE_MATRIX_DISTINCT_HARDWARE_REQUIRED`);
+  }
+
+  return {
+    failures,
+    summary: {
+      required_roles: requiredRoles,
+      observed_roles: observedRoles.sort(),
+      role_device_keys: roleDeviceKeys,
+      verified: failures.length === 0
+    }
   };
 }
 

@@ -24,7 +24,8 @@ const valid = {
     "S12_SYSTEM_MATERIAL_ADJACENCY"
   ],
   capture_kind: ["compositor", "framebuffer", "layer_snapshot"],
-  touch_phase: ["rest", "press", "drag", "release", "morph", "sustained"]
+  touch_phase: ["rest", "press", "drag", "release", "morph", "sustained"],
+  device_matrix_role: ["mvl_primary", "weakest_supported", "target", "latest_pro"]
 };
 
 main();
@@ -111,6 +112,9 @@ function validateDevice(errors, device) {
   }
   if (looksLikeGenericAppleFamilyIdentifier(device.model_identifier)) {
     errors.push("device_info.model_identifier must be hardware identifier, not UIDevice.current.model family");
+  }
+  if (device.device_matrix_role !== undefined) {
+    requireEnum(errors, "device_info.device_matrix_role", device.device_matrix_role, valid.device_matrix_role);
   }
   requireValue(errors, device.os_name === "iOS", "device_info.os_name must be iOS");
   requireNumber(errors, "device_info.screen_scale", device.screen_scale);

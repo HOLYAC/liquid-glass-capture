@@ -118,9 +118,9 @@ npm run trajectory:build -- --self-test
 npm run material:probe -- --self-test
 npm run artifact:validate -- ./artifacts/sample.capture.json
 npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
-npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --out ./artifacts/ios-capture-plan.json
-npm run ios:capture -- --rig C1 --scene S07_BUSY_PHOTO --state busy_photo_rest --device physical --capture compositor --repeat 50 --out ./artifacts/ios-capture-s07-plan.json
-npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --manifest ./artifacts/r0.repeat-manifest.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --out ./artifacts/ios-capture-plan.json
+npm run ios:capture -- --rig C1 --scene S07_BUSY_PHOTO --state busy_photo_rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --out ./artifacts/ios-capture-s07-plan.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --manifest ./artifacts/r0.repeat-manifest.json
 npm run null:ladder -- --native ./artifacts/r0.capture.json --candidate ./artifacts/c0.capture.json --rung flat_p3_grey --out ./artifacts/null.report.json
 npm run metrics:compare -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g2.report.json
 npm run metrics:optics -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g3-optics.report.json
@@ -132,6 +132,7 @@ npm run artifact:store -- --put ./artifacts/c1.capture.png --class raw_png_frame
 npm run artifact:store -- --verify-index ./artifacts/store/index.json --out ./artifacts/store/verify.report.json
 npm run artifact:store -- --plan-retention ./artifacts/store/index.json --out ./artifacts/store/retention-plan.json
 npm run device:lane -- --lane mvl --git-commit <sha> --out ./artifacts/device-lane/mvl.plan.json
+npm run device:lane -- --lane prod_p99 --git-commit <sha> --out ./artifacts/device-lane/prod-p99.plan.json
 npm run device:lane -- --plan ./artifacts/device-lane/mvl.plan.json --manifest ./artifacts/r0.repeat-manifest.json --manifest ./artifacts/r1.repeat-manifest.json --manifest ./artifacts/c1.repeat-manifest.json --manifest ./artifacts/domc.repeat-manifest.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --out ./artifacts/device-lane/mvl.report.json
 npm run review:packet -- --packet ./artifacts/g7-review.packet.json --out ./artifacts/g7-review.report.json
 npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --solver ./artifacts/solver.pareto.report.json --store-index ./artifacts/store/index.json --device-lane ./artifacts/device-lane/mvl.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
@@ -210,11 +211,15 @@ verifies collected repeat manifests artifact-by-artifact. It rejects simulator
 artifacts, rejects `layer_snapshot`, requires compositor/framebuffer capture,
 requires nominal thermal start, requires Low Power Mode off, verifies PNG and
 mask hashes, enforces declared gesture-scene trajectory source hashes, and
-checks G2-G6 reports for MVL/prod/sustained lanes. Sustained lanes additionally
-require a sustained manifest class, 60s capture duration, logged 60s cooldown,
-artifact-level sustained duration, recorded degradation/frame-interval metrics,
-and G6 sustained/thermal evidence. Hosted GitHub CI still cannot mint this
-evidence; it names the required lane report as pending instead.
+checks G2-G6 reports for MVL/prod/sustained lanes. Production `prod_p99` lanes
+also require three `device_matrix_role` manifests: `weakest_supported`,
+`target`, and `latest_pro`; each role must carry matching artifact metadata and
+resolve to distinct physical hardware via `device_info.model_identifier`.
+Sustained lanes additionally require a sustained manifest class, 60s capture
+duration, logged 60s cooldown, artifact-level sustained duration, recorded
+degradation/frame-interval metrics, and G6 sustained/thermal evidence. Hosted
+GitHub CI still cannot mint this evidence; it names the required lane report as
+pending instead.
 
 Current G7 scope validates a review packet rather than free-form taste: every
 block needs scene, state, mask, artifact pointer, reviewer category, written
@@ -242,7 +247,9 @@ pretending a simulator or Linux runner can mint parity.
 
 The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
 capture repeatedly, writes a `repeat_capture_manifest`, and enforces nominal
-thermal state before each baseline iteration.
+thermal state before each baseline iteration. The controls include a `device`
+role chip so the same installed binary can tag MVL and production-matrix
+captures without changing native code.
 Native capture artifacts record the human device family as `model_name` and the
 hardware identifier from `utsname.machine` as `model_identifier`; generic
 `UIDevice.current.model` values such as `iPhone` are rejected by the artifact

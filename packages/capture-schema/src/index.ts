@@ -63,6 +63,12 @@ export type ShaderPipeline =
 
 export type ThermalState = "nominal" | "fair" | "serious" | "critical";
 
+export type DeviceMatrixRole =
+  | "mvl_primary"
+  | "weakest_supported"
+  | "target"
+  | "latest_pro";
+
 export interface CaptureArtifact {
   schema_version: "1.2.0";
   id: string;
@@ -79,6 +85,7 @@ export interface CaptureArtifact {
   device_info: {
     model_name: string;
     model_identifier: string;
+    device_matrix_role?: DeviceMatrixRole;
     os_name: "iOS";
     os_version: string;
     os_build: string;

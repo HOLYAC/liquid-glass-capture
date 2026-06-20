@@ -75,6 +75,7 @@
       "properties": {
         "model_name": { "type": "string", "minLength": 1 },
         "model_identifier": { "type": "string", "minLength": 1 },
+        "device_matrix_role": { "enum": ["mvl_primary", "weakest_supported", "target", "latest_pro"] },
         "os_name": { "const": "iOS" },
         "os_version": { "type": "string", "minLength": 1 },
         "os_build": { "type": "string", "minLength": 1 },

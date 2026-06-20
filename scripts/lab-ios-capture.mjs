@@ -12,6 +12,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const validRigs = new Set(["R0", "R1", "C0", "C1", "DOM_C"]);
 const validScenes = new Set(Object.keys(glassSceneDefaults));
 const validCaptureKinds = new Set(["compositor"]);
+const validDeviceMatrixRoles = new Set(["mvl_primary", "weakest_supported", "target", "latest_pro"]);
 
 main();
 
@@ -25,6 +26,7 @@ function main() {
       state: "rest",
       capture: "compositor",
       repeat: 3,
+      deviceRole: "mvl_primary",
       manifest,
       out: args.out
     });
@@ -50,6 +52,7 @@ function writeCapturePlan(request) {
     ...sceneMetadata,
     rigId: request.rig,
     captureKind: request.capture,
+    deviceMatrixRole: request.deviceRole,
     baselineClass,
     requiresNominalThermal: true,
     captureDurationMs,
@@ -67,19 +70,21 @@ function writeCapturePlan(request) {
     capture_kind: request.capture,
     repeat_count_requested: request.repeat,
     baseline_class: baselineClass,
+    device_matrix_role: request.deviceRole,
     capture_duration_ms: captureDurationMs,
     cooldown_ms: cooldownMs,
     on_device_app_action: {
       open_controls: true,
       set_rig: request.rig,
       set_scene_state: `${request.scene}/${request.state}`,
+      set_device_matrix_role: request.deviceRole,
       set_repeat: request.repeat,
       press_button: "B"
     },
     metadata,
     output_contract: {
       manifest_kind: "repeat_capture_manifest",
-      use_after_capture: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --manifest <repeat-manifest.json>`,
+      use_after_capture: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --device-role ${request.deviceRole} --manifest <repeat-manifest.json>`,
       baseline_command: `npm run metrics:baseline -- --ref-manifest <r0-repeat-manifest.json> --probe-manifest <r1-repeat-manifest.json> --class ${baselineClass} --repeat ${request.repeat} --out ./baselines/current.json`
     }
   };
@@ -102,6 +107,7 @@ function verifyManifest(request) {
   if (manifest.scene_id !== request.scene) failures.push("SCENE_MISMATCH");
   if (manifest.state_id !== request.state) failures.push("STATE_MISMATCH");
   if (manifest.capture_kind !== request.capture) failures.push("CAPTURE_KIND_MISMATCH");
+  if (manifest.device_matrix_role !== request.deviceRole) failures.push("DEVICE_MATRIX_ROLE_MISMATCH");
   if ((manifest.repeat_count_observed ?? 0) < request.repeat) failures.push("REPEAT_COUNT_INCOMPLETE");
   if (!Array.isArray(manifest.artifact_json_paths) || manifest.artifact_json_paths.length < request.repeat) {
     failures.push("ARTIFACT_PATHS_INCOMPLETE");
@@ -117,6 +123,7 @@ function verifyManifest(request) {
       scene_id: request.scene,
       state_id: request.state,
       capture_kind: request.capture,
+      device_matrix_role: request.deviceRole,
       repeat_count_requested: request.repeat
     },
     observed: {
@@ -141,6 +148,7 @@ function normalizeRequest(args) {
     state: args.state ?? "rest",
     device: args.device ?? "physical",
     capture: args.capture ?? "compositor",
+    deviceRole: args.deviceRole ?? "mvl_primary",
     repeat: args.repeat ?? 50,
     manifest: args.manifest,
     out: args.out
@@ -152,6 +160,7 @@ function normalizeRequest(args) {
   if (sceneFailures.length > 0) throw new Error(sceneFailures.join(", "));
   if (request.device !== "physical") throw new Error("Only --device physical is valid for parity capture");
   if (!validCaptureKinds.has(request.capture)) throw new Error("Only --capture compositor is implemented");
+  if (!validDeviceMatrixRoles.has(request.deviceRole)) throw new Error(`Unsupported --device-role: ${request.deviceRole}`);
   if (!Number.isFinite(request.repeat) || request.repeat < 1) throw new Error("--repeat must be a positive number");
   return request;
 }
@@ -168,6 +177,7 @@ function writeSelfTestManifest() {
     scene_id: "S01_SEARCH",
     state_id: "rest",
     capture_kind: "compositor",
+    device_matrix_role: "mvl_primary",
     repeat_count_requested: 3,
     repeat_count_observed: 3,
     artifact_json_paths: [
@@ -190,6 +200,7 @@ function parseArgs(args) {
     else if (arg === "--state") parsed.state = args[++index];
     else if (arg === "--device") parsed.device = args[++index];
     else if (arg === "--capture") parsed.capture = args[++index];
+    else if (arg === "--device-role") parsed.deviceRole = args[++index];
     else if (arg === "--repeat") parsed.repeat = Number(args[++index]);
     else if (arg === "--manifest") parsed.manifest = args[++index];
     else if (arg === "--out") parsed.out = args[++index];

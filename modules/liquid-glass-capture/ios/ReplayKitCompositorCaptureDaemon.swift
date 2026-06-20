@@ -330,6 +330,23 @@ private final class ReplayKitCaptureSession {
       environment["geometry_pack_sha256"] = geometryPackSHA256
     }
 
+    var deviceInfo: [String: Any] = [
+      "model_name": UIDevice.current.model,
+      "model_identifier": Self.hardwareModelIdentifier(),
+      "os_name": "iOS",
+      "os_version": UIDevice.current.systemVersion,
+      "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
+      "sdk_build": Bundle.main.infoDictionary?["DTSDKBuild"] as? String ?? "runtime-unknown",
+      "screen_scale": Double(UIScreen.main.scale),
+      "refresh_hz": refreshHz,
+      "thermal_state_start": Self.thermalStateString(initialThermalState),
+      "thermal_state_end": finalThermalState,
+      "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
+    ]
+    if let deviceMatrixRole = metadata["deviceMatrixRole"] as? String {
+      deviceInfo["device_matrix_role"] = deviceMatrixRole
+    }
+
     var artifact: [String: Any] = [
       "schema_version": "1.2.0",
       "id": id,
@@ -342,19 +359,7 @@ private final class ReplayKitCaptureSession {
       "invalid_reason": "REPLAYKIT_CAPTURE_UNQUALIFIED",
       "null_qualification": metadata["nullQualification"] as? String ?? "fail",
       "capture_kind": "compositor",
-      "device_info": [
-        "model_name": UIDevice.current.model,
-        "model_identifier": Self.hardwareModelIdentifier(),
-        "os_name": "iOS",
-        "os_version": UIDevice.current.systemVersion,
-        "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
-        "sdk_build": Bundle.main.infoDictionary?["DTSDKBuild"] as? String ?? "runtime-unknown",
-        "screen_scale": Double(UIScreen.main.scale),
-        "refresh_hz": refreshHz,
-        "thermal_state_start": Self.thermalStateString(initialThermalState),
-        "thermal_state_end": finalThermalState,
-        "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
-      ],
+      "device_info": deviceInfo,
       "environment": environment,
       "color": [
         "embedded_icc_profile": "Display P3",

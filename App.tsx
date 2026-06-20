@@ -49,6 +49,7 @@ const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
 const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge_overlap", "morph_tall"] as const;
 const tints = ["none", "cyan", "amber", "red"] as const;
 const repeatCounts = [3, 10, 24, 50, 300] as const;
+const deviceMatrixRoles = ["mvl_primary", "weakest_supported", "target", "latest_pro"] as const;
 const backgroundPackId = "glass_background_pack_v1";
 const backgroundPackSha256 = "5c305dcadc6d32b7ca9366c5b82793345e791a3e7c5c58b46c3da5557450d877";
 const geometryPackId = "glass_geometry_pack_v1";
@@ -81,6 +82,7 @@ type Shape = (typeof shapes)[number];
 type Phase = (typeof phases)[number];
 type Mode = (typeof modes)[number];
 type Tint = (typeof tints)[number];
+type DeviceMatrixRole = (typeof deviceMatrixRoles)[number];
 type TouchPhase = "rest" | "press" | "drag" | "morph";
 type SceneSpec = {
   sceneId: SceneId;
@@ -363,13 +365,14 @@ export default function App() {
   const [compositorActive, setCompositorActive] = useState(false);
   const [batchActive, setBatchActive] = useState(false);
   const [repeatCount, setRepeatCount] = useState<(typeof repeatCounts)[number]>(50);
+  const [deviceMatrixRole, setDeviceMatrixRole] = useState<DeviceMatrixRole>("mvl_primary");
   const [lastReferenceArtifact, setLastReferenceArtifact] = useState<string | null>(null);
   const [lastCandidateArtifact, setLastCandidateArtifact] = useState<string | null>(null);
   const scene = useMemo(() => sceneSpecFor(sceneId), [sceneId]);
 
   const scenario = useMemo(
-    () => [rig, scene.sceneId, scene.stateId, scene.substrate, scene.shape, scene.phase, mode, interactive ? "interactive" : "static", tint].join("__"),
-    [rig, scene, mode, interactive, tint]
+    () => [rig, scene.sceneId, scene.stateId, scene.substrate, scene.shape, scene.phase, mode, interactive ? "interactive" : "static", tint, deviceMatrixRole].join("__"),
+    [rig, scene, mode, interactive, tint, deviceMatrixRole]
   );
 
   function applyScene(nextSceneId: SceneId) {
@@ -419,6 +422,7 @@ export default function App() {
         controls,
         capturedFrom: "bottom_bar"
       };
+      metadata["deviceMatrixRole"] = deviceMatrixRole;
       addSceneMetadata(metadata, scene);
 
       if (handle.captureLabArtifactAsync) {
@@ -466,7 +470,8 @@ export default function App() {
           touchPhase: scene.touchPhase,
           nullQualification: scene.sceneId === "S00_NULL" ? "pass" : "fail",
           maxFrames: 180,
-          appearance: "dark"
+          appearance: "dark",
+          deviceMatrixRole
         };
         addSceneMetadata(metadata, scene);
         const payload = await handle.startCompositorCaptureAsync("compositor", metadata);
@@ -508,6 +513,7 @@ export default function App() {
       nullQualification: scene.sceneId === "S00_NULL" ? "pass" : "fail",
       baselineClass,
       requiresNominalThermal: true,
+      deviceMatrixRole,
       maxFrames: baselineClass === "sustained" ? 900 : 90,
       appearance: "dark"
     };
@@ -603,6 +609,7 @@ export default function App() {
               <Chip label="interactive" value={String(interactive)} onPress={() => setInteractive((value) => !value)} />
               <Chip label="autoplay" value={String(autoplay)} onPress={() => setAutoplay((value) => !value)} />
               <Chip label="repeat" value={String(repeatCount)} onPress={() => setRepeatCount(nextValue(repeatCounts, repeatCount))} />
+              <Chip label="device" value={deviceMatrixRole} onPress={() => setDeviceMatrixRole(nextValue(deviceMatrixRoles, deviceMatrixRole))} />
               <Chip label="controls" value="hide" onPress={() => setControls(false)} />
             </ScrollView>
           </View>

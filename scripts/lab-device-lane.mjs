@@ -142,6 +142,41 @@ function writeSelfTestFixture(outPath) {
     gateReports: makeGateReports({ sustainedDurationMs: 60_000 })
   });
 
+  const prodPlan = buildPhysicalDeviceLanePlan({
+    laneClass: "prod_p99",
+    tasks: [{ rig_id: "R0", scene_id: "S01_SEARCH", state_id: "rest" }],
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    gitCommit: "self-test",
+    reason: "device-lane-prod-matrix-self-test"
+  });
+  const prodMatrixManifests = [
+    ["weakest_supported", "iPhone14,7"],
+    ["target", "iPhone16,2"],
+    ["latest_pro", "iPhone18,3"]
+  ].map(([role, modelIdentifier]) => {
+    const artifactPath = writeCaptureArtifact(dir, `prod-${role}`, modelIdentifier, "compositor", "pass", {
+      deviceMatrixRole: role
+    });
+    return writeRepeatManifest({
+      dir,
+      name: `prod-${role}.repeat-manifest.json`,
+      artifactPaths: Array.from({ length: 300 }, () => artifactPath),
+      repeatCountRequested: 300,
+      baselineClass: "prod_p99",
+      deviceMatrixRole: role
+    });
+  });
+  const prodReport = verifyPhysicalDeviceLane({
+    plan: prodPlan,
+    manifests: prodMatrixManifests.map((path) => ({ path, manifest: JSON.parse(readFileSync(path, "utf8")) })),
+    gateReports: makeGateReports({ sustainedDurationMs: 60_000 })
+  });
+  const prodMissingRoleReport = verifyPhysicalDeviceLane({
+    plan: prodPlan,
+    manifests: prodMatrixManifests.slice(0, 2).map((path) => ({ path, manifest: JSON.parse(readFileSync(path, "utf8")) })),
+    gateReports: makeGateReports({ sustainedDurationMs: 60_000 })
+  });
+
   const badSceneContractArtifact = writeCaptureArtifact(dir, "bad-contract", "iPhone16,2", "compositor", "pass");
   const badSceneContract = JSON.parse(readFileSync(badSceneContractArtifact, "utf8"));
   delete badSceneContract.environment.background_pack_id;
@@ -165,16 +200,20 @@ function writeSelfTestFixture(outPath) {
     kind: "physical_device_lane_self_test_report",
     status: report.status === "pass" &&
       sustainedReport.status === "pass" &&
+      prodReport.status === "pass" &&
       badReport.status !== "pass" &&
       layerSnapshotReport.status !== "pass" &&
       badSceneContractReport.status !== "pass" &&
+      prodMissingRoleReport.status !== "pass" &&
       shortSustainedReport.status !== "pass" ? "pass" : "fail",
     plan_path: planPath,
     positive_report: report,
     sustained_positive_report: sustainedReport,
+    prod_matrix_positive_report: prodReport,
     simulator_negative_report: badReport,
     layer_snapshot_negative_report: layerSnapshotReport,
     scene_contract_negative_report: badSceneContractReport,
+    prod_matrix_missing_role_negative_report: prodMissingRoleReport,
     sustained_short_negative_report: shortSustainedReport
   };
   writeJson(out, selfTestReport);
@@ -183,9 +222,11 @@ function writeSelfTestFixture(outPath) {
     out,
     report,
     sustainedReport,
+    prodReport,
     badReport,
     layerSnapshotReport,
     badSceneContractReport,
+    prodMissingRoleReport,
     shortSustainedReport,
     selfTestReport
   };
@@ -194,9 +235,11 @@ function writeSelfTestFixture(outPath) {
 function assertDeviceLaneGuardRails({
   report,
   sustainedReport,
+  prodReport,
   badReport,
   layerSnapshotReport,
   badSceneContractReport,
+  prodMissingRoleReport,
   shortSustainedReport,
   selfTestReport
 }) {
@@ -211,6 +254,15 @@ function assertDeviceLaneGuardRails({
   }
   if (sustainedReport.evidence?.sustained_contract_verified !== true) {
     throw new Error("device-lane self-test did not expose sustained contract evidence");
+  }
+  if (prodReport.status !== "pass" || prodReport.lane_class !== "prod_p99") {
+    throw new Error("device-lane self-test failed to verify prod_p99 matrix lane");
+  }
+  if (prodReport.evidence?.production_device_matrix_verified !== true) {
+    throw new Error("device-lane self-test did not expose production matrix evidence");
+  }
+  if (prodReport.task_reports[0]?.device_matrix?.observed_roles?.length !== 3) {
+    throw new Error("device-lane self-test did not record all production matrix roles");
   }
   if (!sustainedReport.task_reports[0]?.artifacts?.every((artifact) => artifact.status === "pass")) {
     throw new Error("device-lane self-test failed to verify sustained artifacts");
@@ -235,6 +287,9 @@ function assertDeviceLaneGuardRails({
   }
   if (!badSceneContractReport.failures.some((failure) => failure.includes("CAPTURE_TIMELINE_ID_MISMATCH"))) {
     throw new Error("device-lane self-test failed to reject missing capture timeline contract");
+  }
+  if (!prodMissingRoleReport.failures.some((failure) => failure.includes("DEVICE_MATRIX_ROLE_LATEST_PRO_MISSING"))) {
+    throw new Error("device-lane self-test failed to reject missing latest_pro matrix role");
   }
   if (!shortSustainedReport.failures.some((failure) => failure.includes("SUSTAINED_CAPTURE_DURATION_INCOMPLETE"))) {
     throw new Error("device-lane self-test failed to reject short sustained manifest");
@@ -265,6 +320,7 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
     device_info: {
       model_name: "iPhone",
       model_identifier: modelIdentifier,
+      device_matrix_role: options.deviceMatrixRole ?? "mvl_primary",
       os_name: "iOS",
       os_version: "26.0",
       os_build: "23A-self-test",
@@ -340,6 +396,7 @@ function writeRepeatManifest({
   artifactPaths,
   repeatCountRequested = 3,
   baselineClass = "smoke",
+  deviceMatrixRole = "mvl_primary",
   captureDurationMs = 900,
   cooldownMs = 750,
   thermal = { initial_state: "nominal", final_state: "nominal" }
@@ -353,6 +410,7 @@ function writeRepeatManifest({
     scene_id: "S01_SEARCH",
     state_id: "rest",
     baseline_class: baselineClass,
+    device_matrix_role: deviceMatrixRole,
     capture_kind: "compositor",
     repeat_count_requested: repeatCountRequested,
     repeat_count_observed: artifactPaths.length,

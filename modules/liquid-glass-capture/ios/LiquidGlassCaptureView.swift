@@ -240,6 +240,22 @@ public final class LiquidGlassCaptureView: ExpoView {
       environment["geometry_pack_sha256"] = geometryPackSHA256
     }
 
+    var deviceInfo: [String: Any] = [
+      "model_name": UIDevice.current.model,
+      "model_identifier": Self.hardwareModelIdentifier(),
+      "os_name": "iOS",
+      "os_version": UIDevice.current.systemVersion,
+      "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
+      "sdk_build": Bundle.main.infoDictionary?["DTSDKBuild"] as? String ?? "runtime-unknown",
+      "screen_scale": Double(UIScreen.main.scale),
+      "refresh_hz": Double(UIScreen.main.maximumFramesPerSecond),
+      "thermal_state_start": Self.thermalStateString(ProcessInfo.processInfo.thermalState),
+      "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
+    ]
+    if let deviceMatrixRole = metadata["deviceMatrixRole"] as? String {
+      deviceInfo["device_matrix_role"] = deviceMatrixRole
+    }
+
     var artifact: [String: Any] = [
       "schema_version": "1.2.0",
       "id": artifactId,
@@ -252,18 +268,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "invalid_reason": invalidReason,
       "null_qualification": sceneId == "S00_NULL" ? "pass" : "fail",
       "capture_kind": "layer_snapshot",
-      "device_info": [
-        "model_name": UIDevice.current.model,
-        "model_identifier": Self.hardwareModelIdentifier(),
-        "os_name": "iOS",
-        "os_version": UIDevice.current.systemVersion,
-        "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
-        "sdk_build": Bundle.main.infoDictionary?["DTSDKBuild"] as? String ?? "runtime-unknown",
-        "screen_scale": Double(UIScreen.main.scale),
-        "refresh_hz": Double(UIScreen.main.maximumFramesPerSecond),
-        "thermal_state_start": Self.thermalStateString(ProcessInfo.processInfo.thermalState),
-        "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
-      ],
+      "device_info": deviceInfo,
       "environment": environment,
       "color": [
         "embedded_icc_profile": "Display P3",
@@ -604,6 +609,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "scene_id": metadata["sceneId"] as? String ?? "S01_SEARCH",
       "state_id": metadata["stateId"] as? String ?? "rest",
       "baseline_class": metadata["baselineClass"] as? String ?? "mvl",
+      "device_matrix_role": metadata["deviceMatrixRole"] as? String ?? "mvl_primary",
       "capture_kind": "compositor",
       "repeat_count_requested": repeatCountRequested,
       "repeat_count_observed": artifactJsonPaths.count,

@@ -215,6 +215,9 @@ function physicalDeviceLaneSummary(report) {
     sustained_contract_verified: report.lane_class === "sustained"
       ? report.evidence?.sustained_contract_verified === true
       : true,
+    production_device_matrix_verified: report.lane_class === "prod_p99"
+      ? report.evidence?.production_device_matrix_verified === true
+      : true,
     failure_count: report.failures?.length ?? 0
   };
 }
