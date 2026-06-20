@@ -382,6 +382,7 @@ function renderBaselineViewer(path, report) {
     section("Namespace", table(rows)),
     section("Instrument Noise", metricSummaryTable(report.instrument_noise?.metrics ?? {})),
     section("Candidate Gap", metricSummaryTable(report.candidate_gap?.metrics ?? {})),
+    section("Thresholds", thresholdSummaryTable(report.threshold_derivation?.metric_thresholds ?? {})),
     section("Artifacts", table([
       ["reference_count", report.reference_artifacts?.length ?? 0],
       ["probe_count", report.probe_artifacts?.length ?? 0]
@@ -572,6 +573,17 @@ function metricSummaryTable(metrics) {
     ]);
   }
   return table(rows.length > 0 ? rows : [["metrics", "not_recorded"]]);
+}
+
+function thresholdSummaryTable(metrics) {
+  const rows = [];
+  for (const [metric, threshold] of Object.entries(metrics)) {
+    rows.push([
+      metric,
+      `loss=${threshold.loss_transform} shader=${round(threshold.shader_threshold)} webkit=${round(threshold.webkit_threshold)} floor_gate=${threshold.no_worse_than_webkit_floor?.gate === true}`
+    ]);
+  }
+  return table(rows.length > 0 ? rows : [["thresholds", "not_recorded"]]);
 }
 
 function baselineNamespaceFromArtifact(artifact) {

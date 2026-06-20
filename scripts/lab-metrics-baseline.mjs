@@ -39,6 +39,43 @@ const bootstrapPolicy = Object.freeze({
   iterations: 400,
   seed_namespace: "apple_glass_baseline_metric_report_v1"
 });
+const thresholdPolicy = Object.freeze({
+  policy_id: "baseline_threshold_policy_v1",
+  shader_formula: "shader_threshold = instrument_noise_loss_ci95_upper + SHADER_SLACK(metric)",
+  webkit_formula: "webkit_threshold = instrument_noise_loss_ci95_upper + WEBKIT_SLACK(metric) * webkit_gap_loss_ci95_upper",
+  no_worse_than_webkit_formula: "candidate_loss(R0,C1) <= webkit_gap_loss_ci95_upper",
+  webkit_gap_role: "report_only_floor_not_shader_slack",
+  shader_threshold_never_borrows_webkit_gap: true,
+  owner: "lab-metrics",
+  derivation: "v1.2 baseline math: C1 shader gates against R0 instrument noise only; WebKit gap remains observable but cannot loosen shader thresholds."
+});
+const defaultSlack = Object.freeze({
+  shader: {
+    value: 0,
+    owner: "lab-metrics",
+    derivation: "No unmeasured visual slack is allowed before a baseline owner signs a per-metric non-zero value."
+  },
+  webkit: {
+    multiplier: 1,
+    owner: "lab-metrics",
+    derivation: "WebKit threshold is anchored to measured WebKit gap with no hidden multiplier until a baseline owner signs one."
+  }
+});
+const metricThresholdPolicies = Object.freeze({
+  oklab_delta_e_mean: metricPolicy("identity", "lower_is_better"),
+  oklab_delta_e_p95: metricPolicy("identity", "lower_is_better"),
+  oklab_delta_e_p99: metricPolicy("identity", "lower_is_better"),
+  oklab_delta_e_max: metricPolicy("identity", "lower_is_better"),
+  ssim: metricPolicy("one_minus_value", "higher_is_better"),
+  ms_ssim: metricPolicy("one_minus_value", "higher_is_better"),
+  flip_style_error_mean: metricPolicy("identity", "lower_is_better"),
+  flip_style_error_p95: metricPolicy("identity", "lower_is_better"),
+  flip_style_error_p99: metricPolicy("identity", "lower_is_better"),
+  flip_style_error_max: metricPolicy("identity", "lower_is_better"),
+  gradient_smoothness_mean_abs_delta: metricPolicy("identity", "lower_is_better"),
+  max_abs_channel_delta: metricPolicy("identity", "lower_is_better"),
+  mean_abs_channel_delta: metricPolicy("identity", "lower_is_better")
+});
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main();
@@ -56,6 +93,7 @@ function main() {
       repeatOverride: 50
     });
     assertOutlierPolicySelfTest();
+    assertThresholdPolicySelfTest(report);
     console.log(`${report.baseline_status.toUpperCase()} ${fixture.out}`);
     return;
   }
@@ -107,6 +145,10 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
   const instrumentNoise = summarizeReports(referenceReports);
   const candidateGap = summarizeReports(candidateReports);
   const infrastructureHealth = assessInfrastructureHealth(instrumentNoise);
+  const thresholdDerivation = buildThresholdDerivation({
+    referenceSamples: referenceReports,
+    candidateSamples: candidateReports
+  });
   const report = {
     schema_version: "1.2.0",
     kind: "baseline_metric_report",
@@ -137,8 +179,10 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
     statistics: {
       outlier_policy: outlierPolicy,
       bootstrap_policy: bootstrapPolicy,
+      threshold_policy: thresholdPolicy,
       infrastructure_health: infrastructureHealth
     },
+    threshold_derivation: thresholdDerivation,
     raw_report_counts: {
       reference_pair_count: referenceReports.length,
       candidate_pair_count: candidateReports.length
@@ -150,6 +194,7 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
       rejected_samples_retained: true,
       outlier_rejection: outlierPolicy.policy_id,
       bootstrap_ci: bootstrapPolicy.policy_id,
+      threshold_policy: thresholdPolicy.policy_id,
       baseline_owner: "unassigned"
     }
   };
@@ -371,6 +416,89 @@ function assessInfrastructureHealth(summary) {
   };
 }
 
+function buildThresholdDerivation({ referenceSamples, candidateSamples }) {
+  const metricIds = Object.keys(referenceSamples[0]?.metrics ?? {})
+    .filter((metricId) => metricThresholdPolicies[metricId]);
+  const metricThresholds = {};
+  for (const metricId of metricIds) {
+    const policy = metricThresholdPolicies[metricId];
+    const instrumentLoss = summarizeMetricSamples(transformSamplesToLoss(referenceSamples, metricId, policy), `${metricId}_loss`);
+    const webkitGapLoss = summarizeMetricSamples(transformSamplesToLoss(candidateSamples, metricId, policy), `${metricId}_loss`);
+    const instrumentNoiseUpper = instrumentLoss.p99_ci95_upper ?? 0;
+    const webkitGapUpper = webkitGapLoss.p99_ci95_upper ?? null;
+    const shaderSlack = policy.shader_slack;
+    const webkitSlack = policy.webkit_slack;
+    metricThresholds[metricId] = {
+      metric_id: metricId,
+      direction: policy.direction,
+      loss_transform: policy.loss_transform,
+      instrument_noise_loss: instrumentLoss,
+      webkit_gap_loss: webkitGapLoss,
+      shader_slack: shaderSlack,
+      webkit_slack: webkitSlack,
+      shader_threshold_components: [
+        "instrument_noise_loss_ci95_upper",
+        "SHADER_SLACK"
+      ],
+      shader_threshold: instrumentNoiseUpper + shaderSlack.value,
+      webkit_threshold_components: [
+        "instrument_noise_loss_ci95_upper",
+        "WEBKIT_SLACK",
+        "webkit_gap_loss_ci95_upper"
+      ],
+      webkit_threshold: webkitGapUpper === null
+        ? null
+        : instrumentNoiseUpper + webkitSlack.multiplier * webkitGapUpper,
+      no_worse_than_webkit_floor: {
+        gate: false,
+        role: thresholdPolicy.webkit_gap_role,
+        candidate_loss_must_be_no_greater_than: webkitGapUpper
+      }
+    };
+  }
+
+  return {
+    policy: thresholdPolicy,
+    metric_count: Object.keys(metricThresholds).length,
+    metric_thresholds: metricThresholds
+  };
+}
+
+function transformSamplesToLoss(samples, metricId, policy) {
+  return samples.map((sample) => ({
+    sample_id: `${sample.sample_id}:${metricId}:loss`,
+    sample_kind: sample.sample_kind,
+    reference_index: sample.reference_index,
+    candidate_index: sample.candidate_index,
+    reference_artifact: sample.reference_artifact,
+    candidate_artifact: sample.candidate_artifact,
+    metrics: {
+      [`${metricId}_loss`]: metricLoss(sample.metrics[metricId], policy)
+    }
+  })).filter((sample) => Number.isFinite(sample.metrics[`${metricId}_loss`]));
+}
+
+function metricLoss(value, policy) {
+  if (!Number.isFinite(value)) return NaN;
+  if (policy.loss_transform === "one_minus_value") return Math.max(0, 1 - value);
+  return value;
+}
+
+function metricPolicy(lossTransform, direction) {
+  return deepFreeze({
+    direction,
+    loss_transform: lossTransform,
+    shader_slack: defaultSlack.shader,
+    webkit_slack: defaultSlack.webkit
+  });
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 function assertOutlierPolicySelfTest() {
   const unknownSamples = makeSyntheticSamples({ knownReason: false });
   const unknownSummary = summarizeMetricSamples(unknownSamples, "probe_metric");
@@ -401,6 +529,34 @@ function assertOutlierPolicySelfTest() {
   const health = assessInfrastructureHealth({ metrics: { probe_metric: unknownSummary } });
   if (health.status !== "fail") {
     throw new Error("outlier policy self-test failed to mark high outlier rate unhealthy");
+  }
+}
+
+function assertThresholdPolicySelfTest(report) {
+  const thresholds = report.threshold_derivation?.metric_thresholds ?? {};
+  const oklab = thresholds.oklab_delta_e_mean;
+  if (!oklab) {
+    throw new Error("threshold policy self-test failed to emit OKLab threshold");
+  }
+  if (oklab.shader_threshold_components.includes("webkit_gap_loss_ci95_upper")) {
+    throw new Error("threshold policy self-test found WebKit gap inside shader threshold");
+  }
+  if (oklab.no_worse_than_webkit_floor.gate !== false) {
+    throw new Error("threshold policy self-test made no_worse_than_webkit a gate");
+  }
+  if (!oklab.shader_slack.owner || !oklab.shader_slack.derivation) {
+    throw new Error("threshold policy self-test found unowned SHADER_SLACK");
+  }
+  if (!oklab.webkit_slack.owner || !oklab.webkit_slack.derivation) {
+    throw new Error("threshold policy self-test found unowned WEBKIT_SLACK");
+  }
+
+  const ssim = thresholds.ssim;
+  if (!ssim || ssim.loss_transform !== "one_minus_value") {
+    throw new Error("threshold policy self-test failed to transform high-good SSIM into loss");
+  }
+  if (report.statistics?.threshold_policy?.shader_threshold_never_borrows_webkit_gap !== true) {
+    throw new Error("threshold policy self-test failed to carry shader/WebKit separation policy");
   }
 }
 

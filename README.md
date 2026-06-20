@@ -248,6 +248,11 @@ comparison samples, and baseline infrastructure health. Statistical outliers
 without machine-proven artifact reasons stay in the threshold as
 `UNKNOWN_OUTLIER`; too many outlier candidates fail health instead of silently
 cleaning the baseline.
+The same baseline file emits per-metric `threshold_derivation`: high-good
+metrics such as SSIM are converted to loss, `SHADER_SLACK` and `WEBKIT_SLACK`
+are named with owner and derivation, and the shader threshold explicitly uses
+only instrument noise plus shader slack. WebKit gap remains a report-only
+`no_worse_than_webkit` floor.
 
 ## Production / TestFlight
 
