@@ -160,6 +160,9 @@ export interface CaptureArtifact {
       | "instruments_power_profiler"
       | "metrickit"
       | "validated_powermetrics_aux";
+    trace_path?: string;
+    trace_hash_method?: "sha256_file_v1" | "sha256_tree_v1";
+    trace_sha256?: string;
     energy_mj_per_10s?: number;
     average_power_mw?: number;
     thermal_onset_ms?: number;

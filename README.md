@@ -127,6 +127,7 @@ npm run metrics:optics -- --reference ./artifacts/r0.capture.json --candidate ./
 npm run metrics:temporal -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g4-temporal.report.json
 npm run metrics:runtime -- --artifact ./artifacts/c1.capture.json --out ./artifacts/g5-runtime.report.json
 npm run energy:stress -- --artifact ./artifacts/c1-sustained.capture.json --sustained --out ./artifacts/g6-energy.report.json
+npm run glass:instruments -- --artifact ./artifacts/c1-sustained.capture.json --out ./artifacts/viewer/c1.instruments.json
 npm run solver:rank -- --candidate ./artifacts/c0-candidate-a.json --candidate ./artifacts/c0-candidate-b.json --out ./artifacts/solver.pareto.report.json
 npm run artifact:store -- --put ./artifacts/c1.capture.png --class raw_png_frame --store ./artifacts/store --out ./artifacts/store/write.report.json
 npm run artifact:store -- --verify-index ./artifacts/store/index.json --out ./artifacts/store/verify.report.json
@@ -153,7 +154,7 @@ G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness
 G3: inferred edge lensing, blur falloff, chromatic fringe, highlight/shadow, alpha/tint split
 G4: motion-energy phase, press overshoot/damping/settle time, frame pacing, trajectory-source lock
 G5: full-frame p95/dropped-frame runtime gate from artifact perf fields
-G6: short/sustained stress, thermal gate, sustained degradation, energy trace availability policy
+G6: short/sustained stress, thermal gate, sustained degradation, energy trace availability and trace hash policy
 Solver: background-sweep loss over S07-S11, Pareto front, knee selection, identifiability lattice, claim constraints
 Artifact Store: content-addressed blob writer, immutable hash manifest, retention plan with tombstones
 Physical Lane: pending plan plus verifier for collected physical compositor/framebuffer repeat manifests
@@ -161,7 +162,7 @@ G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
 Scene Contract: fixed background, geometry, and capture timeline packs for every scene/state
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
-Viewer/DX: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, gate-local failure-chain explain, invalid DX replay, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
+Viewer/DX: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, gate-local failure-chain explain, invalid DX replay, Instruments/MetricKit trace report, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
 ```
 
 Current scene-contract scope locks a fixed background pack, a
@@ -191,10 +192,15 @@ interval proxy when a physical compositor capture writes `artifact.perf`.
 Precise CPU/GPU split still needs a profiler-backed adapter.
 
 Current G6 energy scope records thermal state, sustained duration,
-frame-interval degradation, and whether a power trace exists. `trace_unavailable`
-is reported in-band and becomes a hard failure only when the command is run with
-`--require-energy-trace`; Instruments Power Profiler and MetricKit adapters are
-the next layer, not silently faked here.
+frame-interval degradation, and whether a power trace exists. Available traces
+must carry `energy.trace_tool`, `energy.trace_path`,
+`energy.trace_hash_method`, and `energy.trace_sha256`; the path may point to a
+file trace (`sha256_file_v1`) or an Instruments-style directory package
+(`sha256_tree_v1`). `glass:instruments` resolves the artifact id, verifies the
+trace hash, and emits the open hint. `trace_unavailable` is reported in-band and
+becomes a hard failure only when the G6 command is run with
+`--require-energy-trace`; Instruments Power Profiler and MetricKit parsers are
+still adapters, not silently faked here.
 
 Current solver scope ranks externally generated C0/C1 candidate records rather
 than pretending the CMA-ES/TPE renderer loop is complete. It refuses single

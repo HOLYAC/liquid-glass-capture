@@ -8,6 +8,7 @@ import {
   validateCaptureArtifactIntegrity
 } from "../packages/capture-schema/src/integrity.mjs";
 import { validateMaskPack } from "../packages/mask-core/src/index.mjs";
+import { sha256TracePath, traceHashMethods } from "./lib/lab-trace-hash.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const valid = {
@@ -42,6 +43,7 @@ function main() {
     assertGenericModelIdentifierRejected(artifact);
     assertPendingIntegrityRejected(artifact);
     assertCanonicalIntegrityTamperRejected(artifact);
+    assertEnergyTraceHashRejected(artifact);
     console.log(`PASS ${artifact}`);
     return;
   }
@@ -101,7 +103,7 @@ function validateArtifact(artifact, artifactDir) {
   validateColor(errors, artifact.color);
   validateFramePack(errors, artifact.frame_pack, artifactDir, artifact);
   validatePerf(errors, artifact.perf);
-  validateEnergy(errors, artifact.energy);
+  validateEnergy(errors, artifact.energy, artifactDir);
   validateReview(errors, artifact.review);
   validateIntegrity(errors, artifact);
   return errors;
@@ -263,7 +265,7 @@ function validatePerf(errors, perf) {
   }
 }
 
-function validateEnergy(errors, energy) {
+function validateEnergy(errors, energy, artifactDir) {
   if (energy === undefined) return;
   if (!energy || typeof energy !== "object") {
     errors.push("energy must be an object when present");
@@ -281,6 +283,39 @@ function validateEnergy(errors, energy) {
       "validated_powermetrics_aux"
     ]);
   }
+  if (energy.trace_path !== undefined) {
+    requireString(errors, "energy.trace_path", energy.trace_path);
+  }
+  if (energy.trace_hash_method !== undefined) {
+    requireEnum(errors, "energy.trace_hash_method", energy.trace_hash_method, traceHashMethods);
+  }
+  if (energy.trace_sha256 !== undefined) {
+    requireSha256(errors, "energy.trace_sha256", energy.trace_sha256);
+  }
+
+  if (energy.trace_available === true) {
+    requireValue(errors, energy.trace_status === "available", "energy.trace_status must be available when trace_available is true");
+    requireString(errors, "energy.trace_tool", energy.trace_tool);
+    requireString(errors, "energy.trace_path", energy.trace_path);
+    requireEnum(errors, "energy.trace_hash_method", energy.trace_hash_method, traceHashMethods);
+    requireSha256(errors, "energy.trace_sha256", energy.trace_sha256);
+  }
+  if (energy.trace_available === false && energy.trace_status === "available") {
+    errors.push("energy.trace_status cannot be available when trace_available is false");
+  }
+
+  const hasTracePath = typeof energy.trace_path === "string" && energy.trace_path.length > 0;
+  const hasTraceSha = typeof energy.trace_sha256 === "string" && energy.trace_sha256.length > 0;
+  if (hasTracePath !== hasTraceSha) {
+    errors.push("energy.trace_path and energy.trace_sha256 must be recorded together");
+  }
+  if ((hasTracePath || hasTraceSha) && energy.trace_hash_method === undefined) {
+    errors.push("energy.trace_hash_method is required when energy.trace_path is recorded");
+  }
+  if (hasTracePath && hasTraceSha && traceHashMethods.includes(energy.trace_hash_method)) {
+    verifyTracePathHash(errors, artifactDir, energy);
+  }
+
   for (const key of ["energy_mj_per_10s", "average_power_mw", "thermal_onset_ms"]) {
     if (energy[key] !== undefined) {
       requireNumber(errors, `energy.${key}`, energy[key]);
@@ -351,6 +386,20 @@ function verifyPathHash(errors, artifactDir, label, rawPath, expectedHash) {
   }
 }
 
+function verifyTracePathHash(errors, artifactDir, energy) {
+  const tracePath = isAbsolute(energy.trace_path)
+    ? energy.trace_path
+    : resolve(artifactDir, energy.trace_path);
+  try {
+    const actual = sha256TracePath(tracePath, energy.trace_hash_method);
+    if (actual.toLowerCase() !== String(energy.trace_sha256).toLowerCase()) {
+      errors.push(`energy.trace_sha256 mismatch: expected ${energy.trace_sha256}, got ${actual}`);
+    }
+  } catch (error) {
+    errors.push(`energy.trace_path cannot be read: ${tracePath} (${error.message})`);
+  }
+}
+
 function writeSelfTestArtifact() {
   const dir = join(repoRoot, "artifacts", "lab-self-test", "validate");
   mkdirSync(dir, { recursive: true });
@@ -368,14 +417,20 @@ function writeSelfTestArtifact() {
   const pngPath = join(dir, "native.png");
   writePng(pngPath, width, height, pixels);
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
+  const tracePath = join(dir, "power.trace.json");
+  writeFileSync(tracePath, `${JSON.stringify({
+    tool: "instruments_power_profiler",
+    sample_count: 2,
+    average_power_mw: 118.5
+  }, null, 2)}\n`);
   const artifactPath = join(dir, "native.capture.json");
-  const artifact = makeSelfTestArtifact(pngPath, maskPath);
+  const artifact = makeSelfTestArtifact(pngPath, maskPath, tracePath);
   finalizeCaptureArtifactIntegrity(artifact);
   writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
   return artifactPath;
 }
 
-function makeSelfTestArtifact(pngPath, maskPath) {
+function makeSelfTestArtifact(pngPath, maskPath, tracePath) {
   return {
     schema_version: "1.2.0",
     id: "self-test-native-s00",
@@ -432,6 +487,17 @@ function makeSelfTestArtifact(pngPath, maskPath) {
       capture_timeline_id: "S00_NULL__s00_flat_grey__rest__timeline_v1",
       capture_timeline_sha256: "61c15338f00fce2349bcbcc05103643664fd248e28d7411772131e1796babd13"
     },
+    energy: {
+      trace_available: true,
+      trace_status: "available",
+      measurement_source: "self_test_power_trace",
+      trace_tool: "instruments_power_profiler",
+      trace_path: tracePath,
+      trace_hash_method: "sha256_file_v1",
+      trace_sha256: sha256TracePath(tracePath, "sha256_file_v1"),
+      energy_mj_per_10s: 1.18,
+      average_power_mw: 118.5
+    },
     integrity: {
       artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-artifact-validate.self-test"
@@ -464,6 +530,15 @@ function assertCanonicalIntegrityTamperRejected(artifactPath) {
   const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
   if (!errors.some((error) => error.includes("INTEGRITY_ARTIFACT_SHA256_MISMATCH"))) {
     throw new Error("artifact validator self-test failed to reject canonical integrity hash mismatch");
+  }
+}
+
+function assertEnergyTraceHashRejected(artifactPath) {
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  artifact.energy.trace_sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+  const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
+  if (!errors.some((error) => error.includes("energy.trace_sha256 mismatch"))) {
+    throw new Error("artifact validator self-test failed to reject energy trace hash mismatch");
   }
 }
 

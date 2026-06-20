@@ -188,10 +188,37 @@
         "trace_status": { "enum": ["available", "trace_unavailable"] },
         "measurement_source": { "type": "string" },
         "trace_tool": { "enum": ["instruments_power_profiler", "metrickit", "validated_powermetrics_aux"] },
+        "trace_path": { "type": "string", "minLength": 1 },
+        "trace_hash_method": { "enum": ["sha256_file_v1", "sha256_tree_v1"] },
+        "trace_sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
         "energy_mj_per_10s": { "type": "number" },
         "average_power_mw": { "type": "number" },
         "thermal_onset_ms": { "type": "number" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "trace_available": { "const": true } },
+            "required": ["trace_available"]
+          },
+          "then": {
+            "required": ["trace_status", "trace_tool", "trace_path", "trace_hash_method", "trace_sha256"],
+            "properties": { "trace_status": { "const": "available" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "trace_available": { "const": false } },
+            "required": ["trace_available"]
+          },
+          "then": {
+            "not": {
+              "properties": { "trace_status": { "const": "available" } },
+              "required": ["trace_status"]
+            }
+          }
+        }
+      ]
     },
     "review": {
       "type": "object",

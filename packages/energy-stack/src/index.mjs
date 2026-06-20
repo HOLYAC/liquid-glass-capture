@@ -11,7 +11,11 @@ export function measureEnergy(artifactOrRecord, options = {}) {
   const shortStressMs = options.shortStressMs ?? 10_000;
   const sustainedStressMs = options.sustainedDurationMs ?? 60_000;
   const traceAvailable = energy.trace_available === true;
-  const traceStatus = traceAvailable ? "available" : "trace_unavailable";
+  const traceStatus = typeof energy.trace_status === "string"
+    ? energy.trace_status
+    : traceAvailable
+      ? "available"
+      : "trace_unavailable";
 
   if (looksLikeSimulator(device.model_identifier)) failures.push("G6_PHYSICAL_DEVICE_REQUIRED");
   if (device.thermal_state_start !== "nominal") failures.push("G6_THERMAL_START_NOT_NOMINAL");
@@ -38,6 +42,21 @@ export function measureEnergy(artifactOrRecord, options = {}) {
       failures.push("G6_ENERGY_TRACE_UNAVAILABLE_REQUIRED");
     } else {
       warnings.push("G6_ENERGY_TRACE_UNAVAILABLE");
+    }
+  } else {
+    if (traceStatus !== "available") failures.push("G6_ENERGY_TRACE_STATUS_NOT_AVAILABLE");
+    if (typeof energy.trace_tool !== "string" || energy.trace_tool.length === 0) {
+      failures.push("G6_ENERGY_TRACE_TOOL_MISSING");
+    }
+    if (
+      typeof energy.trace_path !== "string" ||
+      energy.trace_path.length === 0 ||
+      typeof energy.trace_hash_method !== "string" ||
+      energy.trace_hash_method.length === 0 ||
+      typeof energy.trace_sha256 !== "string" ||
+      energy.trace_sha256.length === 0
+    ) {
+      failures.push("G6_ENERGY_TRACE_POINTER_MISSING");
     }
   }
 
@@ -68,6 +87,9 @@ export function measureEnergy(artifactOrRecord, options = {}) {
       energy: {
         trace_status: traceStatus,
         trace_tool: energy.trace_tool ?? null,
+        trace_path: energy.trace_path ?? null,
+        trace_hash_method: energy.trace_hash_method ?? null,
+        trace_sha256: energy.trace_sha256 ?? null,
         energy_mj_per_10s: finiteOrNull(energy.energy_mj_per_10s),
         average_power_mw: finiteOrNull(energy.average_power_mw)
       },
@@ -91,6 +113,10 @@ export function flattenEnergyReport(report) {
   const sustained = report.metrics?.sustained ?? {};
   return {
     trace_status: energy.trace_status,
+    trace_tool: energy.trace_tool,
+    trace_path: energy.trace_path,
+    trace_hash_method: energy.trace_hash_method,
+    trace_sha256: energy.trace_sha256,
     energy_mj_per_10s: energy.energy_mj_per_10s,
     average_power_mw: energy.average_power_mw,
     thermal_start_state: thermal.start_state,
