@@ -183,6 +183,11 @@ scoring. Reports and viewers name the exact mask id (`core`, `edge_band`,
 `compositor_region`, `product_focus`) so prototype numbers cannot silently fall
 back to whole-frame or residual-selected regions.
 
+Current G3 highlight scope uses the fixed `highlight` mask for reference-vs-
+candidate centroid, width, and intensity mismatch. SDR screenshot clipping is
+explicit policy: centroid and width remain load-bearing, while intensity delta
+is either EDR-required or marked as `sdr_clip_tolerated` with a warning.
+
 Current G4 temporal scope is sequence-based and gateable only when both
 artifacts carry the same `frame_pack.trajectory_source_sha256`. Gesture scenes
 S02/S03/S04 have one source fixture each, with XCUITest and PointerEvent

@@ -44,16 +44,21 @@ export function measureOptics(reference, candidate, options = {}) {
   const edgeBand = Array.isArray(options.edgeBandIndexes) && options.edgeBandIndexes.length > 0
     ? fixedEdgeBand(options.edgeBandIndexes, refLuma, residual, width, height)
     : inferEdgeBand(refLuma, residual, width, height, options);
+  const highlightIndexes = Array.isArray(options.highlightIndexes) && options.highlightIndexes.length > 0
+    ? uniqueValidIndexes(options.highlightIndexes, pixelCount)
+    : edgeBand.indexes;
   const lensing = measureLensing(refLuma, candLuma, edgeBand, width, height, options);
   const blur = measureBlurFalloff(refLuma, candLuma, edgeBand, width, height);
   const fringe = measureChromaticFringe(reference.pixels, candidate.pixels, edgeBand, width, height);
-  const highlight = measureSignedResidualBlob(residual, width, height, 1);
+  const highlight = measureHighlightMismatch(refLuma, candLuma, reference.pixels, candidate.pixels, highlightIndexes, width, height, options);
+  const highlightResidual = measureSignedResidualBlob(residual, width, height, 1);
   const innerShadow = measureSignedResidualBlob(residual, width, height, -1);
   const alphaTint = measureAlphaTintSeparation(refOklab, candOklab, residual, edgeBand);
   const edgeBandReport = { ...edgeBand };
   delete edgeBandReport.indexes;
 
   const failures = [];
+  const warnings = [];
   if (edgeBand.sample_count === 0) failures.push("G3_EDGE_BAND_EMPTY");
   if (lensing.vector_field.p95_magnitude_px > (options.lensingP95CeilingPx ?? 3.5)) {
     failures.push("G3_EDGE_LENSING_P95_ABOVE_CEILING");
@@ -64,6 +69,23 @@ export function measureOptics(reference, candidate, options = {}) {
   if (fringe.chromatic_fringe_px > (options.chromaticFringeCeilingPx ?? 1.5)) {
     failures.push("G3_CHROMATIC_FRINGE_ABOVE_CEILING");
   }
+  if (highlight.sample_count === 0) failures.push("G3_HIGHLIGHT_MASK_EMPTY");
+  if (!highlight.mismatch.centroid_valid) failures.push("G3_HIGHLIGHT_CENTROID_UNIDENTIFIED");
+  if (highlight.mismatch.centroid_drift_px > highlight.policy.center_drift_ceiling_px) {
+    failures.push("G3_HIGHLIGHT_CENTROID_DRIFT_ABOVE_CEILING");
+  }
+  if (highlight.mismatch.width_delta_px > highlight.policy.width_delta_ceiling_px) {
+    failures.push("G3_HIGHLIGHT_WIDTH_DELTA_ABOVE_CEILING");
+  }
+  if (highlight.mismatch.intensity_delta_evaluated && highlight.mismatch.intensity_delta > highlight.policy.intensity_delta_ceiling) {
+    failures.push("G3_HIGHLIGHT_INTENSITY_DELTA_ABOVE_CEILING");
+  }
+  if (highlight.policy.sdr_clip_detected && highlight.policy.require_edr_for_clipped_highlight) {
+    failures.push("G3_HIGHLIGHT_SDR_CLIP_REQUIRES_EDR");
+  }
+  if (highlight.policy.sdr_clip_tolerated) {
+    warnings.push("G3_HIGHLIGHT_INTENSITY_DELTA_CLIP_TOLERATED");
+  }
 
   return {
     schema_version: "1.2.0",
@@ -71,6 +93,7 @@ export function measureOptics(reference, candidate, options = {}) {
     gate: "G3",
     status: failures.length === 0 ? "pass" : "fail",
     failures,
+    warnings,
     dimensions: {
       width,
       height
@@ -84,7 +107,7 @@ export function measureOptics(reference, candidate, options = {}) {
         ? "Edge band is read from the fixed scene mask pack."
         : "Edge band is inferred from reference gradient and residual energy because no fixed mask was provided.",
       "Blur radius is a high-frequency falloff proxy, not an optical PSF fit.",
-      "Highlight metrics use SDR PNG data and report clip fraction."
+      "Highlight centroid and width stay load-bearing under SDR clip; intensity delta is either EDR-required or explicitly tolerated."
     ],
     edge_band: edgeBandReport,
     metrics: {
@@ -92,6 +115,7 @@ export function measureOptics(reference, candidate, options = {}) {
       blur,
       chromatic_fringe: fringe,
       highlight,
+      highlight_residual: highlightResidual,
       inner_shadow: innerShadow,
       alpha_tint_separation: alphaTint
     }
@@ -101,9 +125,7 @@ export function measureOptics(reference, candidate, options = {}) {
 function fixedEdgeBand(indexes, refLuma, residual, width, height) {
   let residualAbsSum = 0;
   let gradientSum = 0;
-  const active = [...new Set(indexes)]
-    .filter((index) => Number.isInteger(index) && index >= 0 && index < width * height)
-    .sort((left, right) => left - right);
+  const active = uniqueValidIndexes(indexes, width * height);
   for (const index of active) {
     const x = index % width;
     const y = Math.floor(index / width);
@@ -127,6 +149,12 @@ function fixedEdgeBand(indexes, refLuma, residual, width, height) {
   };
 }
 
+function uniqueValidIndexes(indexes, pixelCount) {
+  return [...new Set(indexes)]
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < pixelCount)
+    .sort((left, right) => left - right);
+}
+
 export function flattenOpticsReport(report) {
   if (!report.metrics) return {};
   return {
@@ -137,9 +165,13 @@ export function flattenOpticsReport(report) {
     high_frequency_ratio: report.metrics.blur.high_frequency_ratio,
     chromatic_fringe_px: report.metrics.chromatic_fringe.chromatic_fringe_px,
     chromatic_delta_mean: report.metrics.chromatic_fringe.chromatic_delta_mean,
-    highlight_intensity_max: report.metrics.highlight.intensity_max,
-    highlight_width_px: report.metrics.highlight.width_px,
-    highlight_sdr_clip_fraction: report.metrics.highlight.sdr_clip_fraction,
+    highlight_centroid_drift_px: report.metrics.highlight.mismatch.centroid_drift_px,
+    highlight_width_delta_px: report.metrics.highlight.mismatch.width_delta_px,
+    highlight_intensity_delta: report.metrics.highlight.mismatch.intensity_delta,
+    highlight_intensity_delta_evaluated: report.metrics.highlight.mismatch.intensity_delta_evaluated,
+    highlight_reference_intensity_max: report.metrics.highlight.reference.intensity_max,
+    highlight_candidate_intensity_max: report.metrics.highlight.candidate.intensity_max,
+    highlight_candidate_sdr_clip_fraction: report.metrics.highlight.candidate.sdr_clip_fraction,
     inner_shadow_intensity_max: report.metrics.inner_shadow.intensity_max,
     inner_shadow_width_px: report.metrics.inner_shadow.width_px,
     alpha_proxy_mean: report.metrics.alpha_tint_separation.alpha_proxy_mean,
@@ -333,6 +365,109 @@ function measureChromaticFringe(referencePixels, candidatePixels, edgeBand, widt
     blue_residual_center_x_px: blueCenter,
     chromatic_fringe_px: validFringeOffset ? Math.abs(redCenter - blueCenter) : 0,
     chromatic_delta_mean: count === 0 ? 0 : channelDeltaSum / count
+  };
+}
+
+function measureHighlightMismatch(refLuma, candLuma, referencePixels, candidatePixels, indexes, width, height, options) {
+  const reference = measureHighlightStats(refLuma, referencePixels, indexes, width, height);
+  const candidate = measureHighlightStats(candLuma, candidatePixels, indexes, width, height);
+  const clipTolerance = options.highlightSdrClipTolerance ?? 0.01;
+  const sdrClipDetected = Math.max(reference.sdr_clip_fraction, candidate.sdr_clip_fraction) > clipTolerance;
+  const requireEdr = options.requireEdrForClippedHighlight === true;
+  const intensityDeltaEvaluated = !sdrClipDetected || requireEdr;
+  const intensityDelta = Math.abs(candidate.intensity_max - reference.intensity_max);
+  const centroidValid = reference.active_sample_count > 0 && candidate.active_sample_count > 0;
+
+  return {
+    method: "fixed_highlight_mask_luma_distribution_v1",
+    sample_count: indexes.length,
+    mask_scope: options.highlightMaskScope ?? null,
+    policy: {
+      center_drift_ceiling_px: options.highlightCenterDriftCeilingPx ?? 8,
+      width_delta_ceiling_px: options.highlightWidthDeltaCeilingPx ?? 8,
+      intensity_delta_ceiling: options.highlightIntensityDeltaCeiling ?? 0.35,
+      sdr_clip_fraction_tolerance: clipTolerance,
+      sdr_clip_detected: sdrClipDetected,
+      sdr_clip_tolerated: sdrClipDetected && !requireEdr,
+      require_edr_for_clipped_highlight: requireEdr
+    },
+    reference,
+    candidate,
+    mismatch: {
+      centroid_valid: centroidValid,
+      centroid_drift_px: centroidValid ? Math.hypot(candidate.center_x_px - reference.center_x_px, candidate.center_y_px - reference.center_y_px) : 0,
+      width_delta_px: Math.abs(candidate.width_px - reference.width_px),
+      intensity_delta: intensityDelta,
+      intensity_delta_evaluated: intensityDeltaEvaluated,
+      intensity_delta_status: intensityDeltaEvaluated ? "evaluated" : "sdr_clip_tolerated"
+    }
+  };
+}
+
+function measureHighlightStats(luma, pixels, indexes, width, height) {
+  const values = indexes.map((index) => luma[index]);
+  const baseline = quantile(values, 0.5);
+  let weightSum = 0;
+  let xSum = 0;
+  let ySum = 0;
+  let intensitySum = 0;
+  let intensityMax = 0;
+  let activeSampleCount = 0;
+  let clipCount = 0;
+
+  for (const index of indexes) {
+    const value = luma[index];
+    const weight = Math.max(0, value - baseline);
+    const offset = index * 4;
+    const clipped = pixels[offset] >= 254 || pixels[offset + 1] >= 254 || pixels[offset + 2] >= 254;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    intensitySum += value;
+    intensityMax = Math.max(intensityMax, value);
+    if (clipped) clipCount += 1;
+    if (weight <= 0) continue;
+    activeSampleCount += 1;
+    weightSum += weight;
+    xSum += x * weight;
+    ySum += y * weight;
+  }
+
+  if (indexes.length === 0 || weightSum === 0) {
+    return {
+      sample_count: indexes.length,
+      active_sample_count: activeSampleCount,
+      center_x_px: 0,
+      center_y_px: 0,
+      width_px: 0,
+      intensity_mean: indexes.length === 0 ? 0 : intensitySum / indexes.length,
+      intensity_max: intensityMax,
+      sdr_clip_fraction: indexes.length === 0 ? 0 : clipCount / indexes.length,
+      baseline_luma: baseline
+    };
+  }
+
+  const centerX = xSum / weightSum;
+  const centerY = ySum / weightSum;
+  let variance = 0;
+  for (const index of indexes) {
+    const value = luma[index];
+    const weight = Math.max(0, value - baseline);
+    if (weight <= 0) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    variance += weight * ((x - centerX) ** 2 + (y - centerY) ** 2);
+  }
+
+  return {
+    sample_count: indexes.length,
+    active_sample_count: activeSampleCount,
+    center_x_px: centerX,
+    center_y_px: centerY,
+    width_px: Math.sqrt(variance / weightSum),
+    intensity_mean: intensitySum / indexes.length,
+    intensity_max: intensityMax,
+    sdr_clip_fraction: clipCount / indexes.length,
+    baseline_luma: baseline
   };
 }
 

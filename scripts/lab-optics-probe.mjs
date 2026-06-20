@@ -21,6 +21,7 @@ function main() {
       allowInvalid: true,
       allowLayerSnapshot: true
     });
+    assertHighlightClipGuardRails();
     console.log(`${report.status.toUpperCase()} ${pair.out}`);
     if (report.status !== "pass") process.exit(1);
     return;
@@ -47,14 +48,28 @@ export function probeOptics(referencePath, candidatePath, options = {}) {
     width: reference.png.width,
     height: reference.png.height
   });
+  const highlightIndexes = maskIndexesFor(reference.mask_pack, {
+    sceneId: reference.artifact.scene_id,
+    stateId: reference.artifact.state_id,
+    maskId: "highlight",
+    width: reference.png.width,
+    height: reference.png.height
+  });
   const opticsReport = measureOptics(reference.png, candidate.png, {
     ...options,
     edgeBandIndexes,
+    highlightIndexes,
     maskScope: maskScopeBlock(reference.mask_pack, {
       sceneId: reference.artifact.scene_id,
       stateId: reference.artifact.state_id,
       maskId: "edge_band",
       sampleCount: edgeBandIndexes.length
+    }),
+    highlightMaskScope: maskScopeBlock(reference.mask_pack, {
+      sceneId: reference.artifact.scene_id,
+      stateId: reference.artifact.state_id,
+      maskId: "highlight",
+      sampleCount: highlightIndexes.length
     })
   });
   const report = {
@@ -72,6 +87,68 @@ export function probeOptics(referencePath, candidatePath, options = {}) {
     writeFileSync(resolve(options.out), `${JSON.stringify(report, null, 2)}\n`);
   }
   return report;
+}
+
+function assertHighlightClipGuardRails() {
+  const width = 6;
+  const height = 4;
+  const referencePixels = Buffer.alloc(width * height * 4);
+  const candidatePixels = Buffer.alloc(width * height * 4);
+  const highlightIndexes = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const offset = index * 4;
+      const inHighlight = x >= 2 && x <= 4 && y >= 1 && y <= 2;
+      const centerBoost = x === 3 && y === 1 ? 24 : 0;
+      const referenceValue = inHighlight ? 226 + centerBoost : 96;
+      const clippedPeak = x === 3 && y === 1;
+      const candidateValue = inHighlight ? (clippedPeak ? 255 : 246) : 96;
+      referencePixels[offset] = referenceValue;
+      referencePixels[offset + 1] = referenceValue;
+      referencePixels[offset + 2] = referenceValue;
+      referencePixels[offset + 3] = 255;
+      candidatePixels[offset] = candidateValue;
+      candidatePixels[offset + 1] = candidateValue;
+      candidatePixels[offset + 2] = candidateValue;
+      candidatePixels[offset + 3] = 255;
+      if (inHighlight) highlightIndexes.push(index);
+    }
+  }
+
+  const common = {
+    edgeBandIndexes: highlightIndexes,
+    highlightIndexes,
+    lensingP95CeilingPx: 99,
+    blurRadiusCeilingPx: 99,
+    chromaticFringeCeilingPx: 99,
+    highlightCenterDriftCeilingPx: 99,
+    highlightWidthDeltaCeilingPx: 99,
+    highlightIntensityDeltaCeiling: 0.0001
+  };
+  const tolerated = measureOptics(
+    { width, height, pixels: referencePixels },
+    { width, height, pixels: candidatePixels },
+    common
+  );
+  if (tolerated.status !== "pass" || !tolerated.warnings.includes("G3_HIGHLIGHT_INTENSITY_DELTA_CLIP_TOLERATED")) {
+    throw new Error("G3 optics self-test failed to tolerate SDR-clipped highlight intensity");
+  }
+  if (tolerated.metrics.highlight.mismatch.intensity_delta_evaluated !== false) {
+    throw new Error("G3 optics self-test failed to mark clipped highlight intensity as unevaluated");
+  }
+
+  const edrRequired = measureOptics(
+    { width, height, pixels: referencePixels },
+    { width, height, pixels: candidatePixels },
+    {
+      ...common,
+      requireEdrForClippedHighlight: true
+    }
+  );
+  if (!edrRequired.failures.includes("G3_HIGHLIGHT_SDR_CLIP_REQUIRES_EDR")) {
+    throw new Error("G3 optics self-test failed to require EDR when configured");
+  }
 }
 
 function writeSelfTestPair(outPath) {
