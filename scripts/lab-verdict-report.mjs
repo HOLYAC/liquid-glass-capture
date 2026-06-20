@@ -430,6 +430,13 @@ function assertVerdictGuardRails(fixture, passReport) {
       passReport.baseline?.final_p99_allowed !== true) {
     throw new Error("G8 guardrail failed: locked baseline evidence missing from verdict");
   }
+  if (
+    typeof passReport.trend_metrics?.visual_loss !== "number" ||
+    typeof passReport.trend_metrics?.runtime_cost_ms !== "number" ||
+    typeof passReport.trend_metrics?.energy_cost !== "number"
+  ) {
+    throw new Error("G8 guardrail failed: trend metrics missing from verdict");
+  }
 
   const gateReports = fixture.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
   const reviewReport = JSON.parse(readFileSync(resolve(fixture.review), "utf8"));

@@ -89,6 +89,7 @@ function makeReport({ args, lane, changedFiles, commands, status, blockers }) {
       workspace_hygiene: commandStatus(commands, "diff_check"),
       physical_device_capture: lane.physical_device_capture_required ? "pending_device_lane" : "not_required",
       physical_device_lane: lane.physical_device_capture_required ? "pending_physical_device_lane_report" : "not_required",
+      trend_report: lane.class === "nightly" ? "required_external_history_artifact" : "not_required",
       flake_class: blockers.length === 0 ? "NONE" : "UNKNOWN"
     },
     commands,

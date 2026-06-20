@@ -113,6 +113,7 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
     traces: {
       energy_trace: energyGate?.metrics?.energy?.trace_status ?? artifact.energy?.trace_status ?? "not_recorded"
     },
+    trend_metrics: trendMetrics({ gateMap, solverReport }),
     blockers: [...failures, ...blockers, ...(reviewReport?.failures ?? [])],
     retention: buildRetentionBlock({ artifactStoreIndex, candidateRecord, artifact }),
     reports: Object.fromEntries(gateReports.map((report) => [report.gate, report.kind ?? "gate_report"]))
@@ -271,6 +272,31 @@ function energyStatus(report) {
   return "pass";
 }
 
+function trendMetrics({ gateMap, solverReport }) {
+  const solverObjectives = solverReport?.selected_candidate?.objectives ?? {};
+  const g2 = gateMap.get("G2")?.metrics ?? {};
+  const g5 = gateMap.get("G5")?.metrics?.runtime ?? {};
+  const g6 = gateMap.get("G6")?.metrics ?? {};
+  return {
+    visual_loss: finiteOrNull(
+      solverObjectives.loss_total ??
+      g2.perception?.flip_style_error_mean ??
+      g2.color?.oklab_delta_e_mean
+    ),
+    runtime_cost_ms: finiteOrNull(
+      solverObjectives.runtime_cost_ms ??
+      g5.full_frame_ms_p95 ??
+      g5.frame_interval_ms_p95
+    ),
+    energy_cost: finiteOrNull(
+      solverObjectives.energy_cost ??
+      g6.energy?.energy_mj_per_10s ??
+      g6.energy?.average_power_mw ??
+      g6.sustained?.degradation_pct
+    )
+  };
+}
+
 function designStatus(designClass) {
   return {
     NOT_RUN: "not_run",
@@ -293,4 +319,8 @@ function deviceSummary(artifact) {
 
 function looksLikeSimulator(modelIdentifier) {
   return typeof modelIdentifier === "string" && /simulator|x86|arm64-sim/i.test(modelIdentifier);
+}
+
+function finiteOrNull(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
