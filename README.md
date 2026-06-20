@@ -141,6 +141,7 @@ npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json -
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
 npm run glass:diff -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/viewer/r0-r1.diff.html
 npm run glass:explain -- --verdict ./artifacts/g8-verdict.report.json --out ./artifacts/viewer/g8.explain.json
+npm run glass:replay -- --artifact ./artifacts/r0.capture.json --candidate ./artifacts/solver/c0-knee.json --out ./artifacts/replay/r0-c0-knee.replay.report.json
 npm run lab:self-test
 ```
 
@@ -160,7 +161,7 @@ G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
 Scene Contract: fixed background, geometry, and capture timeline packs for every scene/state
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
-Viewer/DX: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, gate-local failure-chain explain, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
+Viewer/DX: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, gate-local failure-chain explain, invalid DX replay, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
 ```
 
 Current scene-contract scope locks a fixed background pack, a
@@ -202,6 +203,12 @@ Pareto front across visual loss, runtime, and energy, selects a knee point, and
 marks each parameter as `MEASURED`, `BOUNDED_AMBIGUOUS`,
 `PROBABLE_UNDER_PRIOR`, or `AMBIGUOUS`. Non-measured parameters may support a
 fit-level result, but not a parameter-level "matched Apple" claim.
+
+Current replay scope is DX-only: `glass:replay` loads a CaptureArtifact plus a
+solver candidate, computes a canonical parameter hash, and writes a `DX_REPLAY`
+artifact/report for local iteration. Replay output is always
+`technical_class=INVALID`, `verdict_class=INVALID`, and
+`invalid_reason=NON_PHYSICAL_PATH`; it cannot feed G8 as parity evidence.
 
 Current artifact-store scope writes content-addressed blobs and an
 append-preserved `hash-manifest.jsonl`, verifies that every indexed blob still
