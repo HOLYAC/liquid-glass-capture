@@ -59,7 +59,11 @@ function assertDiffViewerContract(path) {
     'id="heatmap"',
     'id="mask-overlay"',
     'id="temporal-phase-plot"',
-    'id="frame-budget-timeline"'
+    'id="frame-budget-timeline"',
+    'id="energy-trace-panel"',
+    'id="energy-trace-link"',
+    "instruments_power_profiler",
+    "sha256_tree_v1"
   ]) {
     if (!html.includes(required)) {
       throw new Error(`diff viewer self-test missing ${required}`);

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -18,6 +19,7 @@ function main() {
     const out = args.out ?? join(repoRoot, "artifacts", "lab-self-test", "artifact-viewer", "inspect.html");
     const html = renderInspectViewer(fixture.referenceArtifact);
     const path = writeViewerHtml(out, html);
+    assertInspectViewerContract(path);
     console.log(`PASS ${path}`);
     return;
   }
@@ -48,4 +50,21 @@ function parseArgs(args) {
 
 function safeName(value) {
   return String(value).replace(/[^a-z0-9_.-]+/gi, "_").slice(0, 80) || "artifact";
+}
+
+function assertInspectViewerContract(path) {
+  const html = readFileSync(path, "utf8");
+  for (const required of [
+    'id="energy-trace-panel"',
+    'id="energy-trace-link"',
+    "instruments_power_profiler",
+    "sha256_tree_v1",
+    "hash_match",
+    "open_macos",
+    "open_windows"
+  ]) {
+    if (!html.includes(required)) {
+      throw new Error(`inspect viewer self-test missing ${required}`);
+    }
+  }
 }

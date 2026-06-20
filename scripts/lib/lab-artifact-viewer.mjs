@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lab-artifact.mjs";
 import { finalizeCaptureArtifactIntegrity } from "../../packages/capture-schema/src/integrity.mjs";
 import { readArtifactFrameSequence } from "./lab-sequence.mjs";
@@ -13,6 +13,7 @@ import { measureEnergy } from "../../packages/energy-stack/src/index.mjs";
 import { maskIndexesFor } from "../../packages/mask-core/src/index.mjs";
 import { makeReviewPacketSeed } from "../../packages/review-stack/src/index.mjs";
 import { glassTrajectoryShaByScene } from "../../packages/material-glass/src/index.mjs";
+import { sha256TracePath } from "./lab-trace-hash.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const s03PressTrajectorySha256 = glassTrajectoryShaByScene.S03_PRESS;
@@ -109,6 +110,7 @@ export function renderInspectViewer(inputPath) {
     section("Device", table(objectRows(identity.device ?? {}))),
     section("Performance", table(objectRows(artifact.perf ?? { status: "not_recorded" }))),
     section("Energy", table(objectRows(artifact.energy ?? { status: "not_recorded" }))),
+    section("Energy Trace", energyTracePanel(record)),
     section("Identifiability", table(objectRows(artifact.shader?.identifiability ?? { status: "not_recorded" }))),
     section("Raw Artifact", `<pre>${escapeHtml(JSON.stringify(artifact, null, 2))}</pre>`)
   ]);
@@ -163,6 +165,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
     section("Temporal Summary", temporalSummary(temporalReport)),
     section("Runtime Summary", runtimeSummary(runtimeReport)),
     section("Energy Summary", energySummary(energyReport)),
+    section("Candidate Energy Trace", energyTracePanel(candidateRecord)),
     section("G7 Review Packet Seed", `<pre>${escapeHtml(JSON.stringify(reviewPacketSeed, null, 2))}</pre>`),
     section("Reference", table([
       ["id", reference.id],
@@ -220,12 +223,14 @@ export function writeViewerSelfTestArtifacts() {
   writePng(candidatePng, width, height, candidatePixels);
   const referenceSequence = writeViewerMotionSequence(dir, "viewer-reference-seq", width, height, 0);
   const candidateSequence = writeViewerMotionSequence(dir, "viewer-candidate-seq", width, height, 4);
+  const referenceTrace = writeViewerTracePackage(dir, "viewer-reference");
+  const candidateTrace = writeViewerTracePackage(dir, "viewer-candidate");
 
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const referenceArtifact = join(dir, "viewer-reference.capture.json");
   const candidateArtifact = join(dir, "viewer-candidate.capture.json");
-  writeFileSync(referenceArtifact, `${JSON.stringify(makeSelfTestArtifact("R0", referencePng, maskPath, referenceSequence), null, 2)}\n`);
-  writeFileSync(candidateArtifact, `${JSON.stringify(makeSelfTestArtifact("R1", candidatePng, maskPath, candidateSequence), null, 2)}\n`);
+  writeFileSync(referenceArtifact, `${JSON.stringify(makeSelfTestArtifact("R0", referencePng, maskPath, referenceSequence, referenceTrace), null, 2)}\n`);
+  writeFileSync(candidateArtifact, `${JSON.stringify(makeSelfTestArtifact("R1", candidatePng, maskPath, candidateSequence, candidateTrace), null, 2)}\n`);
   return {
     referenceArtifact,
     candidateArtifact
@@ -472,6 +477,74 @@ function energySummary(report) {
   ].join("");
 }
 
+function energyTracePanel(record) {
+  const energy = record.artifact.energy ?? {};
+  const trace = resolveEnergyTrace(record.artifact_path, energy);
+  const rows = [
+    ["trace_available", energy.trace_available ?? "not_recorded"],
+    ["trace_status", energy.trace_status ?? "not_recorded"],
+    ["trace_tool", energy.trace_tool ?? ""],
+    ["trace_path", trace.path ?? ""],
+    ["repo_relative_path", trace.repoRelativePath ?? ""],
+    ["path_exists", trace.pathExists],
+    ["trace_hash_method", energy.trace_hash_method ?? ""],
+    ["expected_sha256", energy.trace_sha256 ?? ""],
+    ["actual_sha256", trace.actualSha256 ?? ""],
+    ["hash_match", trace.hashMatch ?? ""],
+    ["failures", trace.failures.join(", ")],
+    ["open_macos", trace.path ? `open "${trace.path}"` : ""],
+    ["open_windows", trace.path ? `start "" "${trace.path}"` : ""]
+  ];
+  const tone = trace.failures.length === 0 && energy.trace_available === true ? "ok" : "warn";
+  const link = trace.path
+    ? `<p><a id="energy-trace-link" href="${escapeHtml(pathToFileURL(trace.path).href)}">open trace package</a></p>`
+    : "";
+  return `
+    <div id="energy-trace-panel" class="trace-panel ${tone}">
+      ${link}
+      ${table(rows)}
+    </div>
+  `;
+}
+
+function resolveEnergyTrace(artifactPath, energy) {
+  const rawPath = energy.trace_path;
+  const tracePath = typeof rawPath === "string" && rawPath.length > 0
+    ? isAbsolute(rawPath)
+      ? rawPath
+      : resolve(dirname(artifactPath), rawPath)
+    : "";
+  const failures = [];
+  let actualSha256 = "";
+  let hashMatch = "";
+
+  if (energy.trace_available !== true) failures.push("TRACE_UNAVAILABLE");
+  if (energy.trace_available === true && energy.trace_status !== "available") failures.push("TRACE_STATUS_NOT_AVAILABLE");
+  if (energy.trace_available === true && !energy.trace_tool) failures.push("TRACE_TOOL_MISSING");
+  if (energy.trace_available === true && !tracePath) failures.push("TRACE_PATH_MISSING");
+  if (energy.trace_available === true && !energy.trace_hash_method) failures.push("TRACE_HASH_METHOD_MISSING");
+  if (energy.trace_available === true && !energy.trace_sha256) failures.push("TRACE_SHA256_MISSING");
+
+  if (tracePath && energy.trace_hash_method && energy.trace_sha256) {
+    try {
+      actualSha256 = sha256TracePath(tracePath, energy.trace_hash_method);
+      hashMatch = String(actualSha256.toLowerCase() === energy.trace_sha256.toLowerCase());
+      if (hashMatch !== "true") failures.push("TRACE_SHA256_MISMATCH");
+    } catch (error) {
+      failures.push(`TRACE_UNREADABLE:${error.message}`);
+    }
+  }
+
+  return {
+    path: tracePath,
+    repoRelativePath: tracePath ? relative(repoRoot, tracePath).replace(/\\/g, "/") : "",
+    pathExists: tracePath ? existsSync(tracePath) : false,
+    actualSha256,
+    hashMatch,
+    failures
+  };
+}
+
 function temporalSummary(report) {
   return [
     table([
@@ -637,6 +710,26 @@ function writeViewerMotionSequence(dir, prefix, width, height, staticBias) {
   return {
     paths,
     timestamps_ms: [0, 16.67, 33.33, 50, 66.67, 83.33]
+  };
+}
+
+function writeViewerTracePackage(dir, prefix) {
+  const tracePath = join(dir, `${prefix}.trace`);
+  mkdirSync(tracePath, { recursive: true });
+  writeFileSync(join(tracePath, "metadata.json"), `${JSON.stringify({
+    tool: "instruments_power_profiler",
+    sample_rate_hz: 10,
+    fixture: prefix
+  }, null, 2)}\n`);
+  writeFileSync(join(tracePath, "samples.jsonl"), [
+    JSON.stringify({ t_ms: 0, power_mw: 118.2 }),
+    JSON.stringify({ t_ms: 100, power_mw: 118.9 }),
+    JSON.stringify({ t_ms: 200, power_mw: 117.8 })
+  ].join("\n") + "\n");
+  return {
+    path: tracePath,
+    artifactPath: `${prefix}.trace`,
+    sha256: sha256TracePath(tracePath, "sha256_tree_v1")
   };
 }
 
@@ -851,7 +944,7 @@ pre { margin:0; overflow:auto; max-height:56vh; padding:12px; background:#050607
 `;
 }
 
-function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
+function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence, trace) {
   return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `viewer-self-test-${rigId}`,
@@ -912,7 +1005,15 @@ function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
       }
     },
     energy: {
-      trace_available: false
+      trace_available: true,
+      trace_status: "available",
+      measurement_source: "artifact_viewer_self_test_power_trace",
+      trace_tool: "instruments_power_profiler",
+      trace_path: trace.artifactPath,
+      trace_hash_method: "sha256_tree_v1",
+      trace_sha256: trace.sha256,
+      energy_mj_per_10s: 1.18,
+      average_power_mw: 118.3
     },
     perf: {
       measurement_source: "artifact-viewer-self-test",
