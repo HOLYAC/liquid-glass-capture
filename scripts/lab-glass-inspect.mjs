@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -19,7 +19,19 @@ function main() {
     const out = args.out ?? join(repoRoot, "artifacts", "lab-self-test", "artifact-viewer", "inspect.html");
     const html = renderInspectViewer(fixture.referenceArtifact);
     const path = writeViewerHtml(out, html);
+    const reportFixtures = writeInspectReportFixtures();
+    const outDir = dirname(resolve(out));
+    const trendPath = writeViewerHtml(
+      join(outDir, "trend.inspect.html"),
+      renderInspectViewer(reportFixtures.trendReport)
+    );
+    const flakePath = writeViewerHtml(
+      join(outDir, "flake-classification.inspect.html"),
+      renderInspectViewer(reportFixtures.flakeReport)
+    );
     assertInspectViewerContract(path);
+    assertTrendViewerContract(trendPath);
+    assertFlakeViewerContract(flakePath);
     console.log(`PASS ${path}`);
     return;
   }
@@ -65,6 +77,193 @@ function assertInspectViewerContract(path) {
   ]) {
     if (!html.includes(required)) {
       throw new Error(`inspect viewer self-test missing ${required}`);
+    }
+  }
+}
+
+function writeInspectReportFixtures() {
+  const dir = join(repoRoot, "artifacts", "lab-self-test", "artifact-viewer");
+  const trendReport = join(dir, "trend.report.json");
+  const flakeReport = join(dir, "flake-classification.report.json");
+  writeFileSync(trendReport, `${JSON.stringify(makeInspectTrendReport(), null, 2)}\n`);
+  writeFileSync(flakeReport, `${JSON.stringify(makeInspectFlakeReport(), null, 2)}\n`);
+  return {
+    trendReport,
+    flakeReport
+  };
+}
+
+function makeInspectTrendReport() {
+  return {
+    schema_version: "1.2.0",
+    kind: "trend_report",
+    status: "pass",
+    generated_at: "2026-01-01T00:00:00.000Z",
+    failures: [],
+    policy: {
+      last_valid_run_limit: 30,
+      valid_run_rule: "exclude INVALID verdicts and INFRA_FLAKE runs",
+      slope_method: "ordinary_least_squares_over_sequence_index"
+    },
+    source_counts: {
+      g8_verdict_report: 35
+    },
+    run_counts: {
+      input: 35,
+      grouped: 35,
+      valid: 33,
+      last_valid: 30
+    },
+    trends: {
+      per_gate: {
+        static: {
+          count: 30,
+          pass_count: 29,
+          fail_count: 1,
+          statuses: { pass: 29, fail: 1 }
+        }
+      },
+      per_device: {
+        "iPhone16,2": {
+          count: 15,
+          pass_count: 15,
+          fail_count: 0,
+          statuses: { pass: 15 }
+        }
+      },
+      per_ios_build: {
+        "26A200": {
+          count: 17,
+          pass_count: 16,
+          fail_count: 1,
+          statuses: { pass: 16, fail: 1 }
+        }
+      },
+      visual_loss: {
+        count: 30,
+        latest: 0.0245,
+        min: 0.0105,
+        max: 0.0245,
+        slope_per_run: 0.0005,
+        direction: "up"
+      },
+      runtime_cost_ms: {
+        count: 30,
+        latest: 16.25,
+        min: 16.25,
+        max: 17.95,
+        slope_per_run: -0.05,
+        direction: "down"
+      },
+      energy_cost: {
+        count: 30,
+        latest: 2.08,
+        min: 1.42,
+        max: 2.08,
+        slope_per_run: 0.02,
+        direction: "up"
+      },
+      flake_rate: {
+        count: 30,
+        rate: 0.13,
+        slope_per_run: 0.01,
+        direction: "up"
+      }
+    },
+    last_30_valid_runs: [
+      {
+        run_id: "trend-self-test-30",
+        source_kind: "g8_verdict_report",
+        source_kinds: ["g8_verdict_report"],
+        input_paths: ["artifacts/lab-self-test/trend-report/run-30.g8-verdict.report.json"],
+        generated_at: "2026-01-01T00:30:00.000Z",
+        status: "pass",
+        verdict_class: "PROD_PASS",
+        technical_class: "SHADER_PASS",
+        flake_class: "NONE",
+        device: {
+          model_name: "iPhone Pro",
+          model_identifier: "iPhone16,2",
+          os_build: "26A200",
+          sdk_build: "26.0"
+        },
+        gates: {
+          static: "pass",
+          optics: "pass",
+          energy: "pass"
+        },
+        metrics: {
+          visual_loss: 0.0245,
+          runtime_cost_ms: 16.25,
+          energy_cost: 2.08
+        }
+      }
+    ]
+  };
+}
+
+function makeInspectFlakeReport() {
+  return {
+    schema_version: "1.2.0",
+    kind: "flake_classification_report",
+    status: "pass",
+    generated_at: "2026-01-01T00:00:00.000Z",
+    flake_class: "PRODUCT_REGRESSION",
+    failures: [],
+    policy: {
+      classes: ["NONE", "METRIC_NOISE", "INFRA_FLAKE", "PRODUCT_REGRESSION", "UNKNOWN"],
+      priority: "UNKNOWN > PRODUCT_REGRESSION > INFRA_FLAKE > METRIC_NOISE > NONE",
+      rules: {
+        INFRA_FLAKE: "device/daemon/runner/capture-path/thermal-precondition failures",
+        PRODUCT_REGRESSION: "deterministic G2-G6/G8 product or metric failures after valid capture",
+        METRIC_NOISE: "explicit noise/outlier/confidence evidence only",
+        UNKNOWN: "evidence exists but no deterministic rule matched"
+      }
+    },
+    action: "block_as_product_red",
+    class_counts: {
+      PRODUCT_REGRESSION: 1
+    },
+    evidence: [
+      {
+        type: "failure",
+        code: "G2_SSIM_BELOW_FLOOR",
+        source_kind: "g2_metric_report",
+        input_path: "artifacts/g2.report.json",
+        class: "PRODUCT_REGRESSION",
+        rule: "product_pattern"
+      }
+    ]
+  };
+}
+
+function assertTrendViewerContract(path) {
+  const html = readFileSync(path, "utf8");
+  for (const required of [
+    'id="trend-slopes"',
+    'id="trend-last-valid-runs"',
+    "visual_loss",
+    "per_gate",
+    "iPhone16,2",
+    "26A200"
+  ]) {
+    if (!html.includes(required)) {
+      throw new Error(`trend inspect viewer self-test missing ${required}`);
+    }
+  }
+}
+
+function assertFlakeViewerContract(path) {
+  const html = readFileSync(path, "utf8");
+  for (const required of [
+    'id="flake-classification-evidence"',
+    "PRODUCT_REGRESSION",
+    "block_as_product_red",
+    "G2_SSIM_BELOW_FLOOR",
+    "product_pattern"
+  ]) {
+    if (!html.includes(required)) {
+      throw new Error(`flake inspect viewer self-test missing ${required}`);
     }
   }
 }

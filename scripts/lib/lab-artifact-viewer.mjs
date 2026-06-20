@@ -54,6 +54,12 @@ export function renderInspectViewer(inputPath) {
   if (json.kind === "g8_verdict_report") {
     return renderVerdictViewer(absolute, json);
   }
+  if (json.kind === "trend_report") {
+    return renderTrendViewer(absolute, json);
+  }
+  if (json.kind === "flake_classification_report") {
+    return renderFlakeClassificationViewer(absolute, json);
+  }
   if (json.kind === "solver_pareto_report") {
     return renderSolverViewer(absolute, json);
   }
@@ -275,6 +281,62 @@ function renderVerdictViewer(path, report) {
   ]);
 }
 
+function renderTrendViewer(path, report) {
+  return page("Trend Inspect", [
+    hero("Trend Inspect", report.generated_at ?? relative(repoRoot, path), [
+      statusPill("trend", report.status ?? "unknown"),
+      statusPill("valid", report.run_counts?.valid ?? "0"),
+      statusPill("last", report.run_counts?.last_valid ?? "0")
+    ]),
+    section("Summary", table([
+      ["kind", report.kind],
+      ["status", report.status],
+      ["generated_at", report.generated_at],
+      ["input_runs", report.run_counts?.input ?? ""],
+      ["grouped_runs", report.run_counts?.grouped ?? ""],
+      ["valid_runs", report.run_counts?.valid ?? ""],
+      ["last_valid_runs", report.run_counts?.last_valid ?? ""],
+      ["failures", (report.failures ?? []).join(", ")],
+      ["source", relative(repoRoot, path)]
+    ])),
+    section("Policy", table(objectRows(report.policy ?? { status: "not_recorded" }))),
+    section("Sources", table(countRows(report.source_counts))),
+    section("Trend Slopes", `<div id="trend-slopes">${table(trendMetricRows(report.trends ?? {}))}</div>`),
+    section("Per Gate", `<div id="trend-per-gate">${table(trendBucketRows(report.trends?.per_gate))}</div>`),
+    section("Per Device", `<div id="trend-per-device">${table(trendBucketRows(report.trends?.per_device))}</div>`),
+    section("Per iOS Build", `<div id="trend-per-ios-build">${table(trendBucketRows(report.trends?.per_ios_build))}</div>`),
+    section("Last 30 Valid Runs", `<div id="trend-last-valid-runs">${table(trendRunRows(report.last_30_valid_runs))}</div>`),
+    section("Raw Trend", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
+  ]);
+}
+
+function renderFlakeClassificationViewer(path, report) {
+  return page("Flake Classification Inspect", [
+    hero("Flake Classification Inspect", report.flake_class ?? relative(repoRoot, path), [
+      statusPill("flake", report.flake_class ?? "unknown"),
+      statusPill("status", report.status ?? "unknown"),
+      statusPill("action", report.action ?? "unknown")
+    ]),
+    section("Summary", table([
+      ["kind", report.kind],
+      ["status", report.status],
+      ["generated_at", report.generated_at],
+      ["flake_class", report.flake_class],
+      ["action", report.action],
+      ["failures", (report.failures ?? []).join(", ")],
+      ["source", relative(repoRoot, path)]
+    ])),
+    section("Class Counts", table(countRows(report.class_counts))),
+    section("Policy", table([
+      ["classes", (report.policy?.classes ?? []).join(", ")],
+      ["priority", report.policy?.priority ?? ""],
+      ...policyRuleRows(report.policy?.rules)
+    ])),
+    section("Evidence", `<div id="flake-classification-evidence">${table(flakeEvidenceRows(report.evidence))}</div>`),
+    section("Raw Flake Classification", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
+  ]);
+}
+
 function renderSolverViewer(path, report) {
   return page("Solver Inspect", [
     hero("Solver Inspect", report.selected_candidate?.id ?? relative(repoRoot, path), [
@@ -305,6 +367,70 @@ function renderSolverViewer(path, report) {
     section("Failures", table((report.failures ?? []).map((failure, index) => [index, failure]))),
     section("Raw Solver Report", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
+}
+
+function trendMetricRows(trends) {
+  const metrics = ["visual_loss", "runtime_cost_ms", "energy_cost", "flake_rate"];
+  const rows = metrics.map((metric) => {
+    const summary = trends[metric] ?? {};
+    const latest = metric === "flake_rate" ? summary.rate : summary.latest;
+    return [
+      metric,
+      `count=${summary.count ?? 0} latest=${formatValue(latest)} min=${formatValue(summary.min)} max=${formatValue(summary.max)} slope=${formatValue(summary.slope_per_run)} direction=${summary.direction ?? "not_recorded"}`
+    ];
+  });
+  return rows.length > 0 ? rows : [["trends", "not_recorded"]];
+}
+
+function trendBucketRows(buckets) {
+  const rows = Object.entries(buckets ?? {}).map(([key, summary]) => [
+    key,
+    `count=${summary.count ?? 0} pass=${summary.pass_count ?? 0} fail=${summary.fail_count ?? 0} statuses=${formatValue(summary.statuses ?? {})}`
+  ]);
+  return rows.length > 0 ? rows : [["buckets", "not_recorded"]];
+}
+
+function trendRunRows(runs) {
+  const rows = (runs ?? []).map((run) => [
+    run.run_id ?? "",
+    [
+      run.generated_at ?? "",
+      `status=${run.status ?? ""}`,
+      `verdict=${run.verdict_class ?? ""}`,
+      `technical=${run.technical_class ?? ""}`,
+      `flake=${run.flake_class ?? ""}`,
+      `device=${run.device?.model_identifier ?? ""}`,
+      `ios=${run.device?.os_build ?? ""}`,
+      `visual=${formatValue(run.metrics?.visual_loss)}`,
+      `runtime=${formatValue(run.metrics?.runtime_cost_ms)}`,
+      `energy=${formatValue(run.metrics?.energy_cost)}`,
+      `sources=${(run.source_kinds ?? [run.source_kind]).join("+")}`
+    ].join(" ")
+  ]);
+  return rows.length > 0 ? rows : [["runs", "not_recorded"]];
+}
+
+function flakeEvidenceRows(evidence) {
+  const rows = (evidence ?? []).map((entry) => [
+    entry.code ?? "",
+    [
+      `class=${entry.class ?? ""}`,
+      `rule=${entry.rule ?? ""}`,
+      `type=${entry.type ?? ""}`,
+      `source=${entry.source_kind ?? ""}`,
+      `path=${entry.input_path ?? ""}`
+    ].join(" ")
+  ]);
+  return rows.length > 0 ? rows : [["evidence", "not_recorded"]];
+}
+
+function policyRuleRows(rules) {
+  return Object.entries(rules ?? {}).map(([key, value]) => [`rule.${key}`, value]);
+}
+
+function countRows(counts) {
+  const rows = Object.entries(counts ?? {}).map(([key, value]) => [key, value]);
+  return rows.length > 0 ? rows : [["counts", "not_recorded"]];
 }
 
 function renderPhysicalDeviceLaneViewer(path, report) {

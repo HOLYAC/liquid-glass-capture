@@ -166,7 +166,7 @@ Flake: deterministic failure-code classifier for INFRA_FLAKE / PRODUCT_REGRESSIO
 Trend: last-30 valid run report with gate/device/iOS buckets and visual/runtime/energy/flake slopes
 Scene Contract: fixed background, geometry, and capture timeline packs for every scene/state
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
-Viewer/DX: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, gate-local failure-chain explain, invalid DX replay, Instruments/MetricKit trace report, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
+Viewer/DX: artifact/baseline/verdict/trend/flake inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, gate-local failure-chain explain, invalid DX replay, Instruments/MetricKit trace report, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
 ```
 
 Current scene-contract scope locks a fixed background pack, a
@@ -317,7 +317,8 @@ or final verdicts. Device/runner/capture-path/thermal-precondition failures are
 evidence is `METRIC_NOISE` and does not block alone; unrecognized evidence is
 `UNKNOWN` and blocks until classified. G8 and CI reports now carry the
 `flake_classification` block instead of silently defaulting red runs to
-`UNKNOWN`.
+`UNKNOWN`. `glass:inspect` renders `flake_classification_report` evidence,
+policy, class counts, and action as first-class viewer sections.
 
 Current trend scope normalizes G8 verdicts, CI reports, solver reports, and
 G2/G5/G6 gate reports into one nightly `trend_report`, grouping related
@@ -326,7 +327,9 @@ excluding `INVALID` verdicts and `INFRA_FLAKE`, then reports
 per-gate, per-device, and per-iOS-build status buckets plus ordinary-least-
 squares slopes for visual loss, runtime cost, energy cost, and flake rate. G8
 now emits `trend_metrics` so the trend report can read final verdict artifacts
-without reconstructing solver/gate history by hand.
+without reconstructing solver/gate history by hand. `glass:inspect` renders
+`trend_report` source counts, run counts, slopes, gate/device/iOS buckets, and
+the last valid run window as first-class viewer sections.
 
 ## Production / TestFlight
 
