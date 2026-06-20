@@ -266,7 +266,7 @@ function checkConnectedDevice(toolPath, request) {
         next: [
           "Connect the iPhone by USB.",
           "Unlock it and tap Trust This Computer.",
-          "Open the app, press B, then rerun npm run phone:pull -- --bootstrap."
+          "Rerun npm run proof:run, install the printed IPA, open the app, and press B."
         ]
       }
     };
@@ -382,12 +382,12 @@ function nextSteps(status, checks) {
   }
   if (findCheck(checks, "connected_ios_device")?.status === "fail") {
     return {
-      connect_phone: "Connect iPhone by USB, unlock, Trust This Computer, open app, press B, rerun npm run phone:wait"
+      connect_phone: "Connect iPhone by USB, unlock, Trust This Computer, rerun npm run proof:run, install the printed IPA, open the app, press B"
     };
   }
   if (findCheck(checks, "wait_for_phone_pull")?.status === "fail") {
     return {
-      wait_again: "Keep the iPhone connected, open the app, press B, rerun npm run phone:wait"
+      wait_again: "Keep the iPhone connected, rerun npm run proof:run, install the printed IPA, open the app, press B"
     };
   }
   return {
@@ -581,7 +581,7 @@ function runSelfTest() {
   if (
     timeout.status !== "fail" ||
     findCheck(timeout.checks, "wait_for_phone_pull")?.status !== "fail" ||
-    timeout.next?.connect_phone !== "Connect iPhone by USB, unlock, Trust This Computer, open app, press B, rerun npm run phone:wait"
+    timeout.next?.connect_phone !== "Connect iPhone by USB, unlock, Trust This Computer, rerun npm run proof:run, install the printed IPA, open the app, press B"
   ) {
     throw new Error("phone-pull self-test failed wait timeout path");
   }
