@@ -152,7 +152,7 @@ Current metric scope:
 
 ```text
 G1: Display P3 artifact contract + linear Display P3 normalization
-G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness
+G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness, text legibility
 G3: inferred edge lensing, blur falloff, chromatic fringe, highlight/shadow, alpha/tint split
 G4: motion-energy phase, press overshoot/damping/settle time, frame pacing, trajectory-source lock
 G5: full-frame p95/dropped-frame runtime gate from artifact perf fields
@@ -187,6 +187,11 @@ Current G3 highlight scope uses the fixed `highlight` mask for reference-vs-
 candidate centroid, width, and intensity mismatch. SDR screenshot clipping is
 explicit policy: centroid and width remain load-bearing, while intensity delta
 is either EDR-required or marked as `sdr_clip_tolerated` with a warning.
+
+Current G2 text scope uses the fixed `text` mask for glyph edge contrast
+retention and the fixed `text_halo` mask for local contrast stability around
+glyph edges. These are machine legibility probes; G7 still owns product/design
+review.
 
 Current G4 temporal scope is sequence-based and gateable only when both
 artifacts carry the same `frame_pack.trajectory_source_sha256`. Gesture scenes

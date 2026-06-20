@@ -10,6 +10,7 @@ import {
   flattenMetricReport,
   summarizeMetricSeries
 } from "../packages/metric-stack/src/index.mjs";
+import { maskIndexesFor } from "../packages/mask-core/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requestedRepeat = Object.freeze({
@@ -90,6 +91,9 @@ const metricThresholdPolicies = Object.freeze({
   flip_style_error_p99: metricPolicy("identity", "lower_is_better"),
   flip_style_error_max: metricPolicy("identity", "lower_is_better"),
   gradient_smoothness_mean_abs_delta: metricPolicy("identity", "lower_is_better"),
+  text_edge_contrast_retention_loss: metricPolicy("identity", "lower_is_better"),
+  text_edge_contrast_delta: metricPolicy("identity", "lower_is_better"),
+  text_halo_local_contrast_stability_delta: metricPolicy("identity", "lower_is_better"),
   max_abs_channel_delta: metricPolicy("identity", "lower_is_better"),
   mean_abs_channel_delta: metricPolicy("identity", "lower_is_better")
 });
@@ -243,7 +247,26 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
 }
 
 function compareRecords(reference, candidate) {
-  const report = compareMetricImages(reference.png, candidate.png);
+  const common = {
+    sceneId: reference.artifact.scene_id,
+    stateId: reference.artifact.state_id,
+    width: reference.png.width,
+    height: reference.png.height
+  };
+  const report = compareMetricImages(reference.png, candidate.png, {
+    maskIndexes: maskIndexesFor(reference.mask_pack, {
+      ...common,
+      maskId: "core"
+    }),
+    textIndexes: maskIndexesFor(reference.mask_pack, {
+      ...common,
+      maskId: "text"
+    }),
+    textHaloIndexes: maskIndexesFor(reference.mask_pack, {
+      ...common,
+      maskId: "text_halo"
+    })
+  });
   return flattenMetricReport(report);
 }
 

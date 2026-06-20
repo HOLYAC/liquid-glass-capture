@@ -24,6 +24,7 @@ function main() {
       allowLayerSnapshot: true,
       selfTest: true
     });
+    assertTextLegibilityGuardRails();
     console.log(`${report.status.toUpperCase()} ${pair.out}`);
     if (report.status !== "pass") process.exit(1);
     return;
@@ -52,14 +53,42 @@ export function compareArtifacts(referencePath, candidatePath, options = {}) {
     width: reference.png.width,
     height: reference.png.height
   });
+  const textIndexes = maskIndexesFor(reference.mask_pack, {
+    sceneId: reference.artifact.scene_id,
+    stateId: reference.artifact.state_id,
+    maskId: "text",
+    width: reference.png.width,
+    height: reference.png.height
+  });
+  const textHaloIndexes = maskIndexesFor(reference.mask_pack, {
+    sceneId: reference.artifact.scene_id,
+    stateId: reference.artifact.state_id,
+    maskId: "text_halo",
+    width: reference.png.width,
+    height: reference.png.height
+  });
   const metricReport = compareMetricImages(reference.png, candidate.png, {
     ...options,
     maskIndexes,
+    textIndexes,
+    textHaloIndexes,
     maskScope: maskScopeBlock(reference.mask_pack, {
       sceneId: reference.artifact.scene_id,
       stateId: reference.artifact.state_id,
       maskId: "core",
       sampleCount: maskIndexes.length
+    }),
+    textMaskScope: maskScopeBlock(reference.mask_pack, {
+      sceneId: reference.artifact.scene_id,
+      stateId: reference.artifact.state_id,
+      maskId: "text",
+      sampleCount: textIndexes.length
+    }),
+    textHaloMaskScope: maskScopeBlock(reference.mask_pack, {
+      sceneId: reference.artifact.scene_id,
+      stateId: reference.artifact.state_id,
+      maskId: "text_halo",
+      sampleCount: textHaloIndexes.length
     })
   });
   const report = {
@@ -79,6 +108,57 @@ export function compareArtifacts(referencePath, candidatePath, options = {}) {
   return report;
 }
 
+function assertTextLegibilityGuardRails() {
+  const width = 8;
+  const height = 6;
+  const referencePixels = Buffer.alloc(width * height * 4);
+  const candidatePixels = Buffer.alloc(width * height * 4);
+  const textIndexes = [];
+  const textHaloIndexes = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const offset = index * 4;
+      const inText = x >= 2 && x <= 5 && y >= 1 && y <= 4;
+      const inHalo = x >= 1 && x <= 6 && y >= 0 && y <= 5;
+      const glyphValue = (x + y) % 2 === 0 ? 36 : 228;
+      const referenceValue = inText ? glyphValue : 112;
+      const candidateValue = inText ? 132 : 112;
+      referencePixels[offset] = referenceValue;
+      referencePixels[offset + 1] = referenceValue;
+      referencePixels[offset + 2] = referenceValue;
+      referencePixels[offset + 3] = 255;
+      candidatePixels[offset] = candidateValue;
+      candidatePixels[offset + 1] = candidateValue;
+      candidatePixels[offset + 2] = candidateValue;
+      candidatePixels[offset + 3] = 255;
+      if (inText) textIndexes.push(index);
+      if (inHalo) textHaloIndexes.push(index);
+    }
+  }
+
+  const report = compareMetricImages(
+    { width, height, pixels: referencePixels },
+    { width, height, pixels: candidatePixels },
+    {
+      ssimFloor: 0,
+      msSsimFloor: 0,
+      oklabMeanCeiling: 10,
+      flipMeanCeiling: 10,
+      textIndexes,
+      textHaloIndexes,
+      textEdgeContrastRetentionFloor: 0.9,
+      textHaloStabilityDeltaCeiling: 0.0001
+    }
+  );
+  if (!report.failures.includes("G2_TEXT_EDGE_CONTRAST_RETENTION_BELOW_FLOOR")) {
+    throw new Error("G2 text self-test failed to catch glyph contrast loss");
+  }
+  if (!report.failures.includes("G2_TEXT_HALO_STABILITY_DELTA_ABOVE_CEILING")) {
+    throw new Error("G2 text self-test failed to catch text halo instability");
+  }
+}
+
 function writeSelfTestPair(outPath) {
   const dir = join(repoRoot, "artifacts", "lab-self-test", "metrics-compare");
   mkdirSync(dir, { recursive: true });
@@ -90,14 +170,14 @@ function writeSelfTestPair(outPath) {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const offset = (y * width + x) * 4;
-      const value = 32 + x * 4 + y * 2;
+      const value = (x + y) % 2 === 0 ? 48 : 208;
       referencePixels[offset] = value;
-      referencePixels[offset + 1] = 96;
-      referencePixels[offset + 2] = 144;
+      referencePixels[offset + 1] = value;
+      referencePixels[offset + 2] = value;
       referencePixels[offset + 3] = 255;
       candidatePixels[offset] = value;
-      candidatePixels[offset + 1] = 96;
-      candidatePixels[offset + 2] = 144;
+      candidatePixels[offset + 1] = value;
+      candidatePixels[offset + 2] = value;
       candidatePixels[offset + 3] = 255;
     }
   }

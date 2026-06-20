@@ -35,6 +35,8 @@ export function compareMetricImages(reference, candidate, options = {}) {
   const height = reference.height;
   const pixelCount = width * height;
   const activeIndexes = normalizeMaskIndexes(options.maskIndexes, pixelCount);
+  const textIndexes = normalizeMaskIndexes(options.textIndexes ?? options.maskIndexes, pixelCount);
+  const textHaloIndexes = normalizeMaskIndexes(options.textHaloIndexes ?? options.textIndexes ?? options.maskIndexes, pixelCount);
   const activeCount = activeIndexes.length;
   const refLuma = new Float64Array(pixelCount);
   const candLuma = new Float64Array(pixelCount);
@@ -104,6 +106,8 @@ export function compareMetricImages(reference, candidate, options = {}) {
 
   const ssim = computeSsim(refLuma, candLuma, activeIndexes);
   const msSsim = options.maskIndexes ? ssim : computeMsSsim(refLuma, candLuma, width, height);
+  const text = measureTextLegibility(refLuma, candLuma, textIndexes, width, height, options);
+  const textHalo = measureTextHaloStability(refLuma, candLuma, textHaloIndexes, width, height, options);
   const failures = [];
   if (ssim < (options.ssimFloor ?? 0.995)) failures.push("G2_SSIM_BELOW_FLOOR");
   if (msSsim < (options.msSsimFloor ?? 0.995)) failures.push("G2_MS_SSIM_BELOW_FLOOR");
@@ -112,6 +116,15 @@ export function compareMetricImages(reference, candidate, options = {}) {
   }
   if (flipSum / activeCount > (options.flipMeanCeiling ?? 0.004)) {
     failures.push("G2_FLIP_STYLE_MEAN_ABOVE_CEILING");
+  }
+  if (text.sample_count === 0) failures.push("G2_TEXT_MASK_EMPTY");
+  if (!text.reference_contrast_identified) failures.push("G2_TEXT_REFERENCE_CONTRAST_UNIDENTIFIED");
+  if (text.edge_contrast_retention < text.policy.edge_contrast_retention_floor) {
+    failures.push("G2_TEXT_EDGE_CONTRAST_RETENTION_BELOW_FLOOR");
+  }
+  if (textHalo.sample_count === 0) failures.push("G2_TEXT_HALO_MASK_EMPTY");
+  if (textHalo.local_contrast_stability_delta > textHalo.policy.local_contrast_stability_delta_ceiling) {
+    failures.push("G2_TEXT_HALO_STABILITY_DELTA_ABOVE_CEILING");
   }
 
   return {
@@ -154,6 +167,10 @@ export function compareMetricImages(reference, candidate, options = {}) {
       gradient: {
         smoothness_mean_abs_delta:
           gradientResidualCount === 0 ? 0 : gradientResidualSum / gradientResidualCount
+      },
+      text,
+      text_halo: {
+        ...textHalo
       }
     }
   };
@@ -173,6 +190,9 @@ export function flattenMetricReport(report) {
     flip_style_error_p99: report.metrics.perception.flip_style_error_p99,
     flip_style_error_max: report.metrics.perception.flip_style_error_max,
     gradient_smoothness_mean_abs_delta: report.metrics.gradient.smoothness_mean_abs_delta,
+    text_edge_contrast_retention_loss: Math.max(0, 1 - report.metrics.text.edge_contrast_retention),
+    text_edge_contrast_delta: report.metrics.text.edge_contrast_delta,
+    text_halo_local_contrast_stability_delta: report.metrics.text_halo.local_contrast_stability_delta,
     max_abs_channel_delta: report.metrics.pixel_debug.max_abs_channel_delta,
     mean_abs_channel_delta: report.metrics.pixel_debug.mean_abs_channel_delta
   };
@@ -219,6 +239,83 @@ function localGradientResidual(refLuma, candLuma, width, height, x, y) {
   const refMagnitude = Math.hypot(horizontalRef, verticalRef);
   const candMagnitude = Math.hypot(horizontalCand, verticalCand);
   return Math.abs(refMagnitude - candMagnitude);
+}
+
+function measureTextLegibility(refLuma, candLuma, indexes, width, height, options) {
+  let referenceEdgeSum = 0;
+  let candidateEdgeSum = 0;
+  let contrastDeltaSum = 0;
+  let count = 0;
+  for (const index of indexes) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const referenceEdge = localContrast(refLuma, width, height, x, y);
+    const candidateEdge = localContrast(candLuma, width, height, x, y);
+    referenceEdgeSum += referenceEdge;
+    candidateEdgeSum += candidateEdge;
+    contrastDeltaSum += Math.abs(referenceEdge - candidateEdge);
+    count += 1;
+  }
+
+  const referenceEdgeMean = count === 0 ? 0 : referenceEdgeSum / count;
+  const candidateEdgeMean = count === 0 ? 0 : candidateEdgeSum / count;
+  const retention = referenceEdgeMean <= 1e-9
+    ? 1
+    : candidateEdgeMean / referenceEdgeMean;
+  return {
+    method: "fixed_text_mask_local_contrast_v1",
+    sample_count: count,
+    mask_scope: options.textMaskScope ?? null,
+    policy: {
+      edge_contrast_retention_floor: options.textEdgeContrastRetentionFloor ?? 0.72
+    },
+    reference_edge_contrast_mean: referenceEdgeMean,
+    candidate_edge_contrast_mean: candidateEdgeMean,
+    edge_contrast_retention: retention,
+    edge_contrast_delta: count === 0 ? 0 : contrastDeltaSum / count,
+    reference_contrast_identified: referenceEdgeMean > (options.textReferenceContrastFloor ?? 0.002)
+  };
+}
+
+function measureTextHaloStability(refLuma, candLuma, indexes, width, height, options) {
+  let deltaSum = 0;
+  let maxDelta = 0;
+  let count = 0;
+  for (const index of indexes) {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const delta = Math.abs(
+      localContrast(refLuma, width, height, x, y) -
+      localContrast(candLuma, width, height, x, y)
+    );
+    deltaSum += delta;
+    maxDelta = Math.max(maxDelta, delta);
+    count += 1;
+  }
+  return {
+    method: "fixed_text_halo_local_contrast_stability_v1",
+    sample_count: count,
+    mask_scope: options.textHaloMaskScope ?? null,
+    policy: {
+      local_contrast_stability_delta_ceiling: options.textHaloStabilityDeltaCeiling ?? 0.08
+    },
+    local_contrast_stability_delta: count === 0 ? 0 : deltaSum / count,
+    local_contrast_stability_delta_max: maxDelta
+  };
+}
+
+function localContrast(values, width, height, x, y) {
+  const center = values[y * width + x];
+  const left = values[y * width + Math.max(0, x - 1)];
+  const right = values[y * width + Math.min(width - 1, x + 1)];
+  const up = values[Math.max(0, y - 1) * width + x];
+  const down = values[Math.min(height - 1, y + 1) * width + x];
+  return (
+    Math.abs(center - left) +
+    Math.abs(center - right) +
+    Math.abs(center - up) +
+    Math.abs(center - down)
+  ) / 4;
 }
 
 function computeSsim(left, right, indexes = undefined) {
