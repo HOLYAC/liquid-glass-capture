@@ -48,7 +48,7 @@ const substrates = [
 const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
 const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge_overlap", "morph_tall"] as const;
 const tints = ["none", "cyan", "amber", "red"] as const;
-const repeatCounts = [3, 10, 24, 50, 300] as const;
+const repeatCounts = [1, 3, 10, 24, 50, 300] as const;
 const deviceMatrixRoles = ["mvl_primary", "weakest_supported", "target", "latest_pro"] as const;
 const backgroundPackId = "glass_background_pack_v1";
 const backgroundPackSha256 = "5c305dcadc6d32b7ca9366c5b82793345e791a3e7c5c58b46c3da5557450d877";
@@ -364,7 +364,7 @@ export default function App() {
   const [captureStatus, setCaptureStatus] = useState("no capture");
   const [compositorActive, setCompositorActive] = useState(false);
   const [batchActive, setBatchActive] = useState(false);
-  const [repeatCount, setRepeatCount] = useState<(typeof repeatCounts)[number]>(50);
+  const [repeatCount, setRepeatCount] = useState<(typeof repeatCounts)[number]>(1);
   const [deviceMatrixRole, setDeviceMatrixRole] = useState<DeviceMatrixRole>("mvl_primary");
   const [lastReferenceArtifact, setLastReferenceArtifact] = useState<string | null>(null);
   const [lastCandidateArtifact, setLastCandidateArtifact] = useState<string | null>(null);

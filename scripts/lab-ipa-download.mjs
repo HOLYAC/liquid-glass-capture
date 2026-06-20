@@ -3,6 +3,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -85,6 +86,13 @@ function downloadUnsignedIpa(request) {
     if (ipaSize <= 0) {
       throw new Error(`Downloaded IPA is empty: ${targetPath}`);
     }
+    const ipaInspection = inspectIpa(targetPath);
+    if (!ipaInspection.has_payload_app) {
+      throw new Error(`Downloaded IPA has no Payload/*.app bundle: ${targetPath}`);
+    }
+    if (!ipaInspection.has_main_js_bundle) {
+      throw new Error(`Downloaded IPA has no embedded main.jsbundle: ${targetPath}`);
+    }
 
     const reportPath = join(request.outDir, "unsigned-ipa-download.report.json");
     const report = {
@@ -111,9 +119,10 @@ function downloadUnsignedIpa(request) {
       },
       ipa_path: targetPath,
       ipa_size_bytes: ipaSize,
+      ipa_inspection: ipaInspection,
       report_path: reportPath,
       next: {
-        sideload: `Install ${targetPath} with Sideloadly or AltStore, then open the app on the iPhone.`,
+        sideload: `Install ${targetPath} with Sideloadly or AltStore, then open the app on the iPhone. No Metro server is required for this downloaded IPA because it contains ${ipaInspection.main_js_bundle_path}.`,
         proof_plan_command:
           "npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --out ./artifacts/ios-max-fidelity-proof.plan.json",
         proof_verify_command:
@@ -218,6 +227,71 @@ function findIpa(root) {
     throw new Error(`No .ipa found in downloaded artifact under ${root}`);
   }
   return files.find((file) => basename(file) === defaultIpa) ?? files[0];
+}
+
+function inspectIpa(file) {
+  const entries = listZipEntries(file);
+  const appBundleRoots = [];
+  for (const entry of entries) {
+    const match = entry.match(/^(Payload\/[^/]+\.app)(?:\/|$)/);
+    if (match && !appBundleRoots.includes(match[1])) {
+      appBundleRoots.push(match[1]);
+    }
+  }
+  const mainJsBundlePath = entries.find((entry) => /^Payload\/[^/]+\.app\/main\.jsbundle$/.test(entry)) ?? null;
+  return {
+    entry_count: entries.length,
+    app_bundle_roots: appBundleRoots,
+    has_payload_app: appBundleRoots.length > 0,
+    has_main_js_bundle: Boolean(mainJsBundlePath),
+    main_js_bundle_path: mainJsBundlePath,
+    standalone_js_bundle: Boolean(mainJsBundlePath)
+  };
+}
+
+function listZipEntries(file) {
+  const buffer = readFileSync(file);
+  const eocdOffset = findEndOfCentralDirectory(buffer);
+  const totalEntries = buffer.readUInt16LE(eocdOffset + 10);
+  const centralDirectorySize = buffer.readUInt32LE(eocdOffset + 12);
+  const centralDirectoryOffset = buffer.readUInt32LE(eocdOffset + 16);
+  if (centralDirectoryOffset === 0xffffffff || centralDirectorySize === 0xffffffff) {
+    throw new Error(`ZIP64 central directory is not supported by this verifier: ${file}`);
+  }
+  if (centralDirectoryOffset + centralDirectorySize > buffer.length) {
+    throw new Error(`ZIP central directory points past EOF: ${file}`);
+  }
+
+  const entries = [];
+  let offset = centralDirectoryOffset;
+  const end = centralDirectoryOffset + centralDirectorySize;
+  while (offset < end && entries.length < totalEntries) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error(`Invalid ZIP central directory header at byte ${offset}: ${file}`);
+    }
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const nameStart = offset + 46;
+    const nameEnd = nameStart + nameLength;
+    entries.push(buffer.toString("utf8", nameStart, nameEnd).replace(/\\/g, "/"));
+    offset = nameEnd + extraLength + commentLength;
+  }
+
+  if (entries.length !== totalEntries) {
+    throw new Error(`ZIP central directory entry count mismatch: expected ${totalEntries}, read ${entries.length}`);
+  }
+  return entries;
+}
+
+function findEndOfCentralDirectory(buffer) {
+  const minOffset = Math.max(0, buffer.length - 65_557);
+  for (let offset = buffer.length - 22; offset >= minOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) {
+      return offset;
+    }
+  }
+  throw new Error("ZIP end of central directory was not found");
 }
 
 function readCurrentBranch() {
@@ -325,9 +399,76 @@ function runSelfTest() {
   writeFileSync(fixtureIpa, "fake ipa");
   assert(findIpa(fixtureDir) === fixtureIpa, "recursive IPA discovery must find the canonical file");
   assert(existsSync(fixtureIpa), "fixture IPA must exist before cleanup");
+
+  const zipIpa = join(fixtureDir, "fixture.ipa");
+  writeMinimalZip(zipIpa, [
+    "Payload/",
+    "Payload/LiquidGlassCapture.app/",
+    "Payload/LiquidGlassCapture.app/main.jsbundle",
+    "Payload/LiquidGlassCapture.app/Info.plist"
+  ]);
+  const inspection = inspectIpa(zipIpa);
+  assert(inspection.has_payload_app, "IPA inspection must find Payload app bundle");
+  assert(inspection.has_main_js_bundle, "IPA inspection must find embedded JS bundle");
+  assert(
+    inspection.main_js_bundle_path === "Payload/LiquidGlassCapture.app/main.jsbundle",
+    "IPA inspection must report the JS bundle path"
+  );
   rmSync(fixtureDir, { recursive: true, force: true });
 
   console.log("PASS ipa-download self-test");
+}
+
+function writeMinimalZip(file, names) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  for (const name of names) {
+    const nameBuffer = Buffer.from(name, "utf8");
+    const localHeader = Buffer.alloc(30 + nameBuffer.length);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt32LE(0, 14);
+    localHeader.writeUInt32LE(0, 18);
+    localHeader.writeUInt32LE(0, 22);
+    localHeader.writeUInt16LE(nameBuffer.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    nameBuffer.copy(localHeader, 30);
+    localParts.push(localHeader);
+
+    const centralHeader = Buffer.alloc(46 + nameBuffer.length);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt32LE(0, 16);
+    centralHeader.writeUInt32LE(0, 20);
+    centralHeader.writeUInt32LE(0, 24);
+    centralHeader.writeUInt16LE(nameBuffer.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    nameBuffer.copy(centralHeader, 46);
+    centralParts.push(centralHeader);
+    offset += localHeader.length;
+  }
+
+  const centralDirectoryOffset = offset;
+  const centralDirectorySize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const endOfCentralDirectory = Buffer.alloc(22);
+  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
+  endOfCentralDirectory.writeUInt16LE(0, 4);
+  endOfCentralDirectory.writeUInt16LE(0, 6);
+  endOfCentralDirectory.writeUInt16LE(names.length, 8);
+  endOfCentralDirectory.writeUInt16LE(names.length, 10);
+  endOfCentralDirectory.writeUInt32LE(centralDirectorySize, 12);
+  endOfCentralDirectory.writeUInt32LE(centralDirectoryOffset, 16);
+  endOfCentralDirectory.writeUInt16LE(0, 20);
+  writeFileSync(file, Buffer.concat([...localParts, ...centralParts, endOfCentralDirectory]));
 }
 
 function assert(condition, message) {

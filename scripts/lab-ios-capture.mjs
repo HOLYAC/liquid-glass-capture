@@ -34,6 +34,7 @@ function main() {
     assertRawFlagSemantics();
     assertRawManifestVerification();
     assertCaptureRootDiscovery();
+    assertAppProofDefaults();
     console.log(`${report.status.toUpperCase()} ${report.jsonPath ?? ""}`.trim());
     if (report.status !== "pass") process.exit(1);
     return;
@@ -692,6 +693,23 @@ function assertCaptureRootDiscovery() {
   const report = verifyManifest(request);
   if (report.status !== "pass" || !report.next?.inspect_command) {
     throw new Error(`ios-capture latest manifest self-test failed: ${report.failures.join(", ")}`);
+  }
+}
+
+function assertAppProofDefaults() {
+  const appSource = readFileSync(join(repoRoot, "App.tsx"), "utf8");
+  const invariants = [
+    [/const repeatCounts = \[1, 3, 10, 24, 50, 300\] as const;/, "repeatCounts must expose one-repeat proof first"],
+    [/const \[sceneId, setSceneId\] = useState<SceneId>\("S01_SEARCH"\);/, "default scene must be S01_SEARCH"],
+    [/const \[rig, setRig\] = useState<LiquidGlassCaptureRig>\("R0"\);/, "default rig must be R0"],
+    [/const \[repeatCount, setRepeatCount\] = useState<\(typeof repeatCounts\)\[number\]>\(1\);/, "default repeat must be 1"],
+    [/const \[deviceMatrixRole, setDeviceMatrixRole\] = useState<DeviceMatrixRole>\("mvl_primary"\);/, "default device role must be mvl_primary"],
+    [/const \[maxFidelityCapture, setMaxFidelityCapture\] = useState\(true\);/, "default max-fidelity capture must be true"]
+  ];
+  for (const [pattern, message] of invariants) {
+    if (!pattern.test(appSource)) {
+      throw new Error(`ios-capture app proof default self-test failed: ${message}`);
+    }
   }
 }
 

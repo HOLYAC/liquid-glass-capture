@@ -88,6 +88,10 @@ gh workflow run build-unsigned-ios-ipa.yml --ref <branch>
 npm run ipa:download -- --out-dir ./artifacts/unsigned-ipa
 ```
 
+The command also verifies that the downloaded `.ipa` has a `Payload/*.app`
+bundle and an embedded `main.jsbundle`, so this downloaded IPA launches as a
+standalone app after sideloading.
+
 5. On Windows, install
    `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa` to iPhone using
    Sideloadly or AltStore with a free Apple ID.
@@ -96,13 +100,17 @@ This path uses GitHub's `macos-26` runner because the native module needs iOS 26
 
 ## Run The App
 
-After the dev build is installed:
+After installing the downloaded unsigned IPA, open **Liquid Glass Capture**
+directly on the iPhone. No Metro server is required for that route because
+`npm run ipa:download` verifies the embedded `main.jsbundle`.
+
+Use a local dev server only for a separate development-client build:
 
 ```bash
 npx expo start --dev-client
 ```
 
-Scan the QR code with the installed development client.
+Then scan the QR code with that development client.
 
 ## Max-Fidelity Raw Capture Proof
 
@@ -115,11 +123,7 @@ app can produce the raw pixel evidence this lab was built for.
 npm run ipa:download -- --out-dir ./artifacts/unsigned-ipa
 ```
 
-2. Start the dev client:
-
-```bash
-npx expo start --dev-client
-```
+2. Open the installed **Liquid Glass Capture** app on the iPhone.
 
 3. Generate the one-repeat proof plan:
 
@@ -127,7 +131,7 @@ npx expo start --dev-client
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --out ./artifacts/ios-max-fidelity-proof.plan.json
 ```
 
-4. In the app, show controls with `2`, set:
+4. The app opens with the proof defaults:
 
 ```text
 scene=S01_SEARCH
@@ -137,7 +141,9 @@ repeat=1
 max-fidelity=true
 ```
 
-Then press `B`. The status line prints the generated repeat-manifest path.
+Press `B`. The status line prints the generated repeat-manifest path. If you
+changed the app state earlier, press `2` to show controls and restore those
+values before pressing `B`.
 
 5. Copy the app Documents folder `LiquidGlassCaptures` to this repo under
    `./artifacts/iphone/LiquidGlassCaptures`. File sharing is enabled in
