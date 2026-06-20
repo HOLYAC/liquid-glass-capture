@@ -118,6 +118,7 @@ npm run metrics:runtime -- --artifact ./artifacts/c1.capture.json --out ./artifa
 npm run energy:stress -- --artifact ./artifacts/c1-sustained.capture.json --sustained --out ./artifacts/g6-energy.report.json
 npm run review:packet -- --packet ./artifacts/g7-review.packet.json --out ./artifacts/g7-review.report.json
 npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
+npm run ci:glass -- --out ./artifacts/ci/glass-gate.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
 npm run glass:diff -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/viewer/r0-r1.diff.html
@@ -166,6 +167,14 @@ fail the gate.
 Current G8 scope emits the two-axis verdict report. It refuses simulator/replay
 verdicts, refuses C1 without `baked_verdict`, and keeps DOM_C in `WEBKIT_PASS`
 instead of allowing a fake SwiftUI claim.
+
+Current CI scope is the source guillotine in `.github/workflows/glass-gate.yml`
+with policy in `ci/glass-gate.yml`. It runs typecheck, the full lab self-test,
+and workspace diff hygiene, then uploads `ci_glass_gate_report` as
+`glass-gate-report`. Hosted CI is not a physical-device verdict lane; when
+glass-affecting files change, the report marks physical capture as
+`pending_device_lane` rather than pretending a simulator or Linux runner can
+mint parity.
 
 The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
 capture repeatedly, writes a `repeat_capture_manifest`, and enforces nominal

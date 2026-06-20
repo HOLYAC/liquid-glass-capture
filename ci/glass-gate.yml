@@ -1,0 +1,59 @@
+schema_version: 1.2.0
+kind: glass_gate_policy
+lanes:
+  smoke:
+    trigger: no_glass_affecting_paths_detected
+    required_commands:
+      - npm run typecheck
+      - npm run lab:self-test
+      - git diff --check
+  fast_pr:
+    trigger: render_ui_color_animation_or_lab_path_changed
+    required_commands:
+      - npm run typecheck
+      - npm run lab:self-test
+      - git diff --check
+    physical_device_capture: pending_device_lane
+  release:
+    trigger: workflow_dispatch_or_main
+    required_commands:
+      - npm run typecheck
+      - npm run lab:self-test
+      - git diff --check
+    g7: required
+    physical_device_capture: pending_device_lane
+  nightly:
+    trigger: schedule
+    required_commands:
+      - npm run typecheck
+      - npm run lab:self-test
+      - git diff --check
+    trend_report: required
+    sustained_g6: required
+glass_affecting_paths:
+  - App.tsx
+  - app.json
+  - eas.json
+  - package.json
+  - package-lock.json
+  - .github/workflows/glass-gate.yml
+  - ci/glass-gate.yml
+  - modules/liquid-glass-capture/**
+  - packages/capture-schema/**
+  - packages/color-pipeline/**
+  - packages/metric-stack/**
+  - packages/energy-stack/**
+  - packages/review-stack/**
+  - packages/verdict-stack/**
+  - scripts/lab-*.mjs
+  - scripts/lib/lab-*.mjs
+  - fixtures/**
+  - apps/artifact-viewer/**
+blockers:
+  hard_fail:
+    - typecheck
+    - G0_G8_SELF_TEST
+    - workspace_hygiene
+  report:
+    kind: ci_glass_gate_report
+    artifact_name: glass-gate-report
