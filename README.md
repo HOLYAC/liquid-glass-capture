@@ -216,11 +216,12 @@ must carry `energy.trace_tool`, `energy.trace_path`,
 `energy.trace_hash_method`, and `energy.trace_sha256`; the path may point to a
 file trace (`sha256_file_v1`) or an Instruments-style directory package
 (`sha256_tree_v1`). `glass:instruments` resolves the artifact id, verifies the
-trace hash, and emits the open hint; `glass:inspect` and `glass:diff` expose the
-same trace path/hash/open-hint evidence in the viewer. `trace_unavailable` is
-reported in-band and becomes a hard failure only when the G6 command is run with
-`--require-energy-trace`; Instruments Power Profiler and MetricKit parsers are
-still adapters, not silently faked here.
+trace hash, emits the open hint, and parses `instruments_power_profiler`
+samples or MetricKit JSON payloads so a hash-valid but empty trace cannot pass
+as energy evidence. `glass:inspect` and `glass:diff` expose the same trace
+path/hash/open-hint evidence in the viewer. `trace_unavailable` is reported
+in-band and becomes a hard failure only when the G6 command is run with
+`--require-energy-trace`.
 
 Current solver scope ranks externally generated C0/C1 candidate records rather
 than pretending the CMA-ES/TPE renderer loop is complete. It refuses single

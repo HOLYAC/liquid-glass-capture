@@ -60,6 +60,9 @@ export function renderInspectViewer(inputPath) {
   if (json.kind === "flake_classification_report") {
     return renderFlakeClassificationViewer(absolute, json);
   }
+  if (json.kind === "glass_instruments_report") {
+    return renderInstrumentsViewer(absolute, json);
+  }
   if (json.kind === "solver_pareto_report") {
     return renderSolverViewer(absolute, json);
   }
@@ -335,6 +338,39 @@ function renderFlakeClassificationViewer(path, report) {
     ])),
     section("Evidence", `<div id="flake-classification-evidence">${table(flakeEvidenceRows(report.evidence))}</div>`),
     section("Raw Flake Classification", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
+  ]);
+}
+
+function renderInstrumentsViewer(path, report) {
+  const parsed = report.trace?.parsed ?? {};
+  return page("Instruments Inspect", [
+    hero("Instruments Inspect", report.artifact?.id ?? relative(repoRoot, path), [
+      statusPill("G6", report.status ?? "unknown"),
+      statusPill("trace", report.trace?.status ?? "unknown"),
+      statusPill("parsed", parsed.status ?? "unknown")
+    ]),
+    section("Summary", table([
+      ["kind", report.kind],
+      ["status", report.status],
+      ["gate", report.gate],
+      ["artifact_id", report.artifact?.id ?? ""],
+      ["tool", report.trace?.tool ?? ""],
+      ["trace_path", report.trace?.repo_relative_path ?? report.trace?.path ?? ""],
+      ["hash_method", report.trace?.hash_method ?? ""],
+      ["hash_match", report.trace?.expected_sha256 && report.trace?.actual_sha256
+        ? String(report.trace.expected_sha256 === report.trace.actual_sha256)
+        : ""],
+      ["source", relative(repoRoot, path)]
+    ])),
+    section("Parsed Trace", `<div id="instruments-parsed-trace">${table([
+      ["kind", parsed.kind ?? ""],
+      ["status", parsed.status ?? ""],
+      ["source_file", parsed.source_file ?? ""],
+      ...objectRows(parsed.metrics ?? {})
+    ])}</div>`),
+    section("Energy", table(objectRows(report.energy ?? { status: "not_recorded" }))),
+    section("Failures", table((report.failures ?? []).map((failure, index) => [index, failure]))),
+    section("Raw Instruments", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
 }
 

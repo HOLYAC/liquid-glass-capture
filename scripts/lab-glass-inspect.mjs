@@ -30,9 +30,14 @@ function main() {
       join(outDir, "flake-classification.inspect.html"),
       renderInspectViewer(reportFixtures.flakeReport)
     );
+    const instrumentsPath = writeViewerHtml(
+      join(outDir, "instruments.inspect.html"),
+      renderInspectViewer(reportFixtures.instrumentsReport)
+    );
     assertInspectViewerContract(path);
     assertTrendViewerContract(trendPath);
     assertFlakeViewerContract(flakePath);
+    assertInstrumentsViewerContract(instrumentsPath);
     console.log(`PASS ${path}`);
     return;
   }
@@ -88,11 +93,14 @@ function writeInspectReportFixtures() {
   const dir = join(repoRoot, "artifacts", "lab-self-test", "artifact-viewer");
   const trendReport = join(dir, "trend.report.json");
   const flakeReport = join(dir, "flake-classification.report.json");
+  const instrumentsReport = join(dir, "instruments.report.json");
   writeFileSync(trendReport, `${JSON.stringify(makeInspectTrendReport(), null, 2)}\n`);
   writeFileSync(flakeReport, `${JSON.stringify(makeInspectFlakeReport(), null, 2)}\n`);
+  writeFileSync(instrumentsReport, `${JSON.stringify(makeInspectInstrumentsReport(), null, 2)}\n`);
   return {
     trendReport,
-    flakeReport
+    flakeReport,
+    instrumentsReport
   };
 }
 
@@ -240,6 +248,49 @@ function makeInspectFlakeReport() {
   };
 }
 
+function makeInspectInstrumentsReport() {
+  return {
+    schema_version: "1.2.0",
+    kind: "glass_instruments_report",
+    gate: "G6",
+    status: "pass",
+    failures: [],
+    warnings: [],
+    artifact: {
+      id: "viewer-self-test-c1-instruments",
+      rig_id: "C1",
+      scene_id: "S03_PRESS",
+      state_id: "sustained"
+    },
+    trace: {
+      available: true,
+      status: "available",
+      tool: "instruments_power_profiler",
+      path: "artifacts/lab-self-test/artifact-viewer/power.trace",
+      repo_relative_path: "artifacts/lab-self-test/artifact-viewer/power.trace",
+      hash_method: "sha256_tree_v1",
+      expected_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      actual_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      parsed: {
+        kind: "instruments_power_profiler",
+        status: "pass",
+        source_file: "artifacts/lab-self-test/artifact-viewer/power.trace/samples.jsonl",
+        metrics: {
+          sample_count: 2,
+          duration_ms: 100,
+          average_power_mw: 118.65,
+          max_power_mw: 119.1,
+          energy_mj: 11.865
+        }
+      }
+    },
+    energy: {
+      energy_mj_per_10s: 1.19,
+      average_power_mw: 118.65
+    }
+  };
+}
+
 function assertTrendViewerContract(path) {
   const html = readFileSync(path, "utf8");
   for (const required of [
@@ -267,6 +318,22 @@ function assertFlakeViewerContract(path) {
   ]) {
     if (!html.includes(required)) {
       throw new Error(`flake inspect viewer self-test missing ${required}`);
+    }
+  }
+}
+
+function assertInstrumentsViewerContract(path) {
+  const html = readFileSync(path, "utf8");
+  for (const required of [
+    'id="instruments-parsed-trace"',
+    "instruments_power_profiler",
+    "sample_count",
+    "average_power_mw",
+    "energy_mj",
+    "hash_match"
+  ]) {
+    if (!html.includes(required)) {
+      throw new Error(`instruments inspect viewer self-test missing ${required}`);
     }
   }
 }
