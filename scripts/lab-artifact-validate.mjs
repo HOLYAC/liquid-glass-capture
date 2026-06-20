@@ -34,6 +34,7 @@ function main() {
   if (args.includes("--self-test")) {
     const artifact = writeSelfTestArtifact();
     validateFile(artifact);
+    assertGenericModelIdentifierRejected(artifact);
     console.log(`PASS ${artifact}`);
     return;
   }
@@ -107,6 +108,9 @@ function validateDevice(errors, device) {
 
   for (const key of ["model_name", "model_identifier", "os_version", "os_build", "sdk_build"]) {
     requireString(errors, `device_info.${key}`, device[key]);
+  }
+  if (looksLikeGenericAppleFamilyIdentifier(device.model_identifier)) {
+    errors.push("device_info.model_identifier must be hardware identifier, not UIDevice.current.model family");
   }
   requireValue(errors, device.os_name === "iOS", "device_info.os_name must be iOS");
   requireNumber(errors, "device_info.screen_scale", device.screen_scale);
@@ -372,7 +376,7 @@ function makeSelfTestArtifact(pngPath, maskPath) {
     capture_kind: "layer_snapshot",
     device_info: {
       model_name: "Self Test Device",
-      model_identifier: "iPhone-self-test",
+      model_identifier: "iPhone16,2",
       os_name: "iOS",
       os_version: "26.0",
       os_build: "self-test",
@@ -421,10 +425,23 @@ function makeSelfTestArtifact(pngPath, maskPath) {
   };
 }
 
+function assertGenericModelIdentifierRejected(artifactPath) {
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  artifact.device_info.model_identifier = "iPhone";
+  const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
+  if (!errors.some((error) => error.includes("model_identifier must be hardware identifier"))) {
+    throw new Error("artifact validator self-test failed to reject generic UIDevice.current.model identifier");
+  }
+}
+
 function requireString(errors, label, value) {
   if (typeof value !== "string" || value.length === 0) {
     errors.push(`${label} must be a non-empty string`);
   }
+}
+
+function looksLikeGenericAppleFamilyIdentifier(value) {
+  return ["iPhone", "iPad", "iPod"].includes(String(value));
 }
 
 function requireSha256(errors, label, value) {

@@ -243,6 +243,10 @@ pretending a simulator or Linux runner can mint parity.
 The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
 capture repeatedly, writes a `repeat_capture_manifest`, and enforces nominal
 thermal state before each baseline iteration.
+Native capture artifacts record the human device family as `model_name` and the
+hardware identifier from `utsname.machine` as `model_identifier`; generic
+`UIDevice.current.model` values such as `iPhone` are rejected by the artifact
+validator.
 
 The baseline script marks reports as `partial` until enough physical captures
 exist for the requested class (`mvl = 50`, `prod_p99 = 300`, `sustained = 24`).

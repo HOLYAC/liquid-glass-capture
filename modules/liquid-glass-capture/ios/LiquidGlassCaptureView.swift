@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import CryptoKit
+import Darwin
 import SwiftUI
 import UIKit
 import WebKit
@@ -253,7 +254,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "capture_kind": "layer_snapshot",
       "device_info": [
         "model_name": UIDevice.current.model,
-        "model_identifier": UIDevice.current.model,
+        "model_identifier": Self.hardwareModelIdentifier(),
         "os_name": "iOS",
         "os_version": UIDevice.current.systemVersion,
         "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
@@ -543,6 +544,16 @@ public final class LiquidGlassCaptureView: ExpoView {
 
   private static func sha256Hex(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func hardwareModelIdentifier() -> String {
+    var info = utsname()
+    uname(&info)
+    return withUnsafePointer(to: &info.machine) { pointer in
+      pointer.withMemoryRebound(to: CChar.self, capacity: 1) { rebound in
+        String(cString: rebound)
+      }
+    }
   }
 
   private static func error(_ message: String) -> NSError {

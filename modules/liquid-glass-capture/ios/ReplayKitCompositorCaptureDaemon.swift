@@ -1,6 +1,7 @@
 import CoreImage
 import CoreMedia
 import CryptoKit
+import Darwin
 import ImageIO
 import ReplayKit
 import UIKit
@@ -343,7 +344,7 @@ private final class ReplayKitCaptureSession {
       "capture_kind": "compositor",
       "device_info": [
         "model_name": UIDevice.current.model,
-        "model_identifier": UIDevice.current.model,
+        "model_identifier": Self.hardwareModelIdentifier(),
         "os_name": "iOS",
         "os_version": UIDevice.current.systemVersion,
         "os_build": ProcessInfo.processInfo.operatingSystemVersionString,
@@ -558,6 +559,16 @@ private final class ReplayKitCaptureSession {
       return 0
     }
     return values.reduce(0, +) / Double(values.count)
+  }
+
+  private static func hardwareModelIdentifier() -> String {
+    var info = utsname()
+    uname(&info)
+    return withUnsafePointer(to: &info.machine) { pointer in
+      pointer.withMemoryRebound(to: CChar.self, capacity: 1) { rebound in
+        String(cString: rebound)
+      }
+    }
   }
 
   private static func displayP3ICCSHA256() -> String? {
