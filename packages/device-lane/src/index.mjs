@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import {
+  glassBackgroundBySceneState,
   glassCaptureTimelineBySceneState,
   glassDefaultDeviceLaneTasks,
   glassGeometryBySceneState,
@@ -24,6 +25,7 @@ export const physicalDeviceLanePolicy = Object.freeze({
   scene_state_matrix: glassSceneStateMatrix,
   default_tasks: glassDefaultDeviceLaneTasks,
   trajectory_sha_by_scene: glassTrajectoryShaByScene,
+  background_by_scene_state: glassBackgroundBySceneState,
   geometry_by_scene_state: glassGeometryBySceneState,
   capture_timeline_by_scene_state: glassCaptureTimelineBySceneState,
   derivation: "v1.2 physical truth: collected artifacts must be physical, compositor/framebuffer, hash-checked, nominal-thermal, and gate-backed"
@@ -138,6 +140,7 @@ function normalizeTask(task, index, lanePolicy, policy) {
   if (!validStates) throw new Error(`task ${index}: unsupported scene ${sceneId}`);
   if (!validStates.includes(stateId)) throw new Error(`task ${index}: state ${stateId} is not valid for ${sceneId}`);
   const sceneState = sceneStateKey(sceneId, stateId);
+  const background = policy.background_by_scene_state?.[sceneState] ?? null;
   const geometry = policy.geometry_by_scene_state?.[sceneState] ?? null;
   const timeline = policy.capture_timeline_by_scene_state?.[sceneState] ?? null;
   return {
@@ -155,6 +158,9 @@ function normalizeTask(task, index, lanePolicy, policy) {
     requires_low_power_mode_off: true,
     requires_null_qualification_pass: true,
     required_trajectory_source_sha256: policy.trajectory_sha_by_scene[sceneId] ?? null,
+    required_background_pack_id: background?.background_pack_id ?? null,
+    required_background_id: background?.background_id ?? null,
+    required_background_pack_sha256: background?.background_pack_sha256 ?? null,
     required_geometry_pack_id: geometry?.geometry_pack_id ?? null,
     required_geometry_id: geometry?.geometry_id ?? null,
     required_geometry_pack_sha256: geometry?.geometry_pack_sha256 ?? null,
@@ -267,7 +273,11 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
     capture_kind: artifact.capture_kind,
     null_qualification: artifact.null_qualification ?? "not_recorded",
     device_key: deviceKey(artifact.device_info),
-    scene_contract_verified: !failures.some((failure) => failure.includes("_GEOMETRY_") || failure.includes("_CAPTURE_TIMELINE_")),
+    scene_contract_verified: !failures.some((failure) =>
+      failure.includes("_BACKGROUND_") ||
+      failure.includes("_GEOMETRY_") ||
+      failure.includes("_CAPTURE_TIMELINE_")
+    ),
     hashes_verified: hashFailures.length === 0,
     failures
   };
@@ -277,6 +287,9 @@ function verifySceneContractFields(task, artifact, index) {
   const failures = [];
   const environment = artifact.environment ?? {};
   const framePack = artifact.frame_pack ?? {};
+  verifyContractValue(failures, task, index, "BACKGROUND_PACK_ID", environment.background_pack_id, task.required_background_pack_id);
+  verifyContractValue(failures, task, index, "BACKGROUND_ID", environment.background_id, task.required_background_id);
+  verifyContractValue(failures, task, index, "BACKGROUND_PACK_SHA256", environment.background_pack_sha256, task.required_background_pack_sha256);
   verifyContractValue(failures, task, index, "GEOMETRY_PACK_ID", environment.geometry_pack_id, task.required_geometry_pack_id);
   verifyContractValue(failures, task, index, "GEOMETRY_ID", environment.geometry_id, task.required_geometry_id);
   verifyContractValue(failures, task, index, "GEOMETRY_PACK_SHA256", environment.geometry_pack_sha256, task.required_geometry_pack_sha256);

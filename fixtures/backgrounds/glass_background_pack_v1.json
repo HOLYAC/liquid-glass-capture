@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "background_pack",
+  "background_pack_id": "glass_background_pack_v1",
+  "source": "packages/material-glass/src/index.mjs",
+  "policy": {
+    "procedural_key": "content_seed",
+    "asset_key": "background_asset_hash",
+    "scene_state_binding": "scene_id + state_id + substrate"
+  },
+  "backgrounds": [
+    { "scene_id": "S00_NULL", "state_id": "s00_flat_grey", "background_id": "S00_NULL__s00_flat_grey__s00_flat_grey__background_v1", "substrate": "s00_flat_grey", "kind": "procedural", "content_seed": "s00-flat-p3-grey-v1" },
+    { "scene_id": "S00_NULL", "state_id": "s00_hard_edge", "background_id": "S00_NULL__s00_hard_edge__s00_hard_edge__background_v1", "substrate": "s00_hard_edge", "kind": "procedural", "content_seed": "s00-hard-edge-v1" },
+    { "scene_id": "S00_NULL", "state_id": "s00_p3_ramp", "background_id": "S00_NULL__s00_p3_ramp__s00_p3_ramp__background_v1", "substrate": "s00_p3_ramp", "kind": "procedural", "content_seed": "s00-p3-ramp-v1" },
+    { "scene_id": "S00_NULL", "state_id": "s00_smooth_gradient", "background_id": "S00_NULL__s00_smooth_gradient__s00_smooth_gradient__background_v1", "substrate": "s00_smooth_gradient", "kind": "procedural", "content_seed": "s00-smooth-gradient-v1" },
+    { "scene_id": "S01_SEARCH", "state_id": "rest", "background_id": "S01_SEARCH__rest__native_text_selection__background_v1", "substrate": "native_text_selection", "kind": "procedural", "content_seed": "s01-search-selection-v1" },
+    { "scene_id": "S02_LOUPE", "state_id": "drag", "background_id": "S02_LOUPE__drag__loupe_text__background_v1", "substrate": "loupe_text", "kind": "procedural", "content_seed": "s02-loupe-text-drag-v1" },
+    { "scene_id": "S03_PRESS", "state_id": "press", "background_id": "S03_PRESS__press__tiny_control_content__background_v1", "substrate": "tiny_control_content", "kind": "procedural", "content_seed": "s03-press-control-v1" },
+    { "scene_id": "S04_MORPH", "state_id": "morph", "background_id": "S04_MORPH__morph__floating_bar_content__background_v1", "substrate": "floating_bar_content", "kind": "procedural", "content_seed": "s04-twin-capsule-morph-v1" },
+    { "scene_id": "S05_FLOATING_BAR", "state_id": "floating_rest", "background_id": "S05_FLOATING_BAR__floating_rest__floating_bar_content__background_v1", "substrate": "floating_bar_content", "kind": "procedural", "content_seed": "s05-floating-bar-v1" },
+    { "scene_id": "S06_TINY_GLASS", "state_id": "tiny_rest", "background_id": "S06_TINY_GLASS__tiny_rest__tiny_control_content__background_v1", "substrate": "tiny_control_content", "kind": "procedural", "content_seed": "s06-tiny-control-v1" },
+    { "scene_id": "S07_BUSY_PHOTO", "state_id": "busy_photo_rest", "background_id": "S07_BUSY_PHOTO__busy_photo_rest__busy_photo__background_v1", "substrate": "busy_photo", "kind": "asset", "content_seed": "s07-busy-photo-procedural-v1", "background_asset_hash": "77238364440e942b31adefec365389a6f2c25a9b0a5561945db9468f8337f148" },
+    { "scene_id": "S08_P3_GRADIENT", "state_id": "p3_gradient_rest", "background_id": "S08_P3_GRADIENT__p3_gradient_rest__p3_saturated_gradient__background_v1", "substrate": "p3_saturated_gradient", "kind": "procedural", "content_seed": "s08-p3-saturated-gradient-v1" },
+    { "scene_id": "S09_NEAR_WHITE", "state_id": "near_white_rest", "background_id": "S09_NEAR_WHITE__near_white_rest__near_white__background_v1", "substrate": "near_white", "kind": "procedural", "content_seed": "s09-near-white-v1" },
+    { "scene_id": "S10_NEAR_BLACK", "state_id": "near_black_rest", "background_id": "S10_NEAR_BLACK__near_black_rest__near_black__background_v1", "substrate": "near_black", "kind": "procedural", "content_seed": "s10-near-black-v1" },
+    { "scene_id": "S11_VIDEO_FRAME", "state_id": "video_frame_rest", "background_id": "S11_VIDEO_FRAME__video_frame_rest__video_frame__background_v1", "substrate": "video_frame", "kind": "asset", "content_seed": "s11-video-high-frequency-procedural-v1", "background_asset_hash": "e976e690f06f8b955a86ab8e49d2fcef51f942c220e975a03c30d414702998a5" },
+    { "scene_id": "S12_SYSTEM_MATERIAL_ADJACENCY", "state_id": "system_material_rest", "background_id": "S12_SYSTEM_MATERIAL_ADJACENCY__system_material_rest__system_material_adjacency__background_v1", "substrate": "system_material_adjacency", "kind": "asset", "content_seed": "s12-system-material-adjacency-procedural-v1", "background_asset_hash": "15cc42e8ad24fd0179d917962281292ea97ea735ceb12796f8eb681e92049fe6" }
+  ]
+}

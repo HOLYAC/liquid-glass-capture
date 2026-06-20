@@ -133,6 +133,12 @@ function validateEnvironment(errors, environment) {
   for (const key of ["geometry_pack_id", "geometry_id"]) {
     if (environment[key] !== undefined) requireString(errors, `environment.${key}`, environment[key]);
   }
+  for (const key of ["background_pack_id", "background_id"]) {
+    if (environment[key] !== undefined) requireString(errors, `environment.${key}`, environment[key]);
+  }
+  if (environment.background_pack_sha256 !== undefined) {
+    requireSha256(errors, "environment.background_pack_sha256", environment.background_pack_sha256);
+  }
   if (environment.geometry_pack_sha256 !== undefined) {
     requireSha256(errors, "environment.geometry_pack_sha256", environment.geometry_pack_sha256);
   }
@@ -361,6 +367,9 @@ function makeSelfTestArtifact(pngPath, maskPath) {
       reduce_transparency: false,
       reduce_motion: false,
       content_seed: "s00-flat-p3-grey-v1",
+      background_pack_id: "glass_background_pack_v1",
+      background_id: "S00_NULL__s00_flat_grey__s00_flat_grey__background_v1",
+      background_pack_sha256: "5c305dcadc6d32b7ca9366c5b82793345e791a3e7c5c58b46c3da5557450d877",
       geometry_pack_id: "glass_geometry_pack_v1",
       geometry_id: "S00_NULL__s00_flat_grey__capsule__rest__geometry_v1",
       geometry_pack_sha256: "a7fa221f4cef5ee74492be403aa2dbe7a153f18cf0d41f84dbb43703d64c3425",

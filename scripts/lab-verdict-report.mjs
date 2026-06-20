@@ -7,6 +7,7 @@ import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
 import {
+  glassBackgroundBySceneState,
   glassCaptureTimelineBySceneState,
   glassDegeneracySceneIds,
   glassGeometryBySceneState,
@@ -130,6 +131,7 @@ function makePixels(width, height) {
 
 function makeCandidateArtifact(pngPath, maskPath) {
   const contractKey = sceneStateKey("S03_PRESS", "press");
+  const background = glassBackgroundBySceneState[contractKey];
   const geometry = glassGeometryBySceneState[contractKey];
   const timeline = glassCaptureTimelineBySceneState[contractKey];
   return {
@@ -159,6 +161,9 @@ function makeCandidateArtifact(pngPath, maskPath) {
       reduce_transparency: false,
       reduce_motion: false,
       content_seed: "g8-verdict-self-test",
+      background_pack_id: background.background_pack_id,
+      background_id: background.background_id,
+      background_pack_sha256: background.background_pack_sha256,
       geometry_pack_id: geometry.geometry_pack_id,
       geometry_id: geometry.geometry_id,
       geometry_pack_sha256: geometry.geometry_pack_sha256,

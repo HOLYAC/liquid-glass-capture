@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
 import {
+  glassBackgroundBySceneState,
   glassCaptureTimelineBySceneState,
   glassGeometryBySceneState
 } from "../packages/material-glass/src/index.mjs";
@@ -98,7 +99,9 @@ function writeSelfTestFixture(outPath) {
 
   const badSceneContractArtifact = writeCaptureArtifact(dir, "bad-contract", "iPhone16,2", "compositor", "pass");
   const badSceneContract = JSON.parse(readFileSync(badSceneContractArtifact, "utf8"));
+  delete badSceneContract.environment.background_pack_id;
   delete badSceneContract.environment.geometry_pack_id;
+  delete badSceneContract.environment.background_id;
   delete badSceneContract.frame_pack.capture_timeline_id;
   writeJson(badSceneContractArtifact, badSceneContract);
   const badSceneContractManifestPath = writeRepeatManifest({
@@ -156,6 +159,12 @@ function assertDeviceLaneGuardRails({ report, badReport, layerSnapshotReport, ba
   if (!badSceneContractReport.failures.some((failure) => failure.includes("GEOMETRY_PACK_ID_MISMATCH"))) {
     throw new Error("device-lane self-test failed to reject missing geometry contract");
   }
+  if (!badSceneContractReport.failures.some((failure) => failure.includes("BACKGROUND_PACK_ID_MISMATCH"))) {
+    throw new Error("device-lane self-test failed to reject missing background pack contract");
+  }
+  if (!badSceneContractReport.failures.some((failure) => failure.includes("BACKGROUND_ID_MISMATCH"))) {
+    throw new Error("device-lane self-test failed to reject missing background id contract");
+  }
   if (!badSceneContractReport.failures.some((failure) => failure.includes("CAPTURE_TIMELINE_ID_MISMATCH"))) {
     throw new Error("device-lane self-test failed to reject missing capture timeline contract");
   }
@@ -163,6 +172,7 @@ function assertDeviceLaneGuardRails({ report, badReport, layerSnapshotReport, ba
 
 function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQualification) {
   const contractKey = sceneStateKey("S01_SEARCH", "rest");
+  const background = glassBackgroundBySceneState[contractKey];
   const geometry = glassGeometryBySceneState[contractKey];
   const timeline = glassCaptureTimelineBySceneState[contractKey];
   const pngPath = join(dir, `frame-${index}.png`);
@@ -201,6 +211,9 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       reduce_transparency: false,
       reduce_motion: false,
       content_seed: "device-lane-self-test",
+      background_pack_id: background.background_pack_id,
+      background_id: background.background_id,
+      background_pack_sha256: background.background_pack_sha256,
       geometry_pack_id: geometry.geometry_pack_id,
       geometry_id: geometry.geometry_id,
       geometry_pack_sha256: geometry.geometry_pack_sha256,

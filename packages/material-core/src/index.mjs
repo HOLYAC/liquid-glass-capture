@@ -32,6 +32,9 @@ export function validateMaterialProbe(probe) {
       if (!nonEmpty(state.shape)) failures.push(`${pair}:SHAPE_REQUIRED`);
       if (!nonEmpty(state.phase)) failures.push(`${pair}:PHASE_REQUIRED`);
       if (!nonEmpty(state.touch_phase)) failures.push(`${pair}:TOUCH_PHASE_REQUIRED`);
+      if (!nonEmpty(state.background_pack_id)) failures.push(`${pair}:BACKGROUND_PACK_ID_REQUIRED`);
+      if (!nonEmpty(state.background_id)) failures.push(`${pair}:BACKGROUND_ID_REQUIRED`);
+      if (!sha256ish(state.background_pack_sha256)) failures.push(`${pair}:BACKGROUND_PACK_SHA256_REQUIRED`);
       if (!nonEmpty(state.geometry_pack_id)) failures.push(`${pair}:GEOMETRY_PACK_ID_REQUIRED`);
       if (!nonEmpty(state.geometry_id)) failures.push(`${pair}:GEOMETRY_ID_REQUIRED`);
       if (!sha256ish(state.geometry_pack_sha256)) failures.push(`${pair}:GEOMETRY_PACK_SHA256_REQUIRED`);
@@ -88,6 +91,9 @@ export function sceneDefaultsById(probe) {
       touchPhase: defaultState?.touch_phase,
       contentSeed: defaultState?.content_seed,
       backgroundAssetHash: defaultState?.background_asset_hash,
+      backgroundPackId: defaultState?.background_pack_id,
+      backgroundId: defaultState?.background_id,
+      backgroundPackSha256: defaultState?.background_pack_sha256,
       geometryPackId: defaultState?.geometry_pack_id,
       geometryId: defaultState?.geometry_id,
       geometryPackSha256: defaultState?.geometry_pack_sha256,
@@ -131,6 +137,9 @@ export function metadataForSceneState(probe, { sceneId, stateId }) {
   };
   if (state.content_seed) metadata.contentSeed = state.content_seed;
   if (state.background_asset_hash) metadata.backgroundAssetHash = state.background_asset_hash;
+  if (state.background_pack_id) metadata.backgroundPackId = state.background_pack_id;
+  if (state.background_id) metadata.backgroundId = state.background_id;
+  if (state.background_pack_sha256) metadata.backgroundPackSha256 = state.background_pack_sha256;
   if (state.geometry_pack_id) metadata.geometryPackId = state.geometry_pack_id;
   if (state.geometry_id) metadata.geometryId = state.geometry_id;
   if (state.geometry_pack_sha256) metadata.geometryPackSha256 = state.geometry_pack_sha256;

@@ -301,6 +301,15 @@ private final class ReplayKitCaptureSession {
     if let backgroundAssetHash = metadata["backgroundAssetHash"] as? String {
       environment["background_asset_hash"] = backgroundAssetHash
     }
+    if let backgroundPackId = metadata["backgroundPackId"] as? String {
+      environment["background_pack_id"] = backgroundPackId
+    }
+    if let backgroundId = metadata["backgroundId"] as? String {
+      environment["background_id"] = backgroundId
+    }
+    if let backgroundPackSHA256 = metadata["backgroundPackSha256"] as? String {
+      environment["background_pack_sha256"] = backgroundPackSHA256
+    }
     if let geometryPackId = metadata["geometryPackId"] as? String {
       environment["geometry_pack_id"] = geometryPackId
     }

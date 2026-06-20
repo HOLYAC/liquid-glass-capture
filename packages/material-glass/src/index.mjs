@@ -8,14 +8,17 @@ import {
   validateSceneState
 } from "../../material-core/src/index.mjs";
 import {
+  backgroundIdFor,
   captureTimelineIdFor,
   geometryIdFor,
+  glassBackgroundPackId,
   glassCaptureTimelinePackId,
   glassGeometryPackId,
   sceneContractMaps
 } from "../../scene-contract/src/index.mjs";
 
 export const glassMaskPackId = "glass_core_mask_pack_v1";
+export const glassBackgroundPackSha256 = "5c305dcadc6d32b7ca9366c5b82793345e791a3e7c5c58b46c3da5557450d877";
 export const glassGeometryPackSha256 = "a7fa221f4cef5ee74492be403aa2dbe7a153f18cf0d41f84dbb43703d64c3425";
 export const glassCaptureTimelinePackSha256 = "61c15338f00fce2349bcbcc05103643664fd248e28d7411772131e1796babd13";
 export const s02LoupeTrajectorySha256 = "33a896a5ee2615762df4248ce2f3a327fe036d8a7df43deea316641118796f5c";
@@ -147,6 +150,7 @@ export const glassSceneIds = Object.freeze(glassMaterialProbe.scenes.map((entry)
 export const glassDegeneracySceneIds = glassMaterialProbe.degeneracy_scene_ids;
 export const glassDegeneracyScenePrefixes = Object.freeze(glassDegeneracySceneIds.map((sceneId) => sceneId.slice(0, 3)));
 export const glassSceneContractMaps = sceneContractMaps(glassMaterialProbe);
+export const glassBackgroundBySceneState = glassSceneContractMaps.background;
 export const glassGeometryBySceneState = glassSceneContractMaps.geometry;
 export const glassCaptureTimelineBySceneState = glassSceneContractMaps.timeline;
 export const glassTrajectoryShaByScene = deepFreeze(Object.fromEntries(
@@ -206,6 +210,9 @@ function state(state_id, substrate, shape, phase, touch_phase, content_seed, ext
 function bindSceneContract(sceneId, stateEntry) {
   return {
     ...stateEntry,
+    background_pack_id: glassBackgroundPackId,
+    background_id: backgroundIdFor(sceneId, stateEntry),
+    background_pack_sha256: glassBackgroundPackSha256,
     geometry_pack_id: glassGeometryPackId,
     geometry_id: geometryIdFor(sceneId, stateEntry),
     geometry_pack_sha256: glassGeometryPackSha256,

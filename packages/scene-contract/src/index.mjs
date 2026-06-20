@@ -1,4 +1,5 @@
 export const sceneContractSchemaVersion = "1.2.0";
+export const glassBackgroundPackId = "glass_background_pack_v1";
 export const glassGeometryPackId = "glass_geometry_pack_v1";
 export const glassCaptureTimelinePackId = "glass_capture_timeline_pack_v1";
 
@@ -14,12 +15,22 @@ export function captureTimelineIdFor(sceneId, state) {
   return `${sceneId}__${state.state_id}__${state.touch_phase}__timeline_v1`;
 }
 
+export function backgroundIdFor(sceneId, state) {
+  return `${sceneId}__${state.state_id}__${state.substrate}__background_v1`;
+}
+
 export function sceneContractMaps(probe) {
+  const background = {};
   const geometry = {};
   const timeline = {};
   for (const scene of probe.scenes ?? []) {
     for (const state of scene.states ?? []) {
       const key = sceneStateKey(scene.scene_id, state.state_id);
+      background[key] = Object.freeze({
+        background_pack_id: state.background_pack_id,
+        background_id: state.background_id,
+        background_pack_sha256: state.background_pack_sha256
+      });
       geometry[key] = Object.freeze({
         geometry_pack_id: state.geometry_pack_id,
         geometry_id: state.geometry_id,
@@ -32,11 +43,24 @@ export function sceneContractMaps(probe) {
       });
     }
   }
-  return deepFreeze({ geometry, timeline });
+  return deepFreeze({ background, geometry, timeline });
 }
 
-export function validateSceneContract({ probe, geometryPack, timelinePack, expectedGeometrySha256, expectedTimelineSha256 }) {
+export function validateSceneContract({
+  probe,
+  backgroundPack,
+  geometryPack,
+  timelinePack,
+  expectedBackgroundSha256,
+  expectedGeometrySha256,
+  expectedTimelineSha256
+}) {
   const failures = [];
+  failures.push(...validatePackEnvelope(backgroundPack, {
+    kind: "background_pack",
+    idKey: "background_pack_id",
+    id: glassBackgroundPackId
+  }));
   failures.push(...validatePackEnvelope(geometryPack, {
     kind: "geometry_pack",
     idKey: "geometry_pack_id",
@@ -48,6 +72,7 @@ export function validateSceneContract({ probe, geometryPack, timelinePack, expec
     id: glassCaptureTimelinePackId
   }));
 
+  const backgroundByKey = new Map((backgroundPack.backgrounds ?? []).map((entry) => [sceneStateKey(entry.scene_id, entry.state_id), entry]));
   const geometryByKey = new Map((geometryPack.scene_geometry ?? []).map((entry) => [sceneStateKey(entry.scene_id, entry.state_id), entry]));
   const timelineByKey = new Map((timelinePack.timelines ?? []).map((entry) => [sceneStateKey(entry.scene_id, entry.state_id), entry]));
   const seenKeys = new Set();
@@ -56,6 +81,18 @@ export function validateSceneContract({ probe, geometryPack, timelinePack, expec
     for (const state of scene.states ?? []) {
       const key = sceneStateKey(scene.scene_id, state.state_id);
       seenKeys.add(key);
+
+      const background = backgroundByKey.get(key);
+      if (!background) {
+        failures.push(`${key}:BACKGROUND_ENTRY_MISSING`);
+      } else {
+        if (background.substrate !== state.substrate) failures.push(`${key}:BACKGROUND_SUBSTRATE_MISMATCH`);
+        if (background.background_id !== backgroundIdFor(scene.scene_id, state)) failures.push(`${key}:BACKGROUND_ID_MISMATCH`);
+        if (background.content_seed !== state.content_seed) failures.push(`${key}:BACKGROUND_CONTENT_SEED_MISMATCH`);
+        if ((background.background_asset_hash ?? null) !== (state.background_asset_hash ?? null)) failures.push(`${key}:BACKGROUND_ASSET_HASH_MISMATCH`);
+        if (background.kind === "asset" && !background.background_asset_hash) failures.push(`${key}:BACKGROUND_ASSET_HASH_REQUIRED`);
+        if (background.kind === "procedural" && background.background_asset_hash) failures.push(`${key}:BACKGROUND_PROCEDURAL_HAS_ASSET_HASH`);
+      }
 
       const geometry = geometryByKey.get(key);
       if (!geometry) {
@@ -75,6 +112,9 @@ export function validateSceneContract({ probe, geometryPack, timelinePack, expec
         failures.push(...validateTimelineSamples(key, timeline));
       }
 
+      if (state.background_pack_id !== glassBackgroundPackId) failures.push(`${key}:STATE_BACKGROUND_PACK_ID`);
+      if (state.background_id !== backgroundIdFor(scene.scene_id, state)) failures.push(`${key}:STATE_BACKGROUND_ID`);
+      if (state.background_pack_sha256 !== expectedBackgroundSha256) failures.push(`${key}:STATE_BACKGROUND_SHA`);
       if (state.geometry_pack_id !== glassGeometryPackId) failures.push(`${key}:STATE_GEOMETRY_PACK_ID`);
       if (state.geometry_id !== geometryIdFor(scene.scene_id, state)) failures.push(`${key}:STATE_GEOMETRY_ID`);
       if (state.geometry_pack_sha256 !== expectedGeometrySha256) failures.push(`${key}:STATE_GEOMETRY_SHA`);
@@ -84,6 +124,9 @@ export function validateSceneContract({ probe, geometryPack, timelinePack, expec
     }
   }
 
+  for (const key of backgroundByKey.keys()) {
+    if (!seenKeys.has(key)) failures.push(`${key}:BACKGROUND_ENTRY_WITHOUT_SCENE_STATE`);
+  }
   for (const key of geometryByKey.keys()) {
     if (!seenKeys.has(key)) failures.push(`${key}:GEOMETRY_ENTRY_WITHOUT_SCENE_STATE`);
   }

@@ -156,16 +156,17 @@ Artifact Store: content-addressed blob writer, immutable hash manifest, retentio
 Physical Lane: pending plan plus verifier for collected physical compositor/framebuffer repeat manifests
 G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
-Scene Contract: fixed geometry pack and fixed capture timeline pack for every scene/state
+Scene Contract: fixed background, geometry, and capture timeline packs for every scene/state
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
 Viewer: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
 ```
 
-Current scene-contract scope locks a formula-versioned geometry pack
-(`ProbeMetrics.v1`) and a capture timeline pack for every scene/state. App
-metadata and native capture artifacts carry the geometry pack hash in
-`environment` and the capture timeline hash in `frame_pack`; physical-device
-lane verification rejects captures whose scene/state contract does not match.
+Current scene-contract scope locks a fixed background pack, a
+formula-versioned geometry pack (`ProbeMetrics.v1`), and a capture timeline
+pack for every scene/state. App metadata and native capture artifacts carry the
+background and geometry pack hashes in `environment` and the capture timeline
+hash in `frame_pack`; physical-device lane verification rejects captures whose
+scene/state contract does not match.
 
 Current G3 mask scope is `edge_band_inferred_from_residual_v0` until exported
 pixel masks land in the capture artifact. Reports keep that method note in-band

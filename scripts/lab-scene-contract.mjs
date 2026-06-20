@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateSceneContract } from "../packages/scene-contract/src/index.mjs";
 import {
+  glassBackgroundPackSha256,
   glassCaptureTimelinePackSha256,
   glassGeometryPackSha256,
   glassMaterialProbe
@@ -11,6 +12,7 @@ import {
 import { sha256File } from "./lib/lab-png.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const backgroundPackPath = join(repoRoot, "fixtures", "backgrounds", "glass_background_pack_v1.json");
 const geometryPackPath = join(repoRoot, "fixtures", "scenes", "glass_geometry_pack_v1.json");
 const timelinePackPath = join(repoRoot, "fixtures", "scenes", "glass_capture_timeline_pack_v1.json");
 
@@ -32,17 +34,22 @@ function main() {
 }
 
 function runSelfTest() {
+  const backgroundPack = JSON.parse(readFileSync(backgroundPackPath, "utf8"));
   const geometryPack = JSON.parse(readFileSync(geometryPackPath, "utf8"));
   const timelinePack = JSON.parse(readFileSync(timelinePackPath, "utf8"));
+  const backgroundSha256 = sha256File(backgroundPackPath);
   const geometrySha256 = sha256File(geometryPackPath);
   const timelineSha256 = sha256File(timelinePackPath);
   const failures = [];
+  if (glassBackgroundPackSha256 !== backgroundSha256) failures.push("MATERIAL_BACKGROUND_PACK_SHA_MISMATCH");
   if (glassGeometryPackSha256 !== geometrySha256) failures.push("MATERIAL_GEOMETRY_PACK_SHA_MISMATCH");
   if (glassCaptureTimelinePackSha256 !== timelineSha256) failures.push("MATERIAL_CAPTURE_TIMELINE_PACK_SHA_MISMATCH");
   failures.push(...validateSceneContract({
     probe: glassMaterialProbe,
+    backgroundPack,
     geometryPack,
     timelinePack,
+    expectedBackgroundSha256: backgroundSha256,
     expectedGeometrySha256: geometrySha256,
     expectedTimelineSha256: timelineSha256
   }));
@@ -51,6 +58,11 @@ function runSelfTest() {
     schema_version: "1.2.0",
     kind: "scene_contract_self_test_report",
     status: failures.length === 0 ? "pass" : "fail",
+    background_pack: {
+      path: "fixtures/backgrounds/glass_background_pack_v1.json",
+      sha256: backgroundSha256,
+      entry_count: backgroundPack.backgrounds?.length ?? 0
+    },
     geometry_pack: {
       path: "fixtures/scenes/glass_geometry_pack_v1.json",
       sha256: geometrySha256,

@@ -95,6 +95,9 @@ export interface CaptureArtifact {
     reduce_motion: boolean;
     content_seed?: string;
     background_asset_hash?: string;
+    background_pack_id?: string;
+    background_id?: string;
+    background_pack_sha256?: string;
     geometry_pack_id?: string;
     geometry_id?: string;
     geometry_pack_sha256?: string;
