@@ -159,7 +159,7 @@ G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
 Scene Contract: fixed background, geometry, and capture timeline packs for every scene/state
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
-Viewer: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
+Viewer: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
 ```
 
 Current scene-contract scope locks a fixed background pack, a
@@ -179,7 +179,10 @@ artifacts carry the same `frame_pack.trajectory_source_sha256`. Gesture scenes
 S02/S03/S04 have one source fixture each, with XCUITest and PointerEvent
 consumers compiled from that source and checked by `npm run trajectory:build`.
 Missing or divergent gesture source hashes make the temporal report fail by
-design, because otherwise it measures runner drift instead of glass motion.
+design, because otherwise it measures runner drift instead of glass motion. G4
+also emits debug series for reference/candidate motion energy and frame
+intervals; the diff viewer uses those same series for the temporal phase plot
+and frame-budget timeline instead of drawing detached illustration.
 
 Current G5 runtime scope uses ReplayKit sample-buffer PTS as a full-frame
 interval proxy when a physical compositor capture writes `artifact.perf`.

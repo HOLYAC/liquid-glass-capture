@@ -10,6 +10,7 @@ import { measureOptics } from "../../packages/metric-stack/src/optics.mjs";
 import { measureTemporal } from "../../packages/metric-stack/src/temporal.mjs";
 import { measureRuntime } from "../../packages/metric-stack/src/runtime.mjs";
 import { measureEnergy } from "../../packages/energy-stack/src/index.mjs";
+import { maskIndexesFor } from "../../packages/mask-core/src/index.mjs";
 import { makeReviewPacketSeed } from "../../packages/review-stack/src/index.mjs";
 import { glassTrajectoryShaByScene } from "../../packages/material-glass/src/index.mjs";
 
@@ -154,6 +155,9 @@ export function renderDiffViewer(referencePath, candidatePath) {
         <figure><canvas class="frame" id="heatmap"></canvas><figcaption>debug heatmap</figcaption></figure>
       </div>
     `),
+    section("Mask Overlay", maskOverlay(referenceRecord)),
+    section("Temporal Phase Plot", temporalPhasePlot(temporalReport)),
+    section("Frame Budget Timeline", frameBudgetTimeline(temporalReport, runtimeReport)),
     section("Metric Summary", metricTable(report.metrics ?? {})),
     section("Optics Summary", metricTable(opticsReport.metrics ?? {})),
     section("Temporal Summary", temporalSummary(temporalReport)),
@@ -483,6 +487,131 @@ function temporalSummary(report) {
   ].join("");
 }
 
+function maskOverlay(record) {
+  const artifact = record.artifact;
+  const maskPack = record.mask_pack;
+  const width = record.png?.width ?? artifact.environment?.viewport_px?.width ?? 0;
+  const height = record.png?.height ?? artifact.environment?.viewport_px?.height ?? 0;
+  const maskIds = ["core", "edge_band", "text", "motion_path", "background_control"];
+  if (!maskPack || !width || !height) {
+    return `<div id="mask-overlay" class="missing">mask overlay unavailable</div>`;
+  }
+
+  const gridWidth = Math.min(72, width);
+  const gridHeight = Math.max(1, Math.round((height / width) * gridWidth));
+  const colors = {
+    core: "rgba(78, 220, 255, 0.36)",
+    edge_band: "rgba(255, 228, 114, 0.42)",
+    text: "rgba(255, 255, 255, 0.38)",
+    motion_path: "rgba(255, 96, 180, 0.22)",
+    background_control: "rgba(120, 255, 150, 0.16)"
+  };
+  const panels = maskIds.map((maskId) => {
+    const indexes = new Set(maskIndexesFor(maskPack, {
+      sceneId: artifact.scene_id,
+      stateId: artifact.state_id,
+      maskId,
+      width,
+      height
+    }));
+    const rects = [];
+    for (let y = 0; y < gridHeight; y += 1) {
+      for (let x = 0; x < gridWidth; x += 1) {
+        const px = Math.min(width - 1, Math.floor((x + 0.5) * width / gridWidth));
+        const py = Math.min(height - 1, Math.floor((y + 0.5) * height / gridHeight));
+        if (indexes.has(py * width + px)) {
+          rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${colors[maskId]}"/>`);
+        }
+      }
+    }
+    return `<figure class="viz-panel">
+      <svg class="plot" viewBox="0 0 ${gridWidth} ${gridHeight}" role="img" aria-label="${escapeHtml(maskId)} mask preview">
+        <rect x="0" y="0" width="${gridWidth}" height="${gridHeight}" fill="#050607"/>
+        ${rects.join("")}
+      </svg>
+      <figcaption>${escapeHtml(maskId)} samples=${indexes.size}</figcaption>
+    </figure>`;
+  });
+
+  return `<div id="mask-overlay" class="viz-grid">${panels.join("")}</div>`;
+}
+
+function temporalPhasePlot(report) {
+  const reference = report.debug_series?.reference_motion ?? [];
+  const candidate = report.debug_series?.candidate_motion ?? [];
+  if (reference.length === 0 || candidate.length === 0) {
+    return `<div id="temporal-phase-plot" class="missing">temporal phase data unavailable</div>`;
+  }
+
+  const width = 720;
+  const height = 190;
+  const pad = 24;
+  const allTimes = [...reference, ...candidate].map((point) => point.t_ms);
+  const allEnergy = [...reference, ...candidate].map((point) => point.energy);
+  const minT = Math.min(...allTimes);
+  const maxT = Math.max(...allTimes);
+  const maxE = Math.max(...allEnergy, 0.000001);
+  const sx = (time) => pad + ((time - minT) / Math.max(1, maxT - minT)) * (width - pad * 2);
+  const sy = (energy) => height - pad - (energy / maxE) * (height - pad * 2);
+  const refPeak = report.metrics?.optical_flow_phase?.reference_peak_time_ms;
+  const candPeak = report.metrics?.optical_flow_phase?.candidate_peak_time_ms;
+  const phaseError = report.metrics?.optical_flow_phase?.peak_phase_error_ms;
+
+  return `<svg id="temporal-phase-plot" class="plot" viewBox="0 0 ${width} ${height}" role="img" aria-label="temporal phase plot">
+    <rect x="0" y="0" width="${width}" height="${height}" fill="#050607"/>
+    ${axisSvg(width, height, pad)}
+    <polyline points="${linePoints(reference, sx, sy)}" fill="none" stroke="#63d8ff" stroke-width="2"/>
+    <polyline points="${linePoints(candidate, sx, sy)}" fill="none" stroke="#ff72c6" stroke-width="2"/>
+    ${Number.isFinite(refPeak) ? markerLine(sx(refPeak), pad, height - pad, "#63d8ff", "R peak") : ""}
+    ${Number.isFinite(candPeak) ? markerLine(sx(candPeak), pad, height - pad, "#ff72c6", "C peak") : ""}
+    <text x="${pad}" y="18" fill="#c9d7e4" font-size="11">motion energy phase, error=${escapeHtml(round(phaseError))}ms</text>
+  </svg>`;
+}
+
+function frameBudgetTimeline(temporalReport, runtimeReport) {
+  const intervals = temporalReport.debug_series?.candidate_frame_intervals_ms ?? [];
+  if (intervals.length === 0) {
+    return `<div id="frame-budget-timeline" class="missing">frame interval data unavailable</div>`;
+  }
+
+  const width = 720;
+  const height = 190;
+  const pad = 24;
+  const budget = runtimeReport.policy?.full_frame_p95_ceiling_ms ?? 25;
+  const maxInterval = Math.max(...intervals.map((point) => point.interval_ms), budget * 1.2);
+  const barWidth = (width - pad * 2) / intervals.length;
+  const sy = (value) => height - pad - (value / maxInterval) * (height - pad * 2);
+  const budgetY = sy(budget);
+  const bars = intervals.map((point, index) => {
+    const x = pad + index * barWidth;
+    const y = sy(point.interval_ms);
+    const fill = point.interval_ms > budget ? "#ff6666" : "#7ee7a8";
+    return `<rect x="${x}" y="${y}" width="${Math.max(1, barWidth - 2)}" height="${height - pad - y}" fill="${fill}" opacity="0.82"/>`;
+  }).join("");
+
+  return `<svg id="frame-budget-timeline" class="plot" viewBox="0 0 ${width} ${height}" role="img" aria-label="frame budget timeline">
+    <rect x="0" y="0" width="${width}" height="${height}" fill="#050607"/>
+    ${axisSvg(width, height, pad)}
+    ${bars}
+    <line x1="${pad}" y1="${budgetY}" x2="${width - pad}" y2="${budgetY}" stroke="#ffe472" stroke-width="2" stroke-dasharray="6 5"/>
+    <text x="${pad}" y="18" fill="#c9d7e4" font-size="11">candidate frame intervals, budget=${escapeHtml(round(budget))}ms</text>
+  </svg>`;
+}
+
+function axisSvg(width, height, pad) {
+  return `<line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" stroke="rgba(255,255,255,0.28)"/>
+    <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" stroke="rgba(255,255,255,0.28)"/>`;
+}
+
+function linePoints(points, sx, sy) {
+  return points.map((point) => `${sx(point.t_ms)},${sy(point.energy)}`).join(" ");
+}
+
+function markerLine(x, top, bottom, color, label) {
+  return `<line x1="${x}" y1="${top}" x2="${x}" y2="${bottom}" stroke="${color}" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <text x="${x + 4}" y="${bottom - 6}" fill="${color}" font-size="10">${escapeHtml(label)}</text>`;
+}
+
 function writeViewerMotionSequence(dir, prefix, width, height, staticBias) {
   const positions = [4, 14, 14, 14, 14, 14];
   const paths = [];
@@ -699,6 +828,9 @@ section { padding:18px 0; border-bottom:1px solid rgba(255,255,255,0.10); }
 .pill.warn { border-color:rgba(245,190,92,0.45); }
 .media-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; align-items:start; }
 .media-grid.one { grid-template-columns:minmax(0, 1fr); }
+.viz-grid { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:10px; align-items:start; }
+.viz-panel { min-width:0; }
+.plot { display:block; width:100%; min-height:150px; background:#050607; border:1px solid rgba(255,255,255,0.14); border-radius:8px; }
 figure { margin:0; min-width:0; }
 figcaption { margin-top:6px; color:#8f9dac; font-size:11px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .frame { display:block; width:100%; max-height:62vh; min-height:180px; object-fit:contain; background:#050607; border:1px solid rgba(255,255,255,0.14); border-radius:8px; }
@@ -713,6 +845,7 @@ pre { margin:0; overflow:auto; max-height:56vh; padding:12px; background:#050607
   .hero { align-items:flex-start; flex-direction:column; }
   .pills { justify-content:flex-start; }
   .media-grid { grid-template-columns:1fr; }
+  .viz-grid { grid-template-columns:1fr; }
   th { width:42%; }
 }
 `;

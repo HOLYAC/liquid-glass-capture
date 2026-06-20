@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -18,6 +19,7 @@ function main() {
     const out = args.out ?? join(repoRoot, "artifacts", "lab-self-test", "artifact-viewer", "diff.html");
     const html = renderDiffViewer(fixture.referenceArtifact, fixture.candidateArtifact);
     const path = writeViewerHtml(out, html);
+    assertDiffViewerContract(path);
     console.log(`PASS ${path}`);
     return;
   }
@@ -49,4 +51,18 @@ function parseArgs(args) {
 
 function safeName(value) {
   return String(value).replace(/[^a-z0-9_.-]+/gi, "_").slice(0, 56) || "artifact";
+}
+
+function assertDiffViewerContract(path) {
+  const html = readFileSync(path, "utf8");
+  for (const required of [
+    'id="heatmap"',
+    'id="mask-overlay"',
+    'id="temporal-phase-plot"',
+    'id="frame-budget-timeline"'
+  ]) {
+    if (!html.includes(required)) {
+      throw new Error(`diff viewer self-test missing ${required}`);
+    }
+  }
 }

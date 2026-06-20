@@ -78,6 +78,12 @@ export function measureTemporal(referenceSequence, candidateSequence, options = 
         reference: referencePacing,
         candidate: candidatePacing
       }
+    },
+    debug_series: {
+      reference_motion: motionDebugSeries(referenceMotion),
+      candidate_motion: motionDebugSeries(candidateMotion),
+      reference_frame_intervals_ms: frameIntervals(referenceSequence.timestamps_ms),
+      candidate_frame_intervals_ms: frameIntervals(candidateSequence.timestamps_ms)
     }
   };
 }
@@ -237,6 +243,28 @@ function summarizeMotion(motion) {
     center_x_mean: mean(motion.center_x),
     center_y_mean: mean(motion.center_y)
   };
+}
+
+function motionDebugSeries(motion) {
+  return motion.time_ms.map((time, index) => ({
+    t_ms: time,
+    energy: motion.energy[index] ?? 0,
+    center_x: motion.center_x[index] ?? 0,
+    center_y: motion.center_y[index] ?? 0
+  }));
+}
+
+function frameIntervals(timestampsMs) {
+  if (!timestampsMs || timestampsMs.length < 2) return [];
+  const intervals = [];
+  for (let index = 1; index < timestampsMs.length; index += 1) {
+    intervals.push({
+      frame_index: index,
+      t_ms: timestampsMs[index],
+      interval_ms: timestampsMs[index] - timestampsMs[index - 1]
+    });
+  }
+  return intervals;
 }
 
 function firstDimensionFailure(referenceSequence, candidateSequence) {
