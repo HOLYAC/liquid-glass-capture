@@ -1,5 +1,6 @@
 import { retentionSummaryForHash } from "../../artifact-store/src/index.mjs";
 import { createHash } from "node:crypto";
+import { classifyFlakiness } from "../../flakiness-stack/src/index.mjs";
 
 const requiredTechnicalGates = ["G2", "G3", "G4", "G5", "G6"];
 
@@ -59,6 +60,13 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
   const verdictClass = verdictClassFromState({ invalid, hardFailed, reviewReport, designClass });
   const energyGate = gateMap.get("G6");
   const solverIdentifiability = solverReport?.parameter_identifiability ?? {};
+  const flakeClassification = classifyVerdictFlakiness({
+    failures,
+    blockers,
+    gateReports,
+    reviewReport,
+    physicalDeviceLaneReport
+  });
 
   return {
     schema_version: "1.2.0",
@@ -66,7 +74,7 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
     verdict_class: verdictClass,
     technical_class: technicalClass,
     design_class: designClass,
-    flake_class: "NONE",
+    flake_class: flakeClassification.flake_class,
     status: verdictClass === "FAIL" || verdictClass === "INVALID" ? "fail" : "pass",
     null_qualification: artifact.null_qualification ?? "not_recorded",
     device: deviceSummary(artifact),
@@ -114,10 +122,36 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       energy_trace: energyGate?.metrics?.energy?.trace_status ?? artifact.energy?.trace_status ?? "not_recorded"
     },
     trend_metrics: trendMetrics({ gateMap, solverReport }),
+    flake_classification: flakeClassification,
     blockers: [...failures, ...blockers, ...(reviewReport?.failures ?? [])],
     retention: buildRetentionBlock({ artifactStoreIndex, candidateRecord, artifact }),
     reports: Object.fromEntries(gateReports.map((report) => [report.gate, report.kind ?? "gate_report"]))
   };
+}
+
+function classifyVerdictFlakiness({ failures, blockers, gateReports, reviewReport, physicalDeviceLaneReport }) {
+  const evidenceCount =
+    failures.length +
+    blockers.length +
+    gateReports.reduce((total, report) => total + (report.failures?.length ?? 0), 0) +
+    (reviewReport?.failures?.length ?? 0) +
+    (physicalDeviceLaneReport?.failures?.length ?? 0);
+  if (evidenceCount === 0) {
+    return {
+      status: "pass",
+      flake_class: "NONE",
+      action: "continue",
+      evidence: []
+    };
+  }
+  return classifyFlakiness({
+    reports: [
+      ...gateReports,
+      reviewReport,
+      physicalDeviceLaneReport
+    ].filter(Boolean),
+    blockers: [...failures, ...blockers, ...(reviewReport?.failures ?? [])]
+  });
 }
 
 function validateBaselineReport(report) {

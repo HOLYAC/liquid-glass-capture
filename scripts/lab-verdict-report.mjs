@@ -409,6 +409,9 @@ function assertVerdictGuardRails(fixture, passReport) {
   if (passReport.technical_class !== "SHADER_PASS" || passReport.verdict_class !== "PROD_PASS") {
     throw new Error("G8 guardrail failed: positive self-test did not produce SHADER_PASS + PROD_PASS");
   }
+  if (passReport.flake_class !== "NONE" || passReport.flake_classification?.action !== "continue") {
+    throw new Error("G8 guardrail failed: positive self-test should carry flake_class NONE");
+  }
   if (passReport.solver?.selected_candidate_id !== "self-test-c1-g8-verdict") {
     throw new Error("G8 guardrail failed: solver selected candidate missing from verdict");
   }
@@ -505,6 +508,9 @@ function assertVerdictGuardRails(fixture, passReport) {
   });
   if (calibrationReport.verdict_class !== "INVALID" || !calibrationReport.blockers.includes("G8_C1_REQUIRES_BAKED_VERDICT_SHADER")) {
     throw new Error("G8 guardrail failed: C1 calibration shader received verdict");
+  }
+  if (calibrationReport.flake_class !== "PRODUCT_REGRESSION") {
+    throw new Error("G8 guardrail failed: deterministic calibration blocker not classified as product regression");
   }
 
   const domRecord = {

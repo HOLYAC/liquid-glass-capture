@@ -262,6 +262,7 @@ function renderVerdictViewer(path, report) {
     section("Device", table(objectRows(report.device ?? {}))),
     section("Solver", table(objectRows(report.solver ?? { status: "not_recorded" }))),
     section("Physical Device Lane", table(objectRows(report.physical_device_lane ?? { status: "not_recorded" }))),
+    section("Flake Classification", table(objectRows(report.flake_classification ?? { status: "not_recorded" }))),
     section("Identifiability", table(objectRows(report.identifiability ?? { status: "not_recorded" }))),
     section("Claim Constraints", table((report.claim_constraints ?? []).map((constraint) => [
       constraint.parameter,

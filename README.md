@@ -136,6 +136,7 @@ npm run device:lane -- --lane mvl --git-commit <sha> --out ./artifacts/device-la
 npm run device:lane -- --lane prod_p99 --git-commit <sha> --out ./artifacts/device-lane/prod-p99.plan.json
 npm run device:lane -- --plan ./artifacts/device-lane/mvl.plan.json --manifest ./artifacts/r0.repeat-manifest.json --manifest ./artifacts/r1.repeat-manifest.json --manifest ./artifacts/c1.repeat-manifest.json --manifest ./artifacts/domc.repeat-manifest.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --out ./artifacts/device-lane/mvl.report.json
 npm run review:packet -- --packet ./artifacts/g7-review.packet.json --out ./artifacts/g7-review.report.json
+npm run report:flake -- --report ./artifacts/g2.report.json --report ./artifacts/g6-energy.report.json --out ./artifacts/flake-classification.report.json
 npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --solver ./artifacts/solver.pareto.report.json --store-index ./artifacts/store/index.json --device-lane ./artifacts/device-lane/mvl.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
 npm run report:trend -- --dir ./artifacts/nightly --limit 30 --out ./artifacts/nightly/trend.report.json
 npm run ci:glass -- --out ./artifacts/ci/glass-gate.report.json
@@ -161,6 +162,7 @@ Artifact Store: content-addressed blob writer, immutable hash manifest, retentio
 Physical Lane: pending plan plus verifier for collected physical compositor/framebuffer repeat manifests
 G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
+Flake: deterministic failure-code classifier for INFRA_FLAKE / PRODUCT_REGRESSION / METRIC_NOISE / UNKNOWN
 Trend: last-30 valid run report with gate/device/iOS buckets and visual/runtime/energy/flake slopes
 Scene Contract: fixed background, geometry, and capture timeline packs for every scene/state
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
@@ -307,6 +309,15 @@ remain unapproved evidence. Every baseline report is frozen by a canonical
 G8 verdicts require that locked baseline to be production-P99 eligible:
 `repeat_policy.final_p99_allowed` must be true, so MVL/day-one baselines can
 inform threshold work but cannot mint `PROD_PASS`.
+
+Current flakiness scope classifies exact failure codes before they reach trend
+or final verdicts. Device/runner/capture-path/thermal-precondition failures are
+`INFRA_FLAKE` and should rerun once; deterministic G2-G6/G8 failures are
+`PRODUCT_REGRESSION` and block as product red; explicit noise/outlier/confidence
+evidence is `METRIC_NOISE` and does not block alone; unrecognized evidence is
+`UNKNOWN` and blocks until classified. G8 and CI reports now carry the
+`flake_classification` block instead of silently defaulting red runs to
+`UNKNOWN`.
 
 Current trend scope normalizes G8 verdicts, CI reports, solver reports, and
 G2/G5/G6 gate reports into one nightly `trend_report`, grouping related

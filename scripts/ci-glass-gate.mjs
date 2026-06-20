@@ -2,6 +2,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { classifyFlakiness } from "../packages/flakiness-stack/src/index.mjs";
 
 const defaultOut = "artifacts/ci/glass-gate.report.json";
 const commandPlan = Object.freeze([
@@ -60,6 +61,7 @@ function main() {
 }
 
 function makeReport({ args, lane, changedFiles, commands, status, blockers }) {
+  const flakeClassification = classifyCiFlakiness({ commands, blockers });
   return {
     schema_version: "1.2.0",
     kind: "ci_glass_gate_report",
@@ -90,8 +92,9 @@ function makeReport({ args, lane, changedFiles, commands, status, blockers }) {
       physical_device_capture: lane.physical_device_capture_required ? "pending_device_lane" : "not_required",
       physical_device_lane: lane.physical_device_capture_required ? "pending_physical_device_lane_report" : "not_required",
       trend_report: lane.class === "nightly" ? "required_external_history_artifact" : "not_required",
-      flake_class: blockers.length === 0 ? "NONE" : "UNKNOWN"
+      flake_class: flakeClassification.flake_class
     },
+    flake_classification: flakeClassification,
     commands,
     blockers,
     evidence: {
@@ -99,6 +102,25 @@ function makeReport({ args, lane, changedFiles, commands, status, blockers }) {
       upload_artifact_name: "glass-gate-report"
     }
   };
+}
+
+function classifyCiFlakiness({ commands, blockers }) {
+  if (blockers.length === 0) {
+    return {
+      status: "pass",
+      flake_class: "NONE",
+      action: "continue",
+      evidence: []
+    };
+  }
+  return classifyFlakiness({
+    blockers,
+    reports: commands.map((command) => ({
+      kind: "ci_command_report",
+      status: command.status,
+      failures: command.status === "pass" ? [] : [`${command.gate}:${command.id}:exit_${command.exit_code}`]
+    }))
+  });
 }
 
 function classifyLane(changedFiles, args = {}) {
@@ -224,6 +246,13 @@ function assertClassificationGuardRails() {
   const docs = classifyLane(["docs/notes.md"]);
   if (docs.protected_surface || docs.null_ladder_required) {
     throw new Error("CI glass classification guardrail failed for docs-only change");
+  }
+  const flake = classifyCiFlakiness({
+    commands: [{ gate: "typescript", id: "typecheck", status: "fail", exit_code: 2 }],
+    blockers: ["typescript:typecheck:exit_2"]
+  });
+  if (flake.flake_class !== "PRODUCT_REGRESSION" || flake.action !== "block_as_product_red") {
+    throw new Error("CI glass flake classification guardrail failed for deterministic source red");
   }
 }
 
