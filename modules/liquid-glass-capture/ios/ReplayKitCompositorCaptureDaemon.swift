@@ -525,7 +525,7 @@ private final class ReplayKitCaptureSession {
       touchPhase: touchPhase
     )
     let maskURL = sessionDir.appendingPathComponent("glass_core_mask_pack_v1.json")
-    let maskData = try JSONSerialization.data(withJSONObject: maskPack, options: [.prettyPrinted, .sortedKeys])
+    let maskData = try JSONValueSanitizer.data(withJSONObject: maskPack, options: [.prettyPrinted, .sortedKeys])
     try maskData.write(to: maskURL, options: .atomic)
 
     let jsonURL = sessionDir.appendingPathComponent("\(id).capture.json")
@@ -643,7 +643,7 @@ private final class ReplayKitCaptureSession {
     ]
 
     try CaptureArtifactIntegrity.finalizeArtifact(&artifact)
-    let jsonData = try JSONSerialization.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
+    let jsonData = try JSONValueSanitizer.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
     try jsonData.write(to: jsonURL, options: .atomic)
 
     artifact["status"] = "stopped"
@@ -735,7 +735,7 @@ private final class ReplayKitCaptureSession {
       "frame_count": frames.count,
       "frames": frames
     ]
-    let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    let manifestData = try JSONValueSanitizer.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     try manifestData.write(to: manifestURL, options: .atomic)
     return FrameManifestWriteResult(
       path: relativePath(for: manifestURL),

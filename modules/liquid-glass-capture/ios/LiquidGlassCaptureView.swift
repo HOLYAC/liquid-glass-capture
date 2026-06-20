@@ -127,7 +127,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "metrics": Self.metrics(for: image)
     ]
 
-    let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    let jsonData = try JSONValueSanitizer.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
     try jsonData.write(to: jsonURL, options: .atomic)
     payload["jsonPath"] = jsonURL.path
     return payload
@@ -181,7 +181,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       phase: metadata["phase"] as? String ?? model.phase.rawValue,
       touchPhase: touchPhase
     )
-    let maskData = try JSONSerialization.data(withJSONObject: maskPack, options: [.prettyPrinted, .sortedKeys])
+    let maskData = try JSONValueSanitizer.data(withJSONObject: maskPack, options: [.prettyPrinted, .sortedKeys])
     try maskData.write(to: maskURL, options: .atomic)
 
     let artifactId = "\(rigId)-\(sceneId)-\(stateId)-\(stamp)"
@@ -288,7 +288,7 @@ public final class LiquidGlassCaptureView: ExpoView {
     ]
 
     try CaptureArtifactIntegrity.finalizeArtifact(&artifact)
-    let jsonData = try JSONSerialization.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
+    let jsonData = try JSONValueSanitizer.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
     try jsonData.write(to: jsonURL, options: .atomic)
     artifact["jsonPath"] = jsonURL.path
     return artifact
@@ -654,9 +654,9 @@ public final class LiquidGlassCaptureView: ExpoView {
       "failures": failures
     ]
 
-    var jsonData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    var jsonData = try JSONValueSanitizer.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     manifest["manifest_sha256"] = Self.sha256Hex(jsonData)
-    jsonData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    jsonData = try JSONValueSanitizer.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     try jsonData.write(to: jsonURL, options: .atomic)
     manifest["jsonPath"] = jsonURL.path
     return manifest

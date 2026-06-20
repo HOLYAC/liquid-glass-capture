@@ -11,6 +11,7 @@ const defaultVenvDir = join(repoRoot, "artifacts", "tooling", "pmd3-venv");
 const pinnedPymobiledevice3 = "pymobiledevice3==9.27.0";
 const defaultWaitMs = 15 * 60 * 1000;
 const defaultPollMs = 2500;
+const commandMaxBuffer = 64 * 1024 * 1024;
 
 main();
 
@@ -124,18 +125,26 @@ function runPhonePull(request) {
   checks.push(deviceCheck);
   if (deviceCheck.status === "fail") return report("fail", request, checks);
 
-  mkdirSync(request.outRoot, { recursive: true });
-  const pullCheck = pullDocuments(toolCheck.evidence.tool_path, request);
-  checks.push(pullCheck);
-  if (pullCheck.status !== "pass") return report("fail", request, checks);
+  const bundleCheck = resolveInstalledBundleId(toolCheck.evidence.tool_path, request);
+  checks.push(bundleCheck);
+  if (bundleCheck.status === "fail") return report("fail", request, checks);
 
-  if (!request.skipVerify) {
-    const verifyCheck = runProofDoctor(request);
+  const resolvedRequest = {
+    ...request,
+    bundleId: bundleCheck.evidence.bundle_id
+  };
+  mkdirSync(resolvedRequest.outRoot, { recursive: true });
+  const pullCheck = pullDocuments(toolCheck.evidence.tool_path, resolvedRequest);
+  checks.push(pullCheck);
+  if (pullCheck.status !== "pass") return report("fail", resolvedRequest, checks);
+
+  if (!resolvedRequest.skipVerify) {
+    const verifyCheck = runProofDoctor(resolvedRequest);
     checks.push(verifyCheck);
-    if (verifyCheck.status !== "pass") return report("fail", request, checks);
+    if (verifyCheck.status !== "pass") return report("fail", resolvedRequest, checks);
   }
 
-  return report("pass", request, checks);
+  return report("pass", resolvedRequest, checks);
 }
 
 function resolvePymobiledevice3(request) {
@@ -282,6 +291,107 @@ function checkConnectedDevice(toolPath, request) {
   };
 }
 
+function resolveInstalledBundleId(toolPath, request) {
+  const queryResult = runCommand(toolPath, [
+    "apps",
+    "query",
+    ...deviceArgs(request),
+    request.bundleId
+  ]);
+  if (queryResult.status === 0) {
+    const queryApps = parseJsonObject(queryResult.stdout);
+    const queryMatches = installedBundleMatches(queryApps, request.bundleId);
+    if (queryMatches.length > 0) {
+      const match = queryMatches[0];
+      return {
+        name: "installed_app_bundle_id",
+        status: "pass",
+        summary: match.bundle_id === request.bundleId
+          ? "requested bundle id is installed"
+          : `resolved installed app bundle id ${match.bundle_id}`,
+        evidence: {
+          requested_bundle_id: request.bundleId,
+          bundle_id: match.bundle_id,
+          resolution: match.bundle_id === request.bundleId ? "exact" : "query_alias",
+          matches: queryMatches
+        }
+      };
+    }
+  }
+
+  const listResult = runCommand(toolPath, [
+    "apps",
+    "list",
+    "--type",
+    "User",
+    ...deviceArgs(request)
+  ]);
+  if (listResult.status !== 0) {
+    return commandFailure("installed_app_bundle_id", "pymobiledevice3 apps list failed", listResult, {
+      requested_bundle_id: request.bundleId,
+      query_exit_code: queryResult.status,
+      query_stderr_tail: tailLines(queryResult.stderr ?? "")
+    });
+  }
+
+  const apps = parseJsonObject(listResult.stdout);
+  const matches = installedBundleMatches(apps, request.bundleId);
+
+  if (matches.length === 0) {
+    return {
+      name: "installed_app_bundle_id",
+      status: "fail",
+      summary: `no installed app matched ${request.bundleId}`,
+      evidence: {
+        requested_bundle_id: request.bundleId,
+        query_exit_code: queryResult.status,
+        query_stderr_tail: tailLines(queryResult.stderr ?? ""),
+        app_count: Object.keys(apps).length
+      }
+    };
+  }
+
+  const match = matches[0];
+  return {
+    name: "installed_app_bundle_id",
+    status: "pass",
+    summary: match.bundle_id === request.bundleId
+      ? "requested bundle id is installed"
+      : `resolved installed sideload bundle id ${match.bundle_id}`,
+    evidence: {
+      requested_bundle_id: request.bundleId,
+      bundle_id: match.bundle_id,
+      resolution: match.bundle_id === request.bundleId ? "exact" : "sideload_suffix",
+      matches
+    }
+  };
+}
+
+function installedBundleMatches(apps, requestedBundleId) {
+  return Object.entries(apps)
+    .filter(([bundleId, info]) => appMatchesBundleRequest(requestedBundleId, bundleId, info))
+    .map(([bundleId, info]) => ({
+      bundle_id: String(info?.CFBundleIdentifier ?? bundleId),
+      key: bundleId,
+      alt_bundle_id: typeof info?.ALTBundleIdentifier === "string" ? info.ALTBundleIdentifier : null,
+      name: info?.CFBundleDisplayName ?? info?.CFBundleName ?? null,
+      sequence_number: Number(info?.SequenceNumber ?? 0)
+    }))
+    .sort((left, right) => {
+      if (left.sequence_number !== right.sequence_number) return right.sequence_number - left.sequence_number;
+      return left.bundle_id.localeCompare(right.bundle_id);
+    });
+}
+
+function appMatchesBundleRequest(requestedBundleId, bundleId, info) {
+  const actualBundleId = String(info?.CFBundleIdentifier ?? bundleId);
+  const altBundleId = String(info?.ALTBundleIdentifier ?? "");
+  return actualBundleId === requestedBundleId ||
+    altBundleId === requestedBundleId ||
+    actualBundleId.startsWith(`${requestedBundleId}.`) ||
+    bundleId.startsWith(`${requestedBundleId}.`);
+}
+
 function pullDocuments(toolPath, request) {
   const args = [
     "apps",
@@ -301,6 +411,24 @@ function pullDocuments(toolPath, request) {
       out_root: request.outRoot
     });
   }
+  const captureRoot = join(request.outRoot, request.remotePath);
+  if (!existsSync(captureRoot)) {
+    return {
+      name: "pull_liquid_glass_captures",
+      status: "fail",
+      summary: "pymobiledevice3 apps pull completed but local LiquidGlassCaptures was not created",
+      evidence: {
+        retryable: true,
+        command: [toolPath, ...args],
+        bundle_id: request.bundleId,
+        remote_path: request.remotePath,
+        out_root: request.outRoot,
+        expected_capture_root: captureRoot,
+        stdout_tail: tailLines(result.stdout ?? ""),
+        stderr_tail: tailLines(result.stderr ?? "")
+      }
+    };
+  }
 
   return {
     name: "pull_liquid_glass_captures",
@@ -308,7 +436,7 @@ function pullDocuments(toolPath, request) {
     summary: "copied LiquidGlassCaptures from the app Documents container",
     evidence: {
       command: [toolPath, ...args],
-      capture_root: join(request.outRoot, request.remotePath)
+      capture_root: captureRoot
     }
   };
 }
@@ -385,6 +513,16 @@ function nextSteps(status, checks) {
       connect_phone: "Connect iPhone by USB, unlock, Trust This Computer, rerun npm run proof:run, install the printed IPA, open the app, press B"
     };
   }
+  if (findCheck(checks, "installed_app_bundle_id")?.status === "fail") {
+    return {
+      install_app: "Install the IPA printed by npm run proof:run, open it once, then rerun npm run proof:run"
+    };
+  }
+  if (findCheck(checks, "pull_liquid_glass_captures")?.evidence?.retryable === true) {
+    return {
+      wait_again: "Keep the iPhone connected, rerun npm run proof:run, install the printed IPA, open the app, press B"
+    };
+  }
   if (findCheck(checks, "wait_for_phone_pull")?.status === "fail") {
     return {
       wait_again: "Keep the iPhone connected, rerun npm run proof:run, install the printed IPA, open the app, press B"
@@ -406,6 +544,8 @@ function printSummary(report) {
     console.log(`NEXT ${report.next.bootstrap}`);
   } else if (report.next.connect_phone) {
     console.log(`NEXT ${report.next.connect_phone}`);
+  } else if (report.next.install_app) {
+    console.log(`NEXT ${report.next.install_app}`);
   } else if (report.next.wait_again) {
     console.log(`NEXT ${report.next.wait_again}`);
   } else if (report.next.manual_fallback) {
@@ -431,12 +571,14 @@ function runCommand(command, args) {
   if (process.platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
     return spawnSync("cmd.exe", ["/d", "/c", command, ...args], {
       cwd: repoRoot,
-      encoding: "utf8"
+      encoding: "utf8",
+      maxBuffer: commandMaxBuffer
     });
   }
   return spawnSync(command, args, {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    maxBuffer: commandMaxBuffer
   });
 }
 
@@ -446,6 +588,15 @@ function parseJsonArray(text) {
     return Array.isArray(value) ? value : [];
   } catch {
     return [];
+  }
+}
+
+function parseJsonObject(text) {
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
   }
 }
 
@@ -570,6 +721,61 @@ function runSelfTest() {
   ];
   if (JSON.stringify(args) !== JSON.stringify(expected)) {
     throw new Error("phone-pull self-test failed command argument construction");
+  }
+
+  const fakeInstalledTool = join(dir, process.platform === "win32" ? "fake-installed-pmd3.cmd" : "fake-installed-pmd3.sh");
+  const fakeInstalledScript = join(dir, "fake-installed-pmd3.cjs");
+  writeFileSync(fakeInstalledScript, `
+const fs = require("fs");
+const path = require("path");
+const args = process.argv.slice(2);
+if (args[0] === "usbmux") {
+  console.log(JSON.stringify([{ Identifier: "UDID", DeviceClass: "iPhone", ConnectionType: "USB" }]));
+  process.exit(0);
+}
+if (args[0] === "apps" && args[1] === "query") {
+  process.exit(1);
+}
+if (args[0] === "apps" && args[1] === "list") {
+  console.log(JSON.stringify({
+    "com.example.app.TEAMID": {
+      CFBundleIdentifier: "com.example.app.TEAMID",
+      ALTBundleIdentifier: "com.example.app",
+      CFBundleDisplayName: "Liquid Glass Capture",
+      SequenceNumber: 7
+    }
+  }));
+  process.exit(0);
+}
+if (args[0] === "apps" && args[1] === "pull") {
+  if (args.includes("--help")) {
+    console.log("Pull a file from an app container");
+    process.exit(0);
+  }
+  if (!args.includes("com.example.app.TEAMID")) process.exit(2);
+  const outRoot = args[args.length - 1];
+  fs.mkdirSync(path.join(outRoot, "LiquidGlassCaptures"), { recursive: true });
+  console.log("Pull a file from an app container");
+  process.exit(0);
+}
+process.exit(3);
+`);
+  const fakeInstalledBody = process.platform === "win32"
+    ? `@echo off\r\nnode "%~dp0fake-installed-pmd3.cjs" %*\r\n`
+    : `#!/bin/sh\nnode "$(dirname "$0")/fake-installed-pmd3.cjs" "$@"\n`;
+  writeFileSync(fakeInstalledTool, fakeInstalledBody, { mode: 0o755 });
+  const suffixBundle = runPhonePull({
+    ...request,
+    tool: fakeInstalledTool,
+    skipVerify: true
+  });
+  const suffixBundleCheck = findCheck(suffixBundle.checks, "installed_app_bundle_id");
+  if (
+    suffixBundle.status !== "pass" ||
+    suffixBundle.bundle_id !== "com.example.app.TEAMID" ||
+    suffixBundleCheck?.evidence?.resolution !== "sideload_suffix"
+  ) {
+    throw new Error("phone-pull self-test failed sideload bundle suffix resolution");
   }
 
   const timeout = runPhonePullAfterWait({

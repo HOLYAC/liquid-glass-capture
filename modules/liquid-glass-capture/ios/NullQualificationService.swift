@@ -77,11 +77,11 @@ final class NullQualificationService {
       ]
     ]
 
-    var jsonData = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+    var jsonData = try JSONValueSanitizer.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
     var integrity = report["integrity"] as? [String: Any] ?? [:]
     integrity["report_sha256"] = Self.sha256Hex(jsonData)
     report["integrity"] = integrity
-    jsonData = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+    jsonData = try JSONValueSanitizer.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
     try jsonData.write(to: reportURL, options: .atomic)
 
     report["jsonPath"] = reportURL.path
