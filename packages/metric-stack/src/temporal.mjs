@@ -28,7 +28,9 @@ export function measureTemporal(referenceSequence, candidateSequence, options = 
   const referencePacing = measureFramePacing(referenceSequence.timestamps_ms);
   const candidatePacing = measureFramePacing(candidateSequence.timestamps_ms);
   const phase = measurePhase(referenceMotion, candidateMotion);
-  const press = measurePressDynamics(candidateMotion);
+  const referencePress = measurePressDynamics(referenceMotion);
+  const candidatePress = measurePressDynamics(candidateMotion);
+  const press = comparePressDynamics(referencePress, candidatePress);
   const referenceMotionPeak = maxValue(referenceMotion.energy);
   const candidateMotionPeak = maxValue(candidateMotion.energy);
 
@@ -41,8 +43,17 @@ export function measureTemporal(referenceSequence, candidateSequence, options = 
   if (Math.abs(phase.peak_phase_error_ms) > (options.phaseErrorCeilingMs ?? 50)) {
     failures.push("G4_PHASE_ERROR_ABOVE_CEILING");
   }
-  if (press.overshoot_ratio > (options.overshootCeiling ?? 0.35)) {
+  if (candidatePress.overshoot_ratio > (options.overshootCeiling ?? 0.35)) {
     failures.push("G4_PRESS_OVERSHOOT_ABOVE_CEILING");
+  }
+  if (press.deltas.overshoot_ratio_abs_delta > (options.overshootMismatchCeiling ?? 0.15)) {
+    failures.push("G4_PRESS_OVERSHOOT_MISMATCH_ABOVE_CEILING");
+  }
+  if (press.deltas.damping_ratio_abs_delta > (options.dampingMismatchCeiling ?? 0.15)) {
+    failures.push("G4_PRESS_DAMPING_MISMATCH_ABOVE_CEILING");
+  }
+  if (press.deltas.settle_time_abs_delta_ms > (options.settleTimeMismatchCeilingMs ?? 70)) {
+    failures.push("G4_PRESS_SETTLE_TIME_MISMATCH_ABOVE_CEILING");
   }
   if (candidatePacing.frame_interval_p95_ms > (options.frameIntervalP95CeilingMs ?? 25)) {
     failures.push("G4_FRAME_PACING_P95_ABOVE_CEILING");
@@ -90,12 +101,18 @@ export function measureTemporal(referenceSequence, candidateSequence, options = 
 
 export function flattenTemporalReport(report) {
   if (!report.metrics) return {};
+  const press = report.metrics.press_dynamics ?? {};
+  const candidatePress = press.candidate ?? press;
+  const deltas = press.deltas ?? {};
   return {
     optical_flow_phase_error_ms: report.metrics.optical_flow_phase.peak_phase_error_ms,
     optical_flow_correlation_lag_frames: report.metrics.optical_flow_phase.correlation_lag_frames,
-    press_overshoot_ratio: report.metrics.press_dynamics.overshoot_ratio,
-    damping_ratio_proxy: report.metrics.press_dynamics.damping_ratio_proxy,
-    settle_time_ms: report.metrics.press_dynamics.settle_time_ms,
+    press_overshoot_ratio: candidatePress.overshoot_ratio,
+    damping_ratio_proxy: candidatePress.damping_ratio_proxy,
+    settle_time_ms: candidatePress.settle_time_ms,
+    press_overshoot_mismatch: deltas.overshoot_ratio_abs_delta ?? 0,
+    damping_ratio_mismatch: deltas.damping_ratio_abs_delta ?? 0,
+    settle_time_mismatch_ms: deltas.settle_time_abs_delta_ms ?? 0,
     candidate_frame_interval_p95_ms: report.metrics.frame_pacing.candidate.frame_interval_p95_ms,
     candidate_frame_interval_jitter_ms: report.metrics.frame_pacing.candidate.frame_interval_jitter_ms,
     candidate_dropped_frame_estimate: report.metrics.frame_pacing.candidate.dropped_frame_estimate,
@@ -201,6 +218,29 @@ function measurePressDynamics(motion) {
     damping_ratio_proxy: 1 - rebound / peakEnergy,
     settle_time_ms: motion.time_ms[settleIndex] ?? 0,
     settle_threshold: threshold
+  };
+}
+
+function comparePressDynamics(reference, candidate) {
+  return {
+    method: "reference_candidate_motion_energy_envelope",
+    peak_time_ms: candidate.peak_time_ms,
+    overshoot_ratio: candidate.overshoot_ratio,
+    damping_ratio_proxy: candidate.damping_ratio_proxy,
+    settle_time_ms: candidate.settle_time_ms,
+    settle_threshold: candidate.settle_threshold,
+    reference,
+    candidate,
+    deltas: {
+      peak_time_delta_ms: candidate.peak_time_ms - reference.peak_time_ms,
+      peak_time_abs_delta_ms: Math.abs(candidate.peak_time_ms - reference.peak_time_ms),
+      overshoot_ratio_delta: candidate.overshoot_ratio - reference.overshoot_ratio,
+      overshoot_ratio_abs_delta: Math.abs(candidate.overshoot_ratio - reference.overshoot_ratio),
+      damping_ratio_delta: candidate.damping_ratio_proxy - reference.damping_ratio_proxy,
+      damping_ratio_abs_delta: Math.abs(candidate.damping_ratio_proxy - reference.damping_ratio_proxy),
+      settle_time_delta_ms: candidate.settle_time_ms - reference.settle_time_ms,
+      settle_time_abs_delta_ms: Math.abs(candidate.settle_time_ms - reference.settle_time_ms)
+    }
   };
 }
 

@@ -25,6 +25,7 @@ function main() {
       allowInvalid: true,
       allowLayerSnapshot: true
     });
+    assertTemporalGuardRails();
     console.log(`${report.status.toUpperCase()} ${pair.out}`);
     if (report.status !== "pass") process.exit(1);
     return;
@@ -72,8 +73,8 @@ function writeSelfTestPair(outPath) {
 
   const width = 36;
   const height = 24;
-  const referenceSequence = writeMotionSequence(dir, "reference", width, height, 0);
-  const candidateSequence = writeMotionSequence(dir, "candidate", width, height, 2);
+  const referenceSequence = writeMotionSequence(dir, "reference", width, height, { staticBias: 0 });
+  const candidateSequence = writeMotionSequence(dir, "candidate", width, height, { staticBias: 2 });
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const reference = join(dir, "reference.capture.json");
   const candidate = join(dir, "candidate.capture.json");
@@ -87,8 +88,44 @@ function writeSelfTestPair(outPath) {
   };
 }
 
-function writeMotionSequence(dir, prefix, width, height, staticBias) {
-  const positions = [4, 16, 16, 16, 16, 16];
+function assertTemporalGuardRails() {
+  const dir = join(repoRoot, "artifacts", "lab-self-test", "temporal-probe-red");
+  mkdirSync(dir, { recursive: true });
+
+  const width = 36;
+  const height = 24;
+  const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
+  const referenceSequence = writeMotionSequence(dir, "reference", width, height, {
+    staticBias: 0,
+    positions: [4, 16, 16, 16, 16, 16]
+  });
+  const candidateSequence = writeMotionSequence(dir, "candidate", width, height, {
+    staticBias: 0,
+    positions: [4, 16, 8, 16, 10, 16]
+  });
+  const reference = join(dir, "reference.capture.json");
+  const candidate = join(dir, "candidate.capture.json");
+  writeFileSync(reference, `${JSON.stringify(makeArtifact("R0", referenceSequence, maskPath), null, 2)}\n`);
+  writeFileSync(candidate, `${JSON.stringify(makeArtifact("R1", candidateSequence, maskPath), null, 2)}\n`);
+
+  const report = probeTemporal(reference, candidate, {
+    allowInvalid: true,
+    allowLayerSnapshot: true
+  });
+  const expected = [
+    "G4_PRESS_OVERSHOOT_MISMATCH_ABOVE_CEILING",
+    "G4_PRESS_DAMPING_MISMATCH_ABOVE_CEILING"
+  ];
+  for (const code of expected) {
+    if (!report.failures.includes(code)) {
+      throw new Error(`temporal guard rail did not catch ${code}: ${report.failures.join(",")}`);
+    }
+  }
+}
+
+function writeMotionSequence(dir, prefix, width, height, options = {}) {
+  const staticBias = options.staticBias ?? 0;
+  const positions = options.positions ?? [4, 16, 16, 16, 16, 16];
   const paths = [];
   for (let index = 0; index < positions.length; index += 1) {
     const pixels = Buffer.alloc(width * height * 4);

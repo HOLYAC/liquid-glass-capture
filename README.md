@@ -154,7 +154,7 @@ Current metric scope:
 G1: Display P3 artifact contract + linear Display P3 normalization
 G2: OKLab delta, SSIM/MS-SSIM, FLIP-style linear-P3 adapter, gradient smoothness, text legibility
 G3: inferred edge lensing, blur falloff, chromatic fringe, highlight/shadow, alpha/tint split
-G4: motion-energy phase, press overshoot/damping/settle time, frame pacing, trajectory-source lock
+G4: motion-energy phase, reference-vs-candidate press overshoot/damping/settle mismatch, frame pacing, trajectory-source lock
 G5: full-frame p95/dropped-frame runtime gate from artifact perf fields
 G6: short/sustained stress, thermal gate, sustained degradation, energy trace availability and trace hash policy
 Solver: background-sweep loss over S07-S11, Pareto front, knee selection, identifiability lattice, claim constraints
@@ -199,9 +199,12 @@ S02/S03/S04 have one source fixture each, with XCUITest and PointerEvent
 consumers compiled from that source and checked by `npm run trajectory:build`.
 Missing or divergent gesture source hashes make the temporal report fail by
 design, because otherwise it measures runner drift instead of glass motion. G4
-also emits debug series for reference/candidate motion energy and frame
-intervals; the diff viewer uses those same series for the temporal phase plot
-and frame-budget timeline instead of drawing detached illustration.
+compares press overshoot, damping proxy, and settle time against the reference
+motion envelope; absolute candidate motion is not enough to pass if the spring
+response is shaped differently from R0. G4 also emits debug series for
+reference/candidate motion energy and frame intervals; the diff viewer uses
+those same series for the temporal phase plot and frame-budget timeline instead
+of drawing detached illustration.
 
 Current G5 runtime scope uses ReplayKit sample-buffer PTS as a full-frame
 interval proxy when a physical compositor capture writes `artifact.perf`.
