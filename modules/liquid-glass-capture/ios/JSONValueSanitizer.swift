@@ -2,7 +2,8 @@ import Foundation
 
 enum JSONValueSanitizer {
   static func data(withJSONObject value: Any, options: JSONSerialization.WritingOptions) throws -> Data {
-    try JSONSerialization.data(withJSONObject: sanitize(value), options: options)
+    let json = JSONStringWriter(options: options).string(for: sanitize(value))
+    return Data(json.utf8)
   }
 
   static func sanitize(_ value: Any) -> Any {
@@ -73,5 +74,112 @@ enum JSONValueSanitizer {
       return array.map { $0 }
     }
     return nil
+  }
+
+  private struct JSONStringWriter {
+    let prettyPrinted: Bool
+    let sortedKeys: Bool
+
+    init(options: JSONSerialization.WritingOptions) {
+      prettyPrinted = options.contains(.prettyPrinted)
+      sortedKeys = options.contains(.sortedKeys)
+    }
+
+    func string(for value: Any) -> String {
+      render(value, depth: 0)
+    }
+
+    private func render(_ value: Any, depth: Int) -> String {
+      let value = JSONValueSanitizer.sanitize(value)
+
+      if value is NSNull {
+        return "null"
+      }
+      if let value = value as? String {
+        return quote(value)
+      }
+      if let value = value as? Bool {
+        return value ? "true" : "false"
+      }
+      if let value = value as? NSNumber {
+        if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
+          return value.boolValue ? "true" : "false"
+        }
+        return value.doubleValue.isFinite ? String(describing: value) : "null"
+      }
+      if let dictionary = JSONValueSanitizer.dictionaryEntries(value) {
+        return renderObject(dictionary, depth: depth)
+      }
+      if let array = JSONValueSanitizer.arrayEntries(value) {
+        return renderArray(array, depth: depth)
+      }
+      return quote(String(describing: value))
+    }
+
+    private func renderObject(_ entries: [(key: String, value: Any)], depth: Int) -> String {
+      if entries.isEmpty {
+        return "{}"
+      }
+      let ordered = sortedKeys ? entries.sorted { $0.key < $1.key } : entries
+      if !prettyPrinted {
+        let body = ordered
+          .map { "\(quote($0.key)):\(render($0.value, depth: depth + 1))" }
+          .joined(separator: ",")
+        return "{\(body)}"
+      }
+
+      let childIndent = indent(depth + 1)
+      let body = ordered
+        .map { "\(childIndent)\(quote($0.key)): \(render($0.value, depth: depth + 1))" }
+        .joined(separator: ",\n")
+      return "{\n\(body)\n\(indent(depth))}"
+    }
+
+    private func renderArray(_ values: [Any], depth: Int) -> String {
+      if values.isEmpty {
+        return "[]"
+      }
+      if !prettyPrinted {
+        return "[\(values.map { render($0, depth: depth + 1) }.joined(separator: ","))]"
+      }
+
+      let childIndent = indent(depth + 1)
+      let body = values
+        .map { "\(childIndent)\(render($0, depth: depth + 1))" }
+        .joined(separator: ",\n")
+      return "[\n\(body)\n\(indent(depth))]"
+    }
+
+    private func indent(_ depth: Int) -> String {
+      String(repeating: "  ", count: depth)
+    }
+
+    private func quote(_ value: String) -> String {
+      var output = "\""
+      for scalar in value.unicodeScalars {
+        switch scalar.value {
+        case 0x22:
+          output += "\\\""
+        case 0x5C:
+          output += "\\\\"
+        case 0x08:
+          output += "\\b"
+        case 0x0C:
+          output += "\\f"
+        case 0x0A:
+          output += "\\n"
+        case 0x0D:
+          output += "\\r"
+        case 0x09:
+          output += "\\t"
+        case 0x00...0x1F:
+          output += String(format: "\\u%04X", scalar.value)
+        default:
+          output.unicodeScalars.append(scalar)
+        }
+      }
+      output += "\""
+      return output
+    }
   }
 }
