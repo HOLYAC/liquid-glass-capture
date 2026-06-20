@@ -97,6 +97,51 @@ function writeSelfTestFixture(outPath) {
     manifests: [{ path: layerSnapshotManifestPath, manifest: JSON.parse(readFileSync(layerSnapshotManifestPath, "utf8")) }]
   });
 
+  const sustainedPlan = buildPhysicalDeviceLanePlan({
+    laneClass: "sustained",
+    tasks: [{ rig_id: "R0", scene_id: "S01_SEARCH", state_id: "rest" }],
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    gitCommit: "self-test",
+    reason: "device-lane-sustained-self-test"
+  });
+  const sustainedManifestPath = writeRepeatManifest({
+    dir,
+    name: "sustained.repeat-manifest.json",
+    artifactPaths: Array.from({ length: 24 }, (_, index) =>
+      writeCaptureArtifact(dir, `sustained-${index}`, "iPhone16,2", "compositor", "pass", {
+        sustainedDurationMs: 60_000
+      })
+    ),
+    repeatCountRequested: 24,
+    baselineClass: "sustained",
+    captureDurationMs: 60_000,
+    cooldownMs: 60_000
+  });
+  const sustainedReport = verifyPhysicalDeviceLane({
+    plan: sustainedPlan,
+    manifests: [{ path: sustainedManifestPath, manifest: JSON.parse(readFileSync(sustainedManifestPath, "utf8")) }],
+    gateReports: makeGateReports({ sustainedDurationMs: 60_000 })
+  });
+
+  const shortSustainedManifestPath = writeRepeatManifest({
+    dir,
+    name: "bad-short-sustained.repeat-manifest.json",
+    artifactPaths: Array.from({ length: 24 }, (_, index) =>
+      writeCaptureArtifact(dir, `short-sustained-${index}`, "iPhone16,2", "compositor", "pass", {
+        sustainedDurationMs: 10_000
+      })
+    ),
+    repeatCountRequested: 24,
+    baselineClass: "sustained",
+    captureDurationMs: 10_000,
+    cooldownMs: 60_000
+  });
+  const shortSustainedReport = verifyPhysicalDeviceLane({
+    plan: sustainedPlan,
+    manifests: [{ path: shortSustainedManifestPath, manifest: JSON.parse(readFileSync(shortSustainedManifestPath, "utf8")) }],
+    gateReports: makeGateReports({ sustainedDurationMs: 60_000 })
+  });
+
   const badSceneContractArtifact = writeCaptureArtifact(dir, "bad-contract", "iPhone16,2", "compositor", "pass");
   const badSceneContract = JSON.parse(readFileSync(badSceneContractArtifact, "utf8"));
   delete badSceneContract.environment.background_pack_id;
@@ -119,33 +164,56 @@ function writeSelfTestFixture(outPath) {
     schema_version: "1.2.0",
     kind: "physical_device_lane_self_test_report",
     status: report.status === "pass" &&
+      sustainedReport.status === "pass" &&
       badReport.status !== "pass" &&
       layerSnapshotReport.status !== "pass" &&
-      badSceneContractReport.status !== "pass" ? "pass" : "fail",
+      badSceneContractReport.status !== "pass" &&
+      shortSustainedReport.status !== "pass" ? "pass" : "fail",
     plan_path: planPath,
     positive_report: report,
+    sustained_positive_report: sustainedReport,
     simulator_negative_report: badReport,
     layer_snapshot_negative_report: layerSnapshotReport,
-    scene_contract_negative_report: badSceneContractReport
+    scene_contract_negative_report: badSceneContractReport,
+    sustained_short_negative_report: shortSustainedReport
   };
   writeJson(out, selfTestReport);
 
   return {
     out,
     report,
+    sustainedReport,
     badReport,
     layerSnapshotReport,
     badSceneContractReport,
+    shortSustainedReport,
     selfTestReport
   };
 }
 
-function assertDeviceLaneGuardRails({ report, badReport, layerSnapshotReport, badSceneContractReport, selfTestReport }) {
+function assertDeviceLaneGuardRails({
+  report,
+  sustainedReport,
+  badReport,
+  layerSnapshotReport,
+  badSceneContractReport,
+  shortSustainedReport,
+  selfTestReport
+}) {
   if (selfTestReport.status !== "pass") {
     throw new Error("device-lane self-test report did not pass");
   }
   if (report.status !== "pass" || report.task_reports[0]?.artifacts?.length !== 3) {
     throw new Error("device-lane positive self-test did not verify repeat artifacts");
+  }
+  if (sustainedReport.status !== "pass" || sustainedReport.lane_class !== "sustained") {
+    throw new Error("device-lane self-test failed to verify sustained lane");
+  }
+  if (sustainedReport.evidence?.sustained_contract_verified !== true) {
+    throw new Error("device-lane self-test did not expose sustained contract evidence");
+  }
+  if (!sustainedReport.task_reports[0]?.artifacts?.every((artifact) => artifact.status === "pass")) {
+    throw new Error("device-lane self-test failed to verify sustained artifacts");
   }
   if (!report.evidence.hashes_verified) {
     throw new Error("device-lane positive self-test did not verify hashes");
@@ -168,9 +236,15 @@ function assertDeviceLaneGuardRails({ report, badReport, layerSnapshotReport, ba
   if (!badSceneContractReport.failures.some((failure) => failure.includes("CAPTURE_TIMELINE_ID_MISMATCH"))) {
     throw new Error("device-lane self-test failed to reject missing capture timeline contract");
   }
+  if (!shortSustainedReport.failures.some((failure) => failure.includes("SUSTAINED_CAPTURE_DURATION_INCOMPLETE"))) {
+    throw new Error("device-lane self-test failed to reject short sustained manifest");
+  }
+  if (!shortSustainedReport.failures.some((failure) => failure.includes("SUSTAINED_DURATION_INCOMPLETE"))) {
+    throw new Error("device-lane self-test failed to reject short sustained artifact");
+  }
 }
 
-function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQualification) {
+function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQualification, options = {}) {
   const contractKey = sceneStateKey("S01_SEARCH", "rest");
   const background = glassBackgroundBySceneState[contractKey];
   const geometry = glassGeometryBySceneState[contractKey];
@@ -198,7 +272,7 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       screen_scale: 3,
       refresh_hz: 120,
       thermal_state_start: "nominal",
-      thermal_state_end: "nominal",
+      thermal_state_end: options.thermalStateEnd ?? "nominal",
       low_power_mode: false
     },
     environment: {
@@ -231,7 +305,7 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       mask_pack_path: maskPath,
       touch_phase: "rest",
       animation_t: 0,
-      sustained_duration_ms: 10_000,
+      sustained_duration_ms: options.sustainedDurationMs ?? 10_000,
       capture_timeline_pack_id: timeline.capture_timeline_pack_id,
       capture_timeline_id: timeline.capture_timeline_id,
       capture_timeline_sha256: timeline.capture_timeline_sha256
@@ -245,11 +319,12 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       frame_interval_ms_p95: 8.2,
       compositor_frame_ms_p95: 8.2,
       dropped_frames: 0,
-      sustained_degradation_pct: 0.1
+      sustained_degradation_pct: options.sustainedDegradationPct ?? 0.1
     },
     energy: {
       trace_available: false,
-      trace_status: "trace_unavailable"
+      trace_status: "trace_unavailable",
+      thermal_onset_ms: options.thermalOnsetMs ?? null
     },
     integrity: {
       artifact_sha256: "self-test-pending",
@@ -259,7 +334,16 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
   return artifactPath;
 }
 
-function writeRepeatManifest({ dir, name, artifactPaths }) {
+function writeRepeatManifest({
+  dir,
+  name,
+  artifactPaths,
+  repeatCountRequested = 3,
+  baselineClass = "smoke",
+  captureDurationMs = 900,
+  cooldownMs = 750,
+  thermal = { initial_state: "nominal", final_state: "nominal" }
+}) {
   const manifestPath = join(dir, name);
   writeJson(manifestPath, {
     schema_version: "1.2.0",
@@ -268,12 +352,53 @@ function writeRepeatManifest({ dir, name, artifactPaths }) {
     rig_id: "R0",
     scene_id: "S01_SEARCH",
     state_id: "rest",
+    baseline_class: baselineClass,
     capture_kind: "compositor",
-    repeat_count_requested: 3,
+    repeat_count_requested: repeatCountRequested,
     repeat_count_observed: artifactPaths.length,
+    capture_duration_ms: captureDurationMs,
+    cooldown_ms: cooldownMs,
+    thermal,
     artifact_json_paths: artifactPaths
   });
   return manifestPath;
+}
+
+function makeGateReports({ sustainedDurationMs }) {
+  return ["G2", "G3", "G4", "G5", "G6"].map((gate) => {
+    if (gate !== "G6") {
+      return {
+        schema_version: "1.2.0",
+        kind: `${gate.toLowerCase()}_device_lane_self_test_report`,
+        gate,
+        status: "pass",
+        failures: []
+      };
+    }
+    return {
+      schema_version: "1.2.0",
+      kind: "g6_energy_report",
+      gate: "G6",
+      status: "pass",
+      failures: [],
+      warnings: ["G6_ENERGY_TRACE_UNAVAILABLE"],
+      metrics: {
+        energy: {
+          trace_status: "trace_unavailable"
+        },
+        thermal: {
+          start_state: "nominal",
+          end_state: "nominal",
+          thermal_onset_ms: null
+        },
+        sustained: {
+          duration_ms: sustainedDurationMs,
+          degradation_pct: 0.1,
+          frame_interval_ms_p95: 8.2
+        }
+      }
+    };
+  });
 }
 
 function makePixels(width, height, delta) {

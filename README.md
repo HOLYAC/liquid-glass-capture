@@ -210,8 +210,11 @@ verifies collected repeat manifests artifact-by-artifact. It rejects simulator
 artifacts, rejects `layer_snapshot`, requires compositor/framebuffer capture,
 requires nominal thermal start, requires Low Power Mode off, verifies PNG and
 mask hashes, enforces declared gesture-scene trajectory source hashes, and
-checks G2-G6 reports for MVL/prod/sustained lanes. Hosted GitHub CI still
-cannot mint this evidence; it names the required lane report as pending instead.
+checks G2-G6 reports for MVL/prod/sustained lanes. Sustained lanes additionally
+require a sustained manifest class, 60s capture duration, logged 60s cooldown,
+artifact-level sustained duration, recorded degradation/frame-interval metrics,
+and G6 sustained/thermal evidence. Hosted GitHub CI still cannot mint this
+evidence; it names the required lane report as pending instead.
 
 Current G7 scope validates a review packet rather than free-form taste: every
 block needs scene, state, mask, artifact pointer, reviewer category, written

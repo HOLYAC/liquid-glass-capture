@@ -212,6 +212,9 @@ function physicalDeviceLaneSummary(report) {
     layer_snapshot_forbidden: report.evidence?.layer_snapshot_forbidden === true,
     scene_contract_verified: report.evidence?.scene_contract_verified === true,
     hashes_verified: report.evidence?.hashes_verified === true,
+    sustained_contract_verified: report.lane_class === "sustained"
+      ? report.evidence?.sustained_contract_verified === true
+      : true,
     failure_count: report.failures?.length ?? 0
   };
 }

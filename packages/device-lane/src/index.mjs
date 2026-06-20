@@ -18,7 +18,7 @@ export const physicalDeviceLanePolicy = Object.freeze({
     smoke: { repeat: 3, requires_gates: false },
     mvl: { repeat: 50, requires_gates: true },
     prod_p99: { repeat: 300, requires_gates: true },
-    sustained: { repeat: 24, requires_gates: true, sustained: true }
+    sustained: { repeat: 24, requires_gates: true, sustained: true, capture_duration_ms: 60_000, cooldown_ms: 60_000 }
   }),
   required_gate_ids: Object.freeze(["G2", "G3", "G4", "G5", "G6"]),
   required_capture_kinds: Object.freeze(["compositor", "framebuffer"]),
@@ -125,7 +125,8 @@ export function verifyPhysicalDeviceLane({
       nominal_thermal_required: true,
       low_power_mode_forbidden: true,
       scene_contract_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.scene_contract_verified)),
-      hashes_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.hashes_verified))
+      hashes_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.hashes_verified)),
+      sustained_contract_verified: plan.lane_class !== "sustained" || failures.length === 0
     }
   };
 }
@@ -155,6 +156,9 @@ function normalizeTask(task, index, lanePolicy, policy) {
     device: "physical",
     repeat_count_requested: repeat,
     baseline_class: lanePolicy.sustained ? "sustained" : lanePolicy.repeat >= 300 ? "prod_p99" : lanePolicy.repeat === 50 ? "mvl" : "smoke",
+    requires_sustained_capture: Boolean(lanePolicy.sustained),
+    required_sustained_duration_ms: lanePolicy.sustained ? lanePolicy.capture_duration_ms : null,
+    required_cooldown_ms: lanePolicy.sustained ? lanePolicy.cooldown_ms : null,
     requires_nominal_thermal_start: true,
     requires_low_power_mode_off: true,
     requires_null_qualification_pass: true,
@@ -189,6 +193,7 @@ function verifyTaskManifest(task, manifestRecord, policy) {
   if (!Array.isArray(manifest.artifact_json_paths) || manifest.artifact_json_paths.length < task.repeat_count_requested) {
     failures.push(`${task.lane_task_id}:ARTIFACT_PATHS_INCOMPLETE`);
   }
+  failures.push(...verifySustainedManifestContract(task, manifest));
 
   const manifestDir = manifestRecord.path ? dirname(manifestRecord.path) : process.cwd();
   const artifactReports = [];
@@ -258,6 +263,7 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
   ) {
     failures.push(`${task.lane_task_id}:ARTIFACT_${index}_TRAJECTORY_SOURCE_MISMATCH`);
   }
+  failures.push(...verifySustainedArtifactFields(task, artifact, index));
   failures.push(...verifySceneContractFields(task, artifact, index));
 
   const hashFailures = verifyFrameHashes(artifact, artifactPath, index, task.lane_task_id);
@@ -375,6 +381,9 @@ function verifyGateReports(gateReports, policy, plan) {
     if (report.status !== "pass") {
       failures.push(`PHYSICAL_LANE_${gate}_REPORT_NOT_PASS`);
     }
+    if (gate === "G6" && lanePolicy.sustained) {
+      failures.push(...verifySustainedG6Report(report, lanePolicy));
+    }
   }
   return {
     status: failures.length === 0 ? "pass" : "fail",
@@ -382,6 +391,75 @@ function verifyGateReports(gateReports, policy, plan) {
     required_gate_ids: policy.required_gate_ids,
     provided_gate_ids: [...reportsByGate.keys()].sort()
   };
+}
+
+function verifySustainedManifestContract(task, manifest) {
+  if (!task.requires_sustained_capture) return [];
+  const failures = [];
+  if (manifest.baseline_class !== "sustained") {
+    failures.push(`${task.lane_task_id}:MANIFEST_BASELINE_CLASS_NOT_SUSTAINED`);
+  }
+  if (!atLeast(manifest.capture_duration_ms, task.required_sustained_duration_ms)) {
+    failures.push(`${task.lane_task_id}:MANIFEST_SUSTAINED_CAPTURE_DURATION_INCOMPLETE`);
+  }
+  if (!atLeast(manifest.cooldown_ms, task.required_cooldown_ms)) {
+    failures.push(`${task.lane_task_id}:MANIFEST_SUSTAINED_COOLDOWN_NOT_LOGGED`);
+  }
+  const thermal = manifest.thermal ?? {};
+  if (thermal.initial_state !== "nominal") {
+    failures.push(`${task.lane_task_id}:MANIFEST_THERMAL_INITIAL_NOT_NOMINAL`);
+  }
+  if (thermal.final_state === "serious" || thermal.final_state === "critical") {
+    failures.push(`${task.lane_task_id}:MANIFEST_THERMAL_FINAL_${String(thermal.final_state).toUpperCase()}`);
+  }
+  return failures;
+}
+
+function verifySustainedArtifactFields(task, artifact, index) {
+  if (!task.requires_sustained_capture) return [];
+  const failures = [];
+  const framePack = artifact.frame_pack ?? {};
+  const perf = artifact.perf ?? {};
+  const energy = artifact.energy ?? {};
+  const device = artifact.device_info ?? {};
+  if (!atLeast(framePack.sustained_duration_ms, task.required_sustained_duration_ms)) {
+    failures.push(`${task.lane_task_id}:ARTIFACT_${index}_SUSTAINED_DURATION_INCOMPLETE`);
+  }
+  if (!isFiniteNumber(perf.sustained_degradation_pct)) {
+    failures.push(`${task.lane_task_id}:ARTIFACT_${index}_SUSTAINED_DEGRADATION_NOT_RECORDED`);
+  }
+  if (!isFiniteNumber(perf.frame_interval_ms_p95)) {
+    failures.push(`${task.lane_task_id}:ARTIFACT_${index}_SUSTAINED_FRAME_INTERVAL_P95_NOT_RECORDED`);
+  }
+  if (device.thermal_state_end === "serious" || device.thermal_state_end === "critical") {
+    failures.push(`${task.lane_task_id}:ARTIFACT_${index}_THERMAL_END_${String(device.thermal_state_end).toUpperCase()}`);
+  }
+  if (isFiniteNumber(energy.thermal_onset_ms) && energy.thermal_onset_ms >= 0) {
+    failures.push(`${task.lane_task_id}:ARTIFACT_${index}_THERMAL_ONSET_IN_SUSTAINED_WINDOW`);
+  }
+  return failures;
+}
+
+function verifySustainedG6Report(report, lanePolicy) {
+  const failures = [];
+  const sustained = report.metrics?.sustained ?? {};
+  const thermal = report.metrics?.thermal ?? {};
+  if (!atLeast(sustained.duration_ms, lanePolicy.capture_duration_ms)) {
+    failures.push("PHYSICAL_LANE_G6_SUSTAINED_DURATION_INCOMPLETE");
+  }
+  if (!isFiniteNumber(sustained.degradation_pct)) {
+    failures.push("PHYSICAL_LANE_G6_SUSTAINED_DEGRADATION_NOT_RECORDED");
+  }
+  if (!isFiniteNumber(sustained.frame_interval_ms_p95)) {
+    failures.push("PHYSICAL_LANE_G6_SUSTAINED_FRAME_INTERVAL_P95_NOT_RECORDED");
+  }
+  if (thermal.start_state !== "nominal") {
+    failures.push("PHYSICAL_LANE_G6_THERMAL_START_NOT_NOMINAL");
+  }
+  if (thermal.end_state === "serious" || thermal.end_state === "critical") {
+    failures.push(`PHYSICAL_LANE_G6_THERMAL_END_${String(thermal.end_state).toUpperCase()}`);
+  }
+  return failures;
 }
 
 export function readPhysicalLaneJson(path) {
@@ -413,6 +491,15 @@ function deviceKey(device = {}) {
 
 function looksLikeSimulator(modelIdentifier) {
   return typeof modelIdentifier === "string" && /simulator|x86|arm64-sim/i.test(modelIdentifier);
+}
+
+function atLeast(value, minimum) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum;
+}
+
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function unique(values) {
