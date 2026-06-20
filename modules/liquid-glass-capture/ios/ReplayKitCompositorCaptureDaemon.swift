@@ -732,7 +732,7 @@ private final class ReplayKitCaptureSession {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 
-  private func writeFrameManifest(to manifestURL: URL, frames: [[String: Any]]) throws -> [String: String] {
+  private func writeFrameManifest(to manifestURL: URL, frames: [[String: Any]]) throws -> FrameManifestWriteResult {
     let manifest: [String: Any] = [
       "schema_version": "1.0.0",
       "frame_count": frames.count,
@@ -740,10 +740,10 @@ private final class ReplayKitCaptureSession {
     ]
     let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     try manifestData.write(to: manifestURL, options: .atomic)
-    return [
-      "path": relativePath(for: manifestURL),
-      "sha256": Self.sha256Hex(manifestData)
-    ]
+    return FrameManifestWriteResult(
+      path: relativePath(for: manifestURL),
+      sha256: Self.sha256Hex(manifestData)
+    )
   }
 
   private func relativePath(for url: URL) -> String {
@@ -907,6 +907,11 @@ private struct ReplayKitFrameSlot {
   let pngUrl: URL
   let rawSourceUrl: URL?
   let rawDisplayUrl: URL?
+}
+
+private struct FrameManifestWriteResult {
+  let path: String
+  let sha256: String
 }
 
 private struct RawBufferCapture {
