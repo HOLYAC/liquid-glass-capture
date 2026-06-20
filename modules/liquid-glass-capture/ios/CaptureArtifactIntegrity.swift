@@ -67,34 +67,53 @@ enum CaptureArtifactIntegrity {
   private static func primitiveNumberString(_ value: Any) throws -> String? {
     switch value {
     case let value as Int:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as Int8:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as Int16:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as Int32:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as Int64:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as UInt:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as UInt8:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as UInt16:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as UInt32:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as UInt64:
-      return try jsonScalarString(value)
+      return String(value)
     case let value as Double:
-      return value.isFinite ? try jsonScalarString(value) : "null"
+      return canonicalDoubleString(value)
     case let value as Float:
-      return value.isFinite ? try jsonScalarString(value) : "null"
+      return canonicalDoubleString(Double(value))
     case let value as CGFloat:
-      return value.isFinite ? try jsonScalarString(Double(value)) : "null"
+      return canonicalDoubleString(Double(value))
+    case let value as NSNumber:
+      if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
+        return nil
+      }
+      return canonicalDoubleString(value.doubleValue)
     default:
       return nil
     }
+  }
+
+  private static func canonicalDoubleString(_ value: Double) -> String {
+    if !value.isFinite {
+      return "null"
+    }
+    if value == 0 {
+      return "0"
+    }
+    let integer = value.rounded(.towardZero)
+    if integer == value && integer >= Double(Int64.min) && integer <= Double(Int64.max) {
+      return String(Int64(integer))
+    }
+    return String(value).replacingOccurrences(of: "e+", with: "e")
   }
 
   private static func dictionaryEntries(_ value: Any) -> [(key: String, value: Any)]? {

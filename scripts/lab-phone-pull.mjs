@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -432,6 +432,8 @@ function pullDocuments(toolPath, request) {
       }
     };
   }
+  const hydrated = hydrateMissingCompositorSessions(toolPath, request, captureRoot);
+  if (hydrated.status !== "pass") return hydrated;
 
   return {
     name: "pull_liquid_glass_captures",
@@ -439,9 +441,130 @@ function pullDocuments(toolPath, request) {
     summary: "copied LiquidGlassCaptures from the app Documents container",
     evidence: {
       command: [toolPath, ...args],
-      capture_root: captureRoot
+      capture_root: captureRoot,
+      hydrated_missing_sessions: hydrated.evidence.hydrated_sessions,
+      already_present_sessions: hydrated.evidence.already_present_sessions
     }
   };
+}
+
+function hydrateMissingCompositorSessions(toolPath, request, captureRoot) {
+  const missingSessions = missingCompositorSessions(captureRoot);
+  if (missingSessions.length === 0) {
+    return {
+      name: "pull_missing_compositor_sessions",
+      status: "pass",
+      summary: "all manifest-referenced compositor sessions were present after root pull",
+      evidence: {
+        hydrated_sessions: [],
+        already_present_sessions: referencedCompositorSessions(captureRoot).length
+      }
+    };
+  }
+
+  const tempRoot = join(request.outRoot, `.direct-compositor-pull-${process.pid}-${Date.now()}`);
+  rmSync(tempRoot, { recursive: true, force: true });
+  mkdirSync(tempRoot, { recursive: true });
+  const hydrated = [];
+  try {
+    for (const session of missingSessions) {
+      const remoteFile = `Documents/${request.remotePath}/Compositor/${session}`;
+      const args = [
+        "apps",
+        "pull",
+        ...deviceArgs(request),
+        request.bundleId,
+        remoteFile,
+        tempRoot
+      ];
+      const result = runCommand(toolPath, args);
+      if (result.status !== 0) {
+        return commandFailure("pull_missing_compositor_sessions", `direct compositor pull failed for ${session}`, result, {
+          command: [toolPath, ...args],
+          session,
+          retryable: true
+        });
+      }
+      const pulledSessionDir = join(tempRoot, session);
+      if (!existsSync(pulledSessionDir)) {
+        return {
+          name: "pull_missing_compositor_sessions",
+          status: "fail",
+          summary: `direct compositor pull completed but did not create ${session}`,
+          evidence: {
+            command: [toolPath, ...args],
+            session,
+            retryable: true,
+            expected_session_dir: pulledSessionDir
+          }
+        };
+      }
+      const localSessionDir = join(captureRoot, "Compositor", session);
+      rmSync(localSessionDir, { recursive: true, force: true });
+      mkdirSync(join(captureRoot, "Compositor"), { recursive: true });
+      cpSync(pulledSessionDir, localSessionDir, { recursive: true });
+      hydrated.push(session);
+    }
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+
+  return {
+    name: "pull_missing_compositor_sessions",
+    status: "pass",
+    summary: `direct-pulled ${hydrated.length} manifest-referenced compositor sessions`,
+    evidence: {
+      hydrated_sessions: hydrated,
+      already_present_sessions: referencedCompositorSessions(captureRoot).length - hydrated.length
+    }
+  };
+}
+
+function missingCompositorSessions(captureRoot) {
+  return referencedCompositorSessions(captureRoot)
+    .filter((session) => {
+      const capturePath = join(captureRoot, "Compositor", session, `${session}.capture.json`);
+      return !existsSync(capturePath);
+    });
+}
+
+function referencedCompositorSessions(captureRoot) {
+  const seriesDir = join(captureRoot, "Series");
+  if (!existsSync(seriesDir)) return [];
+  const manifests = [];
+  for (const entry of readdirSync(seriesDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".repeat-manifest.json")) continue;
+    const path = join(seriesDir, entry.name);
+    try {
+      const manifest = JSON.parse(readFileSync(path, "utf8"));
+      manifests.push({ manifest, orderKey: repeatManifestOrderKey(manifest, path) });
+    } catch {
+      // A broken old manifest should be rejected by proof:doctor, not by the pull hydrator.
+    }
+  }
+  const latest = manifests
+    .sort((left, right) => {
+      if (left.orderKey === right.orderKey) return 0;
+      return left.orderKey > right.orderKey ? -1 : 1;
+    })[0]?.manifest;
+  if (!latest) return [];
+
+  const sessions = new Set();
+  const paths = Array.isArray(latest.artifact_json_paths) ? latest.artifact_json_paths : [];
+  for (const artifactPath of paths) {
+    if (typeof artifactPath !== "string") continue;
+    const normalized = artifactPath.replace(/\\/g, "/");
+    const match = normalized.match(/(?:^|\/)Compositor\/([^/]+)\/[^/]+\.capture\.json$/);
+    if (match) sessions.add(match[1]);
+  }
+  return [...sessions].sort();
+}
+
+function repeatManifestOrderKey(manifest, path) {
+  const raw = manifest?.finished_at_ns ?? manifest?.started_at_ns;
+  if (typeof raw === "string" && /^\d+$/.test(raw)) return BigInt(raw);
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return BigInt(Math.round(raw));
+  return BigInt(Math.round(statSync(path).mtimeMs * 1_000_000));
 }
 
 function runProofDoctor(request) {
