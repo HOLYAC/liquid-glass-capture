@@ -383,7 +383,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "maxFidelity": metadata["maxFidelity"] as? Bool ?? false,
       "captureRawFrames": metadata["captureRawFrames"] as? Bool ?? false,
       "captureRawPixels": metadata["captureRawPixels"] as? Bool ?? false,
-      "maxFrames": metadata["maxFrames"] as? Int ?? -1,
+      "maxFrames": Self.intValue(metadata["maxFrames"]) ?? -1,
       "metadataKeys": metadata.keys.sorted().joined(separator: ",")
     ])
 
@@ -456,7 +456,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       iterationMetadata["requiresNominalThermal"] = requiresNominalThermal
       iterationMetadata["captureDurationMs"] = boundedCaptureDurationMs
       iterationMetadata["cooldownMs"] = boundedCooldownMs
-      if iterationMetadata["maxFrames"] == nil {
+      if Self.intValue(iterationMetadata["maxFrames"]) == nil {
         iterationMetadata["maxFrames"] = max(8, Int(ceil(Double(boundedCaptureDurationMs) / 1000.0 * Double(UIScreen.main.maximumFramesPerSecond))))
       }
 
@@ -673,7 +673,7 @@ public final class LiquidGlassCaptureView: ExpoView {
         "jsonPath_device": jsonPathDevice,
         "sessionDir": sessionDir,
         "sessionDir_device": sessionDirDevice,
-        "frameCount": artifact["frameCount"] as? Int ?? 0
+        "frameCount": Self.intValue(artifact["frameCount"]) ?? 0
       ] as [String: Any]
     }
     CaptureDiagnostics.log("repeat.manifest.summaries-built", details: [
@@ -707,7 +707,7 @@ public final class LiquidGlassCaptureView: ExpoView {
       "max_fidelity": maxFidelity,
       "capture_raw_frames": captureRawFrames,
       "capture_raw_pixels": captureRawPixels,
-      "max_frames": metadata["maxFrames"] as? Int ?? 0,
+      "max_frames": Self.intValue(metadata["maxFrames"]) ?? 0,
       "started_at_ns": "\(startedAtNs)",
       "finished_at_ns": "\(UInt64(Date().timeIntervalSince1970 * 1_000_000_000))",
       "thermal": [
@@ -782,6 +782,51 @@ public final class LiquidGlassCaptureView: ExpoView {
     @unknown default:
       return "fair"
     }
+  }
+
+  private static func intValue(_ value: Any?) -> Int? {
+    switch value {
+    case let value as Int:
+      return value
+    case let value as Int8:
+      return Int(value)
+    case let value as Int16:
+      return Int(value)
+    case let value as Int32:
+      return Int(value)
+    case let value as Int64:
+      return Int(value)
+    case let value as UInt:
+      return value <= UInt(Int.max) ? Int(value) : nil
+    case let value as UInt8:
+      return Int(value)
+    case let value as UInt16:
+      return Int(value)
+    case let value as UInt32:
+      return Int(value)
+    case let value as UInt64:
+      return value <= UInt64(Int.max) ? Int(value) : nil
+    case let value as Double:
+      return Self.intFromFiniteDouble(value)
+    case let value as Float:
+      return Self.intFromFiniteDouble(Double(value))
+    case let value as CGFloat:
+      return Self.intFromFiniteDouble(Double(value))
+    case let value as NSNumber:
+      if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
+        return nil
+      }
+      return Self.intFromFiniteDouble(value.doubleValue)
+    default:
+      return nil
+    }
+  }
+
+  private static func intFromFiniteDouble(_ value: Double) -> Int? {
+    if !value.isFinite || value < Double(Int.min) || value > Double(Int.max) {
+      return nil
+    }
+    return Int(value)
   }
 
   private static func touchPhase(for phase: ProbePhase) -> String {

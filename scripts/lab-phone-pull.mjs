@@ -404,6 +404,7 @@ function pullDocuments(toolPath, request) {
     remoteFile,
     request.outRoot
   ];
+  rmSync(join(request.outRoot, request.remotePath), { recursive: true, force: true });
   const result = runCommand(toolPath, args);
   if (result.status !== 0) {
     return commandFailure("pull_liquid_glass_captures", "pymobiledevice3 apps pull failed", result, {

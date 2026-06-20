@@ -1,4 +1,5 @@
 import CryptoKit
+import CoreGraphics
 import Foundation
 
 enum CaptureArtifactIntegrity {
@@ -89,6 +90,8 @@ enum CaptureArtifactIntegrity {
       return value.isFinite ? try jsonScalarString(value) : "null"
     case let value as Float:
       return value.isFinite ? try jsonScalarString(value) : "null"
+    case let value as CGFloat:
+      return value.isFinite ? try jsonScalarString(Double(value)) : "null"
     default:
       return nil
     }

@@ -200,7 +200,7 @@ private final class ReplayKitCaptureSession {
     self.metadata = metadata
     self.props = props
     self.viewportPx = viewportPx
-    maxFrames = max(1, min(metadata["maxFrames"] as? Int ?? 180, 900))
+    maxFrames = max(1, min(Self.intValue(metadata["maxFrames"]) ?? 180, 900))
     let maxFidelity = (metadata["maxFidelity"] as? Bool) == true
     captureRawPixels = maxFidelity || (metadata["captureRawPixels"] as? Bool) == true
     captureRawFrames = maxFidelity
@@ -721,6 +721,51 @@ private final class ReplayKitCaptureSession {
     @unknown default:
       return "fair"
     }
+  }
+
+  private static func intValue(_ value: Any?) -> Int? {
+    switch value {
+    case let value as Int:
+      return value
+    case let value as Int8:
+      return Int(value)
+    case let value as Int16:
+      return Int(value)
+    case let value as Int32:
+      return Int(value)
+    case let value as Int64:
+      return Int(value)
+    case let value as UInt:
+      return value <= UInt(Int.max) ? Int(value) : nil
+    case let value as UInt8:
+      return Int(value)
+    case let value as UInt16:
+      return Int(value)
+    case let value as UInt32:
+      return Int(value)
+    case let value as UInt64:
+      return value <= UInt64(Int.max) ? Int(value) : nil
+    case let value as Double:
+      return Self.intFromFiniteDouble(value)
+    case let value as Float:
+      return Self.intFromFiniteDouble(Double(value))
+    case let value as CGFloat:
+      return Self.intFromFiniteDouble(Double(value))
+    case let value as NSNumber:
+      if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
+        return nil
+      }
+      return Self.intFromFiniteDouble(value.doubleValue)
+    default:
+      return nil
+    }
+  }
+
+  private static func intFromFiniteDouble(_ value: Double) -> Int? {
+    if !value.isFinite || value < Double(Int.min) || value > Double(Int.max) {
+      return nil
+    }
+    return Int(value)
   }
 
   private static func contentSeed(for stateId: String) -> String {

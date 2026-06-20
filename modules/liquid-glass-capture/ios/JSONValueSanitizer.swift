@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum JSONValueSanitizer {
@@ -78,6 +79,8 @@ enum JSONValueSanitizer {
       return value.isFinite ? value : NSNull()
     case let value as Float:
       return value.isFinite ? value : NSNull()
+    case let value as CGFloat:
+      return value.isFinite ? Double(value) : NSNull()
     default:
       return nil
     }
@@ -179,6 +182,8 @@ enum JSONValueSanitizer {
         return value.isFinite ? String(value) : "null"
       case let value as Float:
         return value.isFinite ? String(value) : "null"
+      case let value as CGFloat:
+        return value.isFinite ? String(Double(value)) : "null"
       case let value as NSNumber:
         if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
           return nil
