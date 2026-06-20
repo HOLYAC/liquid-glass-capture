@@ -44,6 +44,7 @@ glass_affecting_paths:
   - packages/metric-stack/**
   - packages/energy-stack/**
   - packages/solver/**
+  - packages/artifact-store/**
   - packages/review-stack/**
   - packages/verdict-stack/**
   - scripts/lab-*.mjs

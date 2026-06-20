@@ -117,8 +117,11 @@ npm run metrics:temporal -- --reference ./artifacts/r0.capture.json --candidate 
 npm run metrics:runtime -- --artifact ./artifacts/c1.capture.json --out ./artifacts/g5-runtime.report.json
 npm run energy:stress -- --artifact ./artifacts/c1-sustained.capture.json --sustained --out ./artifacts/g6-energy.report.json
 npm run solver:rank -- --candidate ./artifacts/c0-candidate-a.json --candidate ./artifacts/c0-candidate-b.json --out ./artifacts/solver.pareto.report.json
+npm run artifact:store -- --put ./artifacts/c1.capture.png --class raw_png_frame --store ./artifacts/store --out ./artifacts/store/write.report.json
+npm run artifact:store -- --verify-index ./artifacts/store/index.json --out ./artifacts/store/verify.report.json
+npm run artifact:store -- --plan-retention ./artifacts/store/index.json --out ./artifacts/store/retention-plan.json
 npm run review:packet -- --packet ./artifacts/g7-review.packet.json --out ./artifacts/g7-review.report.json
-npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --solver ./artifacts/solver.pareto.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
+npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --solver ./artifacts/solver.pareto.report.json --store-index ./artifacts/store/index.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
 npm run ci:glass -- --out ./artifacts/ci/glass-gate.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
@@ -136,6 +139,7 @@ G4: motion-energy phase, press overshoot/damping/settle time, frame pacing, traj
 G5: full-frame p95/dropped-frame runtime gate from artifact perf fields
 G6: short/sustained stress, thermal gate, sustained degradation, energy trace availability policy
 Solver: background-sweep loss over S07-S11, Pareto front, knee selection, identifiability lattice, claim constraints
+Artifact Store: content-addressed blob writer, immutable hash manifest, retention plan with tombstones
 G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
@@ -169,6 +173,13 @@ marks each parameter as `MEASURED`, `BOUNDED_AMBIGUOUS`,
 `PROBABLE_UNDER_PRIOR`, or `AMBIGUOUS`. Non-measured parameters may support a
 fit-level result, but not a parameter-level "matched Apple" claim.
 
+Current artifact-store scope writes content-addressed blobs and an
+append-preserved `hash-manifest.jsonl`, verifies that every indexed blob still
+matches its SHA-256, and emits a retention plan. It does not silently delete
+blobs; expired artifacts become delete candidates with tombstones and
+`hash_manifest_preserved=true`. Baselines and release-candidate artifacts are
+indefinite retention classes.
+
 Current G7 scope validates a review packet rather than free-form taste: every
 block needs scene, state, mask, artifact pointer, reviewer category, written
 reason, owner, and ticket. Naked objections like "looks off" or "не нравится"
@@ -178,7 +189,8 @@ Current G8 scope emits the two-axis verdict report. It refuses simulator/replay
 verdicts, refuses C1 without `baked_verdict`, keeps DOM_C in `WEBKIT_PASS`
 instead of allowing a fake SwiftUI claim, and carries solver-selected candidate
 plus identifiability claim constraints into the final report when a solver
-report is provided.
+report is provided. When an artifact-store index is provided, G8 also carries
+the candidate retention entry instead of pretending retention was recorded.
 
 Current CI scope is the source guillotine in `.github/workflows/glass-gate.yml`
 with policy in `ci/glass-gate.yml`. It runs typecheck, the full lab self-test,

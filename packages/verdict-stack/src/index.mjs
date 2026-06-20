@@ -1,6 +1,8 @@
+import { retentionSummaryForHash } from "../../artifact-store/src/index.mjs";
+
 const requiredTechnicalGates = ["G2", "G3", "G4", "G5", "G6"];
 
-export function buildVerdictReport({ candidateRecord, gateReports = [], reviewReport, baselineReport, solverReport, preflightFailures = [] }) {
+export function buildVerdictReport({ candidateRecord, gateReports = [], reviewReport, baselineReport, solverReport, artifactStoreIndex, preflightFailures = [] }) {
   const artifact = candidateRecord.artifact ?? candidateRecord;
   const failures = [...preflightFailures];
   const blockers = [];
@@ -94,10 +96,7 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       energy_trace: energyGate?.metrics?.energy?.trace_status ?? artifact.energy?.trace_status ?? "not_recorded"
     },
     blockers: [...failures, ...blockers, ...(reviewReport?.failures ?? [])],
-    retention: {
-      class: "lab_generated",
-      raw_artifacts_retained: true
-    },
+    retention: buildRetentionBlock({ artifactStoreIndex, candidateRecord, artifact }),
     reports: Object.fromEntries(gateReports.map((report) => [report.gate, report.kind ?? "gate_report"]))
   };
 }
@@ -118,6 +117,24 @@ function solverSummary(report) {
     required_degeneracy_scene_ids: report.background_sweep?.required_scene_ids ?? [],
     observed_scene_ids: report.background_sweep?.observed_scene_ids ?? [],
     claim_constraint_count: report.claim_constraints?.length ?? 0
+  };
+}
+
+function buildRetentionBlock({ artifactStoreIndex, candidateRecord, artifact }) {
+  const candidateHash = candidateRecord.png?.sha256 ?? artifact.frame_pack?.base_png_sha256 ?? null;
+  if (!artifactStoreIndex || !candidateHash) {
+    return {
+      status: "not_recorded",
+      class: "not_recorded",
+      raw_artifacts_retained: "unknown",
+      deletion_never_removes_hash_manifest: true
+    };
+  }
+  const summary = retentionSummaryForHash(artifactStoreIndex, candidateHash);
+  return {
+    ...summary,
+    raw_artifacts_retained: summary.status === "indexed",
+    deletion_never_removes_hash_manifest: true
   };
 }
 

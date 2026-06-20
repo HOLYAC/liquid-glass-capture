@@ -6,6 +6,7 @@ import { readCaptureArtifact } from "./lib/lab-artifact.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
+import { readArtifactStoreIndex, writeArtifactStore } from "../packages/artifact-store/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
 import { makePassingPacket } from "./lab-review-packet.mjs";
 
@@ -28,7 +29,7 @@ function main() {
   }
 
   if (!args.candidate || args.gates.length === 0) {
-    console.error("usage: node scripts/lab-verdict-report.mjs --candidate <capture.json> --gate <g2.json> ... [--solver <solver.json>] [--review <g7.json>] [--baseline <baseline.json>] [--out report.json]");
+    console.error("usage: node scripts/lab-verdict-report.mjs --candidate <capture.json> --gate <g2.json> ... [--solver <solver.json>] [--store-index <index.json>] [--review <g7.json>] [--baseline <baseline.json>] [--out report.json]");
     console.error("       node scripts/lab-verdict-report.mjs --self-test [--out report.json]");
     process.exit(2);
   }
@@ -46,12 +47,14 @@ function buildReportFromFiles(args) {
   });
   const gateReports = args.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
   const solverReport = args.solver ? JSON.parse(readFileSync(resolve(args.solver), "utf8")) : undefined;
+  const artifactStoreIndex = args.storeIndex ? readArtifactStoreIndex(args.storeIndex) : undefined;
   const reviewReport = args.review ? JSON.parse(readFileSync(resolve(args.review), "utf8")) : undefined;
   const baselineReport = args.baseline ? JSON.parse(readFileSync(resolve(args.baseline), "utf8")) : undefined;
   return buildVerdictReport({
     candidateRecord,
     gateReports,
     solverReport,
+    artifactStoreIndex,
     reviewReport,
     baselineReport,
     preflightFailures: candidateRecord.preflight_failures
@@ -80,11 +83,18 @@ function writeSelfTestFixture(outPath) {
   writeFileSync(review, `${JSON.stringify(reviewReport, null, 2)}\n`);
   const solver = join(dir, "solver.pareto.report.json");
   writeFileSync(solver, `${JSON.stringify(makeSolverReport(), null, 2)}\n`);
+  const storeWrite = writeArtifactStore({
+    files: [pngPath],
+    storeRoot: join(dir, "store"),
+    retentionClass: "raw_png_frame",
+    generatedAt: "2026-01-01T00:00:00.000Z"
+  });
 
   return {
     candidate,
     gates,
     solver,
+    storeIndex: storeWrite.index_path,
     review,
     out: outPath ? resolve(outPath) : join(dir, "g8-verdict.report.json")
   };
@@ -241,6 +251,9 @@ function assertVerdictGuardRails(fixture, passReport) {
   if (!passReport.claim_constraints.some((constraint) => constraint.parameter === "tint" && constraint.parameter_level_match_claim === "forbidden")) {
     throw new Error("G8 guardrail failed: solver claim constraints missing from verdict");
   }
+  if (passReport.retention?.status !== "indexed" || passReport.retention.raw_artifacts_retained !== true) {
+    throw new Error("G8 guardrail failed: artifact-store retention entry missing from verdict");
+  }
 
   const gateReports = fixture.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
   const reviewReport = JSON.parse(readFileSync(resolve(fixture.review), "utf8"));
@@ -303,6 +316,7 @@ function parseArgs(args) {
     else if (arg === "--candidate") parsed.candidate = args[++index];
     else if (arg === "--gate") parsed.gates.push(args[++index]);
     else if (arg === "--solver") parsed.solver = args[++index];
+    else if (arg === "--store-index") parsed.storeIndex = args[++index];
     else if (arg === "--review") parsed.review = args[++index];
     else if (arg === "--baseline") parsed.baseline = args[++index];
     else if (arg === "--out") parsed.out = args[++index];

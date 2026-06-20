@@ -53,6 +53,15 @@ export function renderInspectViewer(inputPath) {
   if (json.kind === "solver_pareto_report") {
     return renderSolverViewer(absolute, json);
   }
+  if (
+    json.kind === "artifact_store_index" ||
+    json.kind === "artifact_store_write_report" ||
+    json.kind === "artifact_store_verify_report" ||
+    json.kind === "artifact_store_retention_plan" ||
+    json.kind === "artifact_store_self_test_report"
+  ) {
+    return renderArtifactStoreViewer(absolute, json);
+  }
 
   const record = readCaptureArtifact(absolute, {
     allowInvalid: true,
@@ -244,6 +253,7 @@ function renderVerdictViewer(path, report) {
       `${constraint.tag}: ${constraint.allowed_claim}`
     ]))),
     section("Baseline", table(objectRows(report.baseline ?? { status: "not_recorded" }))),
+    section("Retention", table(objectRows(report.retention ?? { status: "not_recorded" }))),
     section("Blockers", table((report.blockers ?? []).map((blocker, index) => [index, blocker]))),
     section("Raw Verdict", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
@@ -278,6 +288,40 @@ function renderSolverViewer(path, report) {
     ]))),
     section("Failures", table((report.failures ?? []).map((failure, index) => [index, failure]))),
     section("Raw Solver Report", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
+  ]);
+}
+
+function renderArtifactStoreViewer(path, report) {
+  const entries = report.entries ?? report.retention_plan?.delete_candidates ?? report.delete_candidates ?? [];
+  return page("Artifact Store Inspect", [
+    hero("Artifact Store Inspect", report.store_root ?? relative(repoRoot, path), [
+      statusPill("store", report.status ?? "index"),
+      statusPill("kind", report.kind ?? "unknown"),
+      statusPill("entries", String(report.entry_count ?? entries.length ?? 0))
+    ]),
+    section("Summary", table([
+      ["kind", report.kind],
+      ["status", report.status ?? "index"],
+      ["store_root", report.store_root ?? ""],
+      ["index_path", report.index_path ?? ""],
+      ["hash_manifest_path", report.hash_manifest_path ?? report.immutability?.hash_manifest_path ?? ""],
+      ["entry_count", report.entry_count ?? entries.length ?? ""],
+      ["delete_candidate_count", report.delete_candidate_count ?? ""],
+      ["source", relative(repoRoot, path)]
+    ])),
+    section("Immutability", table(objectRows(report.immutability ?? report.invariant ?? {
+      deletion_never_removes_hash_manifest: "not_recorded"
+    }))),
+    section("Entries", table((report.entries ?? []).slice(0, 80).map((entry) => [
+      entry.logical_id ?? entry.artifact_store_id,
+      `${entry.retention_class} ${entry.sha256 ?? ""} expires=${entry.expires_at ?? "never"}`
+    ]))),
+    section("Delete Candidates", table((report.delete_candidates ?? []).map((entry) => [
+      entry.logical_id ?? entry.artifact_store_id,
+      `${entry.retention_class} ${entry.sha256 ?? ""} tombstone=${entry.tombstone?.hash_manifest_preserved === true}`
+    ]))),
+    section("Failures", table((report.failures ?? []).map((failure, index) => [index, failure]))),
+    section("Raw Store Report", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
 }
 
