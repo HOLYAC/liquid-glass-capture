@@ -137,19 +137,23 @@ Then press `B`. The status line prints the generated repeat-manifest path.
    so the folder is reachable through Files/iTunes/Sideloadly-style file
    browsers.
 
-6. Verify the copied manifest. The repeat manifest lives under
-   `LiquidGlassCaptures/Series` and points to sibling `../Sessions/...`
-   artifacts:
+6. Verify the newest copied manifest. The command finds the latest
+   `LiquidGlassCaptures/Series/*.repeat-manifest.json` by the manifest's
+   `finished_at_ns` / `started_at_ns`, then follows its sibling
+   `../Sessions/...` artifact paths:
 
 ```bash
-npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --manifest ./artifacts/iphone/LiquidGlassCaptures/Series/<name>.repeat-manifest.json --out ./artifacts/ios-max-fidelity-proof.verify.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --capture-root ./artifacts/iphone/LiquidGlassCaptures --out ./artifacts/ios-max-fidelity-proof.verify.json
 ```
 
 `PASS` here means the verifier read the repeat manifest, every capture JSON,
 `frame_manifest.json`, every `.source.raw`, every `.display.rgba`, and checked
-their SHA-256 hashes. A missing raw file or hash mismatch is a failure.
+their SHA-256 hashes. A missing raw file or hash mismatch is a failure. On pass,
+the command also prints an `INSPECT ...` line for the newest capture.
 
-7. Open the capture:
+7. Open the capture with the printed command, or read
+   `next.inspect_command` from `./artifacts/ios-max-fidelity-proof.verify.json`.
+   It has this shape:
 
 ```bash
 npm run glass:inspect -- ./artifacts/iphone/LiquidGlassCaptures/Sessions/<capture-id>/<capture-id>.capture.json --out ./artifacts/viewer/max-fidelity.inspect.html
@@ -178,7 +182,7 @@ npm run material:probe -- --self-test
 npm run artifact:validate -- ./artifacts/sample.capture.json
 npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --out ./artifacts/ios-max-fidelity-proof.plan.json
-npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --manifest ./artifacts/iphone/LiquidGlassCaptures/Series/<name>.repeat-manifest.json --out ./artifacts/ios-max-fidelity-proof.verify.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --capture-root ./artifacts/iphone/LiquidGlassCaptures --out ./artifacts/ios-max-fidelity-proof.verify.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --out ./artifacts/ios-capture-plan.json
 npm run ios:capture -- --rig C1 --scene S07_BUSY_PHOTO --state busy_photo_rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --out ./artifacts/ios-capture-s07-plan.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --manifest ./artifacts/r0.repeat-manifest.json

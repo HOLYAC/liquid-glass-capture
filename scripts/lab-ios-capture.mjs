@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,14 +33,18 @@ function main() {
     });
     assertRawFlagSemantics();
     assertRawManifestVerification();
+    assertCaptureRootDiscovery();
     console.log(`${report.status.toUpperCase()} ${report.jsonPath ?? ""}`.trim());
     if (report.status !== "pass") process.exit(1);
     return;
   }
 
   const request = normalizeRequest(args);
-  const report = args.manifest ? verifyManifest(request) : writeCapturePlan(request);
-  console.log(`${report.status.toUpperCase()} ${report.jsonPath ?? ""}`.trim());
+  const report = request.manifest ? verifyManifest(request) : writeCapturePlan(request);
+  console.log(`${report.status.toUpperCase()} ${report.jsonPath ?? report.manifest_path ?? ""}`.trim());
+  if (report.status === "pass" && report.next?.inspect_command) {
+    console.log(`INSPECT ${report.next.inspect_command}`);
+  }
   if (report.status === "fail") process.exit(1);
 }
 
@@ -120,6 +124,7 @@ function writeCapturePlan(request) {
           : "display raw is not required for this request"
       ],
       use_after_capture: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --device-role ${request.deviceRole} --max-frames ${maxFrames}${outputPathSuffix} --manifest <repeat-manifest.json>`,
+      use_after_copy_latest: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --device-role ${request.deviceRole} --max-frames ${maxFrames}${outputPathSuffix} --capture-root ./artifacts/iphone/LiquidGlassCaptures --out ./artifacts/ios-max-fidelity-proof.verify.json`,
       inspect_after_pass: "npm run glass:inspect -- <first-or-last-capture.json> --out ./artifacts/viewer/max-fidelity.inspect.html",
       baseline_command: `npm run metrics:baseline -- --ref-manifest <r0-repeat-manifest.json> --probe-manifest <r1-repeat-manifest.json> --class ${baselineClass} --repeat ${request.repeat} --out ./baselines/current.json`
     }
@@ -137,6 +142,12 @@ function writeCapturePlan(request) {
 function verifyManifest(request) {
   const manifestPath = resolve(request.manifest);
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const manifestDir = dirname(manifestPath);
+  const artifactJsonPaths = Array.isArray(manifest.artifact_json_paths) ? manifest.artifact_json_paths : [];
+  const resolvedArtifactJsonPaths = artifactJsonPaths
+    .filter((value) => typeof value === "string" && value.length > 0)
+    .map((value) => resolveMaybe(manifestDir, value));
+  const latestArtifactJsonPath = resolvedArtifactJsonPaths.at(-1) ?? null;
   const failures = [];
   if (manifest.kind !== "repeat_capture_manifest") failures.push("MANIFEST_KIND_NOT_REPEAT_CAPTURE");
   if (manifest.rig_id !== request.rig) failures.push("RIG_MISMATCH");
@@ -161,7 +172,6 @@ function verifyManifest(request) {
     if (typeof manifest.max_frames !== "number" || manifest.max_frames <= 0) failures.push("MANIFEST_MAX_FRAMES_MISSING");
   }
   if (requestedRawFrames && Array.isArray(manifest.artifact_json_paths)) {
-    const manifestDir = dirname(manifestPath);
     for (const [index, artifactJsonPath] of manifest.artifact_json_paths.entries()) {
       verifyArtifactRawManifest(failures, manifestDir, artifactJsonPath, index, {
         requiresRawDisplay: requestedRawPixels
@@ -174,6 +184,7 @@ function verifyManifest(request) {
     kind: "ios_capture_verification",
     status: failures.length === 0 ? "pass" : "fail",
     manifest_path: manifestPath,
+    capture_root: request.captureRoot ?? null,
     request: {
       rig_id: request.rig,
       scene_id: request.scene,
@@ -184,8 +195,15 @@ function verifyManifest(request) {
     },
     observed: {
       repeat_count_observed: manifest.repeat_count_observed ?? 0,
-      artifact_json_paths: manifest.artifact_json_paths ?? []
+      artifact_json_paths: manifest.artifact_json_paths ?? [],
+      artifact_json_paths_resolved: resolvedArtifactJsonPaths,
+      latest_artifact_json_path: latestArtifactJsonPath
     },
+    next: latestArtifactJsonPath
+      ? {
+        inspect_command: `npm run glass:inspect -- ${shellQuote(latestArtifactJsonPath)} --out ./artifacts/viewer/max-fidelity.inspect.html`
+      }
+      : {},
     failures
   };
 
@@ -300,6 +318,7 @@ function sha256File(path) {
 }
 
 function normalizeRequest(args) {
+  const captureRoot = args.captureRoot ? resolve(args.captureRoot) : null;
   const request = {
     rig: args.rig ?? "R0",
     scene: args.scene ?? "S01_SEARCH",
@@ -312,7 +331,8 @@ function normalizeRequest(args) {
     captureRawFrames: Boolean(args.captureRawFrames),
     captureRawPixels: Boolean(args.captureRawPixels),
     maxFrames: args.maxFrames ?? null,
-    manifest: args.manifest,
+    manifest: args.manifest ?? (captureRoot ? findLatestRepeatManifest(captureRoot) : undefined),
+    captureRoot,
     out: args.out
   };
 
@@ -330,6 +350,44 @@ function normalizeRequest(args) {
     }
   }
   return request;
+}
+
+function findLatestRepeatManifest(captureRoot) {
+  const seriesDir = join(resolve(captureRoot), "Series");
+  const candidates = readdirSync(seriesDir)
+    .filter((name) => name.endsWith(".repeat-manifest.json"))
+    .map((name) => {
+      const path = join(seriesDir, name);
+      return {
+        path,
+        orderKey: repeatManifestOrderKey(path)
+      };
+    })
+    .sort((left, right) => {
+      if (left.orderKey === right.orderKey) return right.path.localeCompare(left.path);
+      return left.orderKey > right.orderKey ? -1 : 1;
+    });
+
+  if (candidates.length === 0) {
+    throw new Error(`No *.repeat-manifest.json found in ${seriesDir}`);
+  }
+  return candidates[0].path;
+}
+
+function repeatManifestOrderKey(path) {
+  try {
+    const manifest = JSON.parse(readFileSync(path, "utf8"));
+    const raw = manifest.finished_at_ns ?? manifest.started_at_ns;
+    if (typeof raw === "string" && /^\d+$/.test(raw)) return BigInt(raw);
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return BigInt(Math.round(raw));
+  } catch {
+    // Fall back to filesystem mtime below.
+  }
+  return BigInt(Math.round(statSync(path).mtimeMs * 1_000_000));
+}
+
+function shellQuote(value) {
+  return `"${String(value).replace(/"/g, '\\"')}"`;
 }
 
 function writeSelfTestManifest() {
@@ -523,6 +581,120 @@ function assertRawManifestVerification() {
   }
 }
 
+function assertCaptureRootDiscovery() {
+  const root = join(
+    repoRoot,
+    "artifacts",
+    "lab-self-test",
+    "ios-capture-latest",
+    `${Date.now()}-${process.pid}`,
+    "LiquidGlassCaptures"
+  );
+  const seriesDir = join(root, "Series");
+  const sessionDir = join(root, "Sessions", "latest-capture");
+  mkdirSync(seriesDir, { recursive: true });
+  mkdirSync(sessionDir, { recursive: true });
+
+  writeJson(join(seriesDir, "z-old.repeat-manifest.json"), {
+    schema_version: "1.2.0",
+    kind: "repeat_capture_manifest",
+    status: "complete",
+    rig_id: "R0",
+    scene_id: "S01_SEARCH",
+    state_id: "rest",
+    capture_kind: "compositor",
+    device_matrix_role: "mvl_primary",
+    repeat_count_requested: 1,
+    repeat_count_observed: 0,
+    finished_at_ns: "1",
+    artifact_json_paths: []
+  });
+
+  const rawPath = join(sessionDir, "000000.source.raw");
+  const displayPath = join(sessionDir, "000000.display.rgba");
+  writeFileSync(rawPath, Buffer.from([9, 10, 11, 12]));
+  writeFileSync(displayPath, Buffer.from([13, 14, 15, 16]));
+  const frameManifestPath = join(sessionDir, "frame_manifest.json");
+  writeJson(frameManifestPath, {
+    schema_version: "1.0.0",
+    frame_count: 1,
+    frames: [
+      {
+        index: 0,
+        png: "000000.png",
+        sha256: "0".repeat(64),
+        raw: {
+          path: "000000.source.raw",
+          format: "32BGRA",
+          width: 1,
+          height: 1,
+          bytesPerRow: 4,
+          byteCount: 4,
+          sha256: sha256File(rawPath),
+          display: {
+            path: "000000.display.rgba",
+            format: "32RGBA",
+            width: 1,
+            height: 1,
+            bytesPerRow: 4,
+            byteCount: 4,
+            sha256: sha256File(displayPath)
+          }
+        }
+      }
+    ]
+  });
+  const artifactPath = join(sessionDir, "latest.capture.json");
+  writeJson(artifactPath, {
+    schema_version: "1.2.0",
+    frame_pack: {
+      frame_manifest_path: "frame_manifest.json",
+      frame_manifest_sha256: sha256File(frameManifestPath)
+    }
+  });
+  const latestManifestPath = join(seriesDir, "a-latest.repeat-manifest.json");
+  writeJson(latestManifestPath, {
+    schema_version: "1.2.0",
+    kind: "repeat_capture_manifest",
+    status: "complete",
+    rig_id: "R0",
+    scene_id: "S01_SEARCH",
+    state_id: "rest",
+    capture_kind: "compositor",
+    device_matrix_role: "mvl_primary",
+    repeat_count_requested: 1,
+    repeat_count_observed: 1,
+    finished_at_ns: "2",
+    artifact_json_paths: ["../Sessions/latest-capture/latest.capture.json"],
+    max_fidelity: true,
+    capture_raw_frames: true,
+    capture_raw_pixels: true,
+    max_frames: 1
+  });
+
+  const request = normalizeRequest({
+    rig: "R0",
+    scene: "S01_SEARCH",
+    state: "rest",
+    device: "physical",
+    capture: "compositor",
+    deviceRole: "mvl_primary",
+    repeat: 1,
+    maxFidelity: true,
+    captureRawFrames: false,
+    captureRawPixels: false,
+    maxFrames: 1,
+    captureRoot: root
+  });
+  if (request.manifest !== latestManifestPath) {
+    throw new Error("ios-capture latest manifest discovery picked the wrong manifest");
+  }
+  const report = verifyManifest(request);
+  if (report.status !== "pass" || !report.next?.inspect_command) {
+    throw new Error(`ios-capture latest manifest self-test failed: ${report.failures.join(", ")}`);
+  }
+}
+
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
@@ -566,6 +738,7 @@ function parseArgs(args) {
       parsed.maxFrames = Number(args[++index]);
     }
     else if (arg === "--manifest") parsed.manifest = args[++index];
+    else if (arg === "--capture-root") parsed.captureRoot = args[++index];
     else if (arg === "--out") parsed.out = args[++index];
     else throw new Error(`Unknown argument: ${arg}`);
   }
