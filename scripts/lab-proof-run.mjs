@@ -25,7 +25,8 @@ function main() {
 }
 
 function runProof(request) {
-  const prepare = runNodeScript(request.prepareScript, ["--refresh-ipa"]);
+  const prepareArgs = request.refreshIpa ? ["--refresh-ipa"] : [];
+  const prepare = runNodeScript(request.prepareScript, prepareArgs);
   if (prepare.status !== 0) {
     printCommandFailure("PREPARE", prepare);
     return { status: "fail", phase: "prepare" };
@@ -40,6 +41,7 @@ function runProof(request) {
 
   const ipaPath = proofReport.artifacts?.ipa_path ?? "artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa";
   console.log(`PASS_READY_FOR_PHONE ${request.proofReport}`);
+  console.log(request.refreshIpa ? "IPA_MODE refresh" : "IPA_MODE reuse");
   console.log(`INSTALL ${ipaPath}`);
   console.log("PHONE Open Liquid Glass Capture, press B after this line, keep the iPhone unlocked and trusted over USB.");
 
@@ -83,6 +85,7 @@ function normalizeRequest(args) {
     pollMs,
     freshnessSkewMs,
     dryRun: Boolean(args.dryRun),
+    refreshIpa: args.refreshIpa ?? true,
     proofReport: resolve(repoRoot, args.proofReport ?? defaultProofReport),
     prepareScript: resolve(repoRoot, args.prepareScript ?? join("scripts", "lab-proof-doctor.mjs")),
     phoneScript: resolve(repoRoot, args.phoneScript ?? join("scripts", "lab-phone-pull.mjs"))
@@ -125,6 +128,8 @@ function parseArgs(argv) {
     const token = argv[index];
     if (token === "--self-test") args.selfTest = true;
     else if (token === "--dry-run") args.dryRun = true;
+    else if (token === "--refresh-ipa") args.refreshIpa = true;
+    else if (token === "--reuse-ipa" || token === "--no-refresh-ipa") args.refreshIpa = false;
     else if (token === "--wait-ms") args.waitMs = Number(readNext(argv, ++index, token));
     else if (token === "--poll-ms") args.pollMs = Number(readNext(argv, ++index, token));
     else if (token === "--freshness-skew-ms") args.freshnessSkewMs = Number(readNext(argv, ++index, token));
@@ -156,7 +161,11 @@ function runSelfTest() {
   });
 
   const prepareScript = join(dir, "fake-prepare.mjs");
-  writeFileSync(prepareScript, "process.exit(0);\n");
+  const prepareArgsPath = join(dir, "prepare-args.json");
+  writeFileSync(
+    prepareScript,
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(prepareArgsPath)}, JSON.stringify(process.argv.slice(2)) + "\\n");\nprocess.exit(0);\n`
+  );
   const phoneArgsPath = join(dir, "phone-args.json");
   const phoneScript = join(dir, "fake-phone.mjs");
   writeFileSync(
@@ -175,6 +184,10 @@ function runSelfTest() {
   if (run.status !== "pass") {
     throw new Error("proof-run self-test expected pass");
   }
+  const refreshPrepareArgs = JSON.parse(readFileSync(prepareArgsPath, "utf8"));
+  if (!refreshPrepareArgs.includes("--refresh-ipa")) {
+    throw new Error("proof-run self-test expected default run to refresh IPA");
+  }
   const phoneArgs = JSON.parse(readFileSync(phoneArgsPath, "utf8"));
   if (!phoneArgs.includes("--min-started-at-ns")) {
     throw new Error("proof-run self-test failed to pass freshness timestamp to phone pull");
@@ -191,6 +204,21 @@ function runSelfTest() {
   }));
   if (dry.status !== "pass" || dry.phase !== "dry_run") {
     throw new Error("proof-run self-test expected dry-run pass");
+  }
+
+  const reuse = runProof(normalizeRequest({
+    proofReport,
+    prepareScript,
+    phoneScript,
+    dryRun: true,
+    refreshIpa: false
+  }));
+  if (reuse.status !== "pass" || reuse.phase !== "dry_run") {
+    throw new Error("proof-run self-test expected reuse dry-run pass");
+  }
+  const reusePrepareArgs = JSON.parse(readFileSync(prepareArgsPath, "utf8"));
+  if (reusePrepareArgs.includes("--refresh-ipa")) {
+    throw new Error("proof-run self-test expected reuse mode not to refresh IPA");
   }
 
   rmSync(dir, { recursive: true, force: true });
