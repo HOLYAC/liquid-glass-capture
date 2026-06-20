@@ -91,6 +91,7 @@ function runDoctor(request) {
   let verifyReportPath = null;
   let inspectCommand = null;
   if (request.verifyCapture || copiedCaptureCheck.status === "pass") {
+    rmSync(request.verifyOut, { force: true });
     const verifyResult = runNodeScript("lab-ios-capture.mjs", [
       ...proofArgs,
       "--capture-root",
@@ -422,6 +423,33 @@ function runSelfTest() {
   const copied = inspectCopiedCaptureRoot(captureRoot);
   if (copied.status !== "pass") {
     throw new Error("proof-doctor self-test failed to recognize copied capture root");
+  }
+
+  const staleVerifyOut = join(dir, "stale.verify.json");
+  writeJson(staleVerifyOut, {
+    status: "pass",
+    capture_count: 1,
+    next: {
+      inspect_command: "stale-inspect-command"
+    }
+  });
+  const staleTrapReport = runDoctor({
+    out: join(dir, "stale-trap.report.json"),
+    ipaReport: reportPath,
+    planOut: join(dir, "stale-trap.plan.json"),
+    captureRoot: join(dir, "missing-LiquidGlassCaptures"),
+    verifyOut: staleVerifyOut,
+    refreshIpa: false,
+    verifyCapture: true
+  });
+  if (staleTrapReport.status !== "fail") {
+    throw new Error("proof-doctor self-test failed to reject missing capture root");
+  }
+  if (staleTrapReport.artifacts.verify_report_path !== null) {
+    throw new Error("proof-doctor self-test reused stale verify report path");
+  }
+  if (existsSync(staleVerifyOut)) {
+    throw new Error("proof-doctor self-test did not remove stale verify report before retry");
   }
   rmSync(dir, { recursive: true, force: true });
   console.log("PASS proof-doctor self-test");
