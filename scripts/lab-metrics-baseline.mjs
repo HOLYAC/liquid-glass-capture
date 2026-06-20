@@ -828,6 +828,27 @@ function assertBaselineApprovalSelfTest(fixture) {
       taintedComplete.statistics?.capture_manifest_gate?.retry_event_count !== 1) {
     throw new Error("baseline approval self-test failed to block retry-tainted manifest");
   }
+
+  const abortedManifest = JSON.parse(readFileSync(fixture.refManifest, "utf8"));
+  abortedManifest.status = "aborted";
+  abortedManifest.failures = ["STOP_FAILED_2: ReplayKit compositor capture produced no video frames"];
+  const abortedManifestPath = join(dirname(fixture.refManifest), "reference.aborted.repeat-manifest.json");
+  writeFileSync(abortedManifestPath, `${JSON.stringify(abortedManifest, null, 2)}\n`);
+  const abortedInput = readRepeatManifestInput(abortedManifestPath, "ref");
+  const abortedComplete = buildBaselineReport({
+    refs: abortedInput.paths,
+    probes: readRepeatManifestPaths(fixture.probeManifest),
+    baselineClass: "mvl",
+    repeatOverride: 3,
+    owner: "lab-owner",
+    approvalId: "approval-self-test",
+    manifestDiagnostics: [abortedInput.diagnostic]
+  });
+  if (abortedComplete.baseline_status !== "invalid" ||
+      !abortedComplete.failures.some((failure) => failure.includes("MANIFEST_ABORTED")) ||
+      !abortedComplete.failures.some((failure) => failure.includes("MANIFEST_RECORDED_FAILURES"))) {
+    throw new Error("baseline approval self-test failed to block aborted manifest");
+  }
 }
 
 function assertBaselineFreezeSelfTest(report) {
@@ -1154,15 +1175,21 @@ function readRepeatManifestInput(path, role) {
     return artifactPath;
   });
   const retryEvents = Array.isArray(manifest.retry_events) ? manifest.retry_events : [];
-  const failures = retryEvents.length > 0
-    ? [`${role}:${resolvedPath}:RETRY_EVENTS_PRESENT`]
+  const manifestFailures = Array.isArray(manifest.failures)
+    ? manifest.failures.filter((failure) => typeof failure === "string" && failure.length > 0)
     : [];
+  const failures = [];
+  if (manifest.status === "aborted") failures.push(`${role}:${resolvedPath}:MANIFEST_ABORTED`);
+  if (manifestFailures.length > 0) failures.push(`${role}:${resolvedPath}:MANIFEST_RECORDED_FAILURES`);
+  if (retryEvents.length > 0) failures.push(`${role}:${resolvedPath}:RETRY_EVENTS_PRESENT`);
   return {
     paths,
     diagnostic: {
       role,
       manifest_path: resolvedPath,
       manifest_id: manifest.id ?? null,
+      manifest_status: manifest.status ?? null,
+      manifest_failures: manifestFailures,
       status: failures.length === 0 ? "pass" : "fail",
       retry_event_count: retryEvents.length,
       retry_events: retryEvents,

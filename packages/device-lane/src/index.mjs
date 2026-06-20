@@ -250,11 +250,18 @@ function verifyTaskManifest(task, manifestRecord, policy) {
       lane_task_id: task.lane_task_id
     }))
     : [];
+  const manifestFailures = Array.isArray(manifest.failures)
+    ? manifest.failures.filter((failure) => typeof failure === "string" && failure.length > 0)
+    : [];
   const requiresRawManifest = manifest.max_fidelity === true ||
     manifest.capture_raw_frames === true ||
     manifest.capture_raw_pixels === true;
   const requiresRawDisplay = manifest.capture_raw_pixels === true || manifest.max_fidelity === true;
   if (manifest.kind !== "repeat_capture_manifest") failures.push(`${task.lane_task_id}:MANIFEST_KIND_NOT_REPEAT_CAPTURE`);
+  if (manifest.status !== "complete") {
+    failures.push(`${task.lane_task_id}:MANIFEST_STATUS_NOT_COMPLETE:${String(manifest.status ?? "missing")}`);
+  }
+  if (manifestFailures.length > 0) failures.push(`${task.lane_task_id}:MANIFEST_RECORDED_FAILURES`);
   if ((manifest.repeat_count_observed ?? 0) < task.repeat_count_requested) failures.push(`${task.lane_task_id}:REPEAT_COUNT_INCOMPLETE`);
   if (!Array.isArray(manifest.artifact_json_paths) || manifest.artifact_json_paths.length < task.repeat_count_requested) {
     failures.push(`${task.lane_task_id}:ARTIFACT_PATHS_INCOMPLETE`);
@@ -285,6 +292,8 @@ function verifyTaskManifest(task, manifestRecord, policy) {
     device_matrix_role: manifest.device_matrix_role ?? null,
     repeat_count_requested: task.repeat_count_requested,
     repeat_count_observed: manifest.repeat_count_observed ?? 0,
+    manifest_status: manifest.status ?? null,
+    manifest_failures: manifestFailures,
     retry_policy: manifest.policy
       ? {
         retry_replaykit_no_frame: manifest.policy.retry_replaykit_no_frame ?? false,

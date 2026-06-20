@@ -156,8 +156,13 @@ function verifyManifest(request) {
   const latestArtifactJsonPath = resolvedArtifactJsonPaths.at(-1) ?? null;
   const minStartedAtNs = request.minStartedAtNs ?? null;
   const retryEvents = Array.isArray(manifest.retry_events) ? manifest.retry_events : [];
+  const manifestFailures = Array.isArray(manifest.failures)
+    ? manifest.failures.filter((failure) => typeof failure === "string" && failure.length > 0)
+    : [];
   const failures = [];
   if (manifest.kind !== "repeat_capture_manifest") failures.push("MANIFEST_KIND_NOT_REPEAT_CAPTURE");
+  if (manifest.status !== "complete") failures.push(`MANIFEST_STATUS_NOT_COMPLETE:${String(manifest.status ?? "missing")}`);
+  if (manifestFailures.length > 0) failures.push("MANIFEST_RECORDED_FAILURES");
   if (manifest.rig_id !== request.rig) failures.push("RIG_MISMATCH");
   if (manifest.scene_id !== request.scene) failures.push("SCENE_MISMATCH");
   if (manifest.state_id !== request.state) failures.push("STATE_MISMATCH");
@@ -221,6 +226,8 @@ function verifyManifest(request) {
       artifact_json_paths: manifest.artifact_json_paths ?? [],
       artifact_json_paths_resolved: resolvedArtifactJsonPaths,
       latest_artifact_json_path: latestArtifactJsonPath,
+      manifest_status: manifest.status ?? null,
+      manifest_failures: manifestFailures,
       retry_event_count: retryEvents.length,
       retry_events: retryEvents,
       retry_policy: manifest.policy
@@ -658,6 +665,21 @@ function assertRawManifestVerification() {
       retryReport.observed.retry_event_count !== 1 ||
       retryReport.observed.clean_capture_path !== false) {
     throw new Error("ios-capture retry provenance self-test failed to taint report status");
+  }
+  const abortedManifestPath = join(dir, "aborted.repeat-manifest.json");
+  writeJson(abortedManifestPath, {
+    ...repeatManifest,
+    status: "aborted",
+    failures: ["STOP_FAILED_0: ReplayKit compositor capture produced no video frames"]
+  });
+  const abortedReport = verifyManifest({
+    ...baseRequest,
+    manifest: abortedManifestPath
+  });
+  if (abortedReport.status !== "fail" ||
+      !abortedReport.failures.includes("MANIFEST_RECORDED_FAILURES") ||
+      !abortedReport.failures.some((failure) => failure.startsWith("MANIFEST_STATUS_NOT_COMPLETE"))) {
+    throw new Error("ios-capture aborted manifest self-test failed to reject recorded failure");
   }
   const staleReport = verifyManifest({
     ...baseRequest,
