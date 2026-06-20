@@ -98,6 +98,39 @@ function writeSelfTestFixture(outPath) {
     manifests: [{ path: layerSnapshotManifestPath, manifest: JSON.parse(readFileSync(layerSnapshotManifestPath, "utf8")) }]
   });
 
+  const rawManifestPath = writeRepeatManifest({
+    dir,
+    name: "raw-positive.repeat-manifest.json",
+    artifactPaths: Array.from({ length: 3 }, (_, frameIndex) =>
+      writeCaptureArtifact(dir, `raw-positive-${frameIndex}`, "iPhone16,2", "compositor", "pass", {
+        frameManifestPath: `raw-frame-manifest-${frameIndex}.json`,
+        frameManifestRawBase: `raw-positive-${frameIndex}`
+      })
+    ),
+    maxFidelity: true,
+    captureRawFrames: true,
+    captureRawPixels: true
+  });
+  const rawManifestReport = verifyPhysicalDeviceLane({
+    plan,
+    manifests: [{ path: rawManifestPath, manifest: JSON.parse(readFileSync(rawManifestPath, "utf8")) }]
+  });
+
+  const rawManifestMissingPath = writeRepeatManifest({
+    dir,
+    name: "raw-missing-frame-manifest.repeat-manifest.json",
+    artifactPaths: Array.from({ length: 3 }, (_, frameIndex) =>
+      writeCaptureArtifact(dir, `raw-missing-${frameIndex}`, "iPhone16,2", "compositor", "pass")
+    ),
+    maxFidelity: true,
+    captureRawFrames: true,
+    captureRawPixels: true
+  });
+  const rawManifestMissingReport = verifyPhysicalDeviceLane({
+    plan,
+    manifests: [{ path: rawManifestMissingPath, manifest: JSON.parse(readFileSync(rawManifestMissingPath, "utf8")) }]
+  });
+
   const sustainedPlan = buildPhysicalDeviceLanePlan({
     laneClass: "sustained",
     tasks: [{ rig_id: "R0", scene_id: "S01_SEARCH", state_id: "rest" }],
@@ -202,11 +235,13 @@ function writeSelfTestFixture(outPath) {
     status: report.status === "pass" &&
       sustainedReport.status === "pass" &&
       prodReport.status === "pass" &&
+      rawManifestReport.status === "pass" &&
       badReport.status !== "pass" &&
       layerSnapshotReport.status !== "pass" &&
       badSceneContractReport.status !== "pass" &&
       prodMissingRoleReport.status !== "pass" &&
-      shortSustainedReport.status !== "pass" ? "pass" : "fail",
+      shortSustainedReport.status !== "pass" &&
+      rawManifestMissingReport.status !== "pass" ? "pass" : "fail",
     plan_path: planPath,
     positive_report: report,
     sustained_positive_report: sustainedReport,
@@ -214,6 +249,8 @@ function writeSelfTestFixture(outPath) {
     simulator_negative_report: badReport,
     layer_snapshot_negative_report: layerSnapshotReport,
     scene_contract_negative_report: badSceneContractReport,
+    raw_manifest_positive_report: rawManifestReport,
+    raw_manifest_missing_negative_report: rawManifestMissingReport,
     prod_matrix_missing_role_negative_report: prodMissingRoleReport,
     sustained_short_negative_report: shortSustainedReport
   };
@@ -229,6 +266,8 @@ function writeSelfTestFixture(outPath) {
     badSceneContractReport,
     prodMissingRoleReport,
     shortSustainedReport,
+    rawManifestReport,
+    rawManifestMissingReport,
     selfTestReport
   };
 }
@@ -242,6 +281,8 @@ function assertDeviceLaneGuardRails({
   badSceneContractReport,
   prodMissingRoleReport,
   shortSustainedReport,
+  rawManifestReport,
+  rawManifestMissingReport,
   selfTestReport
 }) {
   if (selfTestReport.status !== "pass") {
@@ -298,6 +339,12 @@ function assertDeviceLaneGuardRails({
   if (!shortSustainedReport.failures.some((failure) => failure.includes("SUSTAINED_DURATION_INCOMPLETE"))) {
     throw new Error("device-lane self-test failed to reject short sustained artifact");
   }
+  if (rawManifestReport.status !== "pass") {
+    throw new Error("device-lane self-test failed to verify raw frame manifest positive path");
+  }
+  if (!rawManifestMissingReport.failures.some((failure) => failure.includes("RAW_MANIFEST_PATH_MISSING"))) {
+    throw new Error("device-lane self-test failed to reject missing raw frame manifest path");
+  }
 }
 
 function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQualification, options = {}) {
@@ -306,9 +353,94 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
   const geometry = glassGeometryBySceneState[contractKey];
   const timeline = glassCaptureTimelineBySceneState[contractKey];
   const pngPath = join(dir, `frame-${index}.png`);
-  writePng(pngPath, 6, 6, makePixels(6, 6, Number.isFinite(Number(index)) ? Number(index) : 0));
+  const framePixelIndex = Number.isFinite(Number(index)) ? Number(index) : 0;
+  writePng(pngPath, 6, 6, makePixels(6, 6, framePixelIndex));
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const artifactPath = join(dir, `r0-s01-rest-${index}.capture.json`);
+  const frameManifestPath = options.frameManifestPath ? resolve(dir, options.frameManifestPath) : null;
+  if (frameManifestPath) {
+    const width = 6;
+    const height = 6;
+    const frameIndex = Number.isFinite(Number(options.frameManifestIndex))
+      ? Number(options.frameManifestIndex)
+      : Number.isFinite(Number(index))
+        ? Number(index)
+        : 0;
+    const rawPath = options.frameManifestRawBase
+      ? resolve(dir, `${options.frameManifestRawBase}.source.raw`)
+      : resolve(dir, `frame-${frameIndex}.source.raw`);
+    const displayRawPath = options.frameManifestRawBase
+      ? resolve(dir, `${options.frameManifestRawBase}.display.rgba`)
+      : resolve(dir, `frame-${frameIndex}.display.rgba`);
+    const rawPixels = makePixels(width, height, frameIndex);
+    writeFileSync(rawPath, rawPixels);
+    writeFileSync(displayRawPath, rawPixels);
+
+    const frameByteCount = rawPixels.length;
+    const rowBytes = width * 4;
+    writeJson(frameManifestPath, {
+      schema_version: "1.2.0",
+      frame_count: 1,
+      frames: [
+        {
+          index: frameIndex,
+          png: `frame-${index}.png`,
+          sha256: sha256File(pngPath),
+          width,
+          height,
+          raw: {
+            path: rawPath,
+            format: "kCVPixelFormatType_32RGBA",
+            sourceFormat: "kCVPixelFormatType_32RGBA",
+            width,
+            height,
+            bytesPerRow: rowBytes,
+            byteCount: frameByteCount,
+            sha256: sha256File(rawPath),
+            source_planes: [
+              {
+                index: 0,
+                format: "kCVPixelFormatType_32RGBA",
+                width,
+                height,
+                bytesPerRow: rowBytes,
+                byteCount: frameByteCount,
+                byteOffset: 0,
+                sha256: sha256File(rawPath)
+              }
+            ],
+            display: {
+              path: displayRawPath,
+              format: "kCVPixelFormatType_32RGBA",
+              width,
+              height,
+              bytesPerRow: rowBytes,
+              byteCount: frameByteCount,
+              sha256: sha256File(displayRawPath)
+            }
+          }
+        }
+      ]
+    });
+  }
+  const framePack = {
+    base_png_sha256: sha256File(pngPath),
+    base_png_path: pngPath,
+    sequence_paths: [pngPath],
+    sequence_timestamps_ms: [0],
+    mask_pack_sha256: sha256File(maskPath),
+    mask_pack_path: maskPath,
+    touch_phase: "rest",
+    animation_t: 0,
+    sustained_duration_ms: options.sustainedDurationMs ?? 10_000,
+    capture_timeline_pack_id: timeline.capture_timeline_pack_id,
+    capture_timeline_id: timeline.capture_timeline_id,
+    capture_timeline_sha256: timeline.capture_timeline_sha256
+  };
+  if (frameManifestPath) {
+    framePack.frame_manifest_path = frameManifestPath;
+    framePack.frame_manifest_sha256 = sha256File(frameManifestPath);
+  }
   writeJson(artifactPath, finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `device-lane-self-test-${index}`,
@@ -354,18 +486,7 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       white_point: "D65"
     },
     frame_pack: {
-      base_png_sha256: sha256File(pngPath),
-      base_png_path: pngPath,
-      sequence_paths: [pngPath],
-      sequence_timestamps_ms: [0],
-      mask_pack_sha256: sha256File(maskPath),
-      mask_pack_path: maskPath,
-      touch_phase: "rest",
-      animation_t: 0,
-      sustained_duration_ms: options.sustainedDurationMs ?? 10_000,
-      capture_timeline_pack_id: timeline.capture_timeline_pack_id,
-      capture_timeline_id: timeline.capture_timeline_id,
-      capture_timeline_sha256: timeline.capture_timeline_sha256
+      ...framePack
     },
     shader: {
       pipeline: "passthrough"
@@ -400,6 +521,9 @@ function writeRepeatManifest({
   deviceMatrixRole = "mvl_primary",
   captureDurationMs = 900,
   cooldownMs = 750,
+  maxFidelity = false,
+  captureRawFrames = false,
+  captureRawPixels = false,
   thermal = { initial_state: "nominal", final_state: "nominal" }
 }) {
   const manifestPath = join(dir, name);
@@ -416,6 +540,9 @@ function writeRepeatManifest({
     repeat_count_requested: repeatCountRequested,
     repeat_count_observed: artifactPaths.length,
     capture_duration_ms: captureDurationMs,
+    max_fidelity: maxFidelity,
+    capture_raw_frames: captureRawFrames,
+    capture_raw_pixels: captureRawPixels,
     cooldown_ms: cooldownMs,
     thermal,
     artifact_json_paths: artifactPaths

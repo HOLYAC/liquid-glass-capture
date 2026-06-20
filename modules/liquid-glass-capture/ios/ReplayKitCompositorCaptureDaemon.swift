@@ -1,5 +1,6 @@
 import CoreImage
 import CoreMedia
+import CoreVideo
 import CryptoKit
 import Darwin
 import ImageIO
@@ -128,14 +129,20 @@ final class ReplayKitCompositorCaptureDaemon {
     }
 
     do {
-      try (pngData as Data).write(to: frameSlot.url, options: .atomic)
+      var rawFrameMetadata: [String: Any]?
+      if let rawFrame = session.captureRawFrame(from: imageBuffer, slot: frameSlot) {
+        rawFrameMetadata = rawFrame
+      }
+
+      try (pngData as Data).write(to: frameSlot.pngUrl, options: .atomic)
       let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
       session.commitFrame(
         slot: frameSlot,
         ptsSeconds: timestamp.seconds,
         width: cgImage.width,
         height: cgImage.height,
-        sha256: Self.sha256Hex(pngData as Data)
+        sha256: Self.sha256Hex(pngData as Data),
+        rawFrame: rawFrameMetadata
       )
     } catch {
       session.recordError(error.localizedDescription)
@@ -157,9 +164,12 @@ final class ReplayKitCompositorCaptureDaemon {
 
 private final class ReplayKitCaptureSession {
   private let lock = NSLock()
+  private let ciContext = CIContext()
   private var nextFrameIndex = 0
   private var frameRecords: [[String: Any]] = []
   private var errors: [String] = []
+  private let captureRawFrames: Bool
+  private let captureRawPixels: Bool
   private let maxFrames: Int
   private let startedAt = Date()
   private let initialThermalState = ProcessInfo.processInfo.thermalState
@@ -167,6 +177,7 @@ private final class ReplayKitCaptureSession {
   let id: String
   let sessionDir: URL
   let frameDir: URL
+  let rawFrameDir: URL
   let metadata: [String: Any]
   let props: [String: Any]
   let viewportPx: [String: Int]
@@ -185,12 +196,21 @@ private final class ReplayKitCaptureSession {
     id = "\(stamp)-\(safeLabel)-replaykit"
     sessionDir = rootDir.appendingPathComponent(id, isDirectory: true)
     frameDir = sessionDir.appendingPathComponent("frames", isDirectory: true)
+    rawFrameDir = sessionDir.appendingPathComponent("raw", isDirectory: true)
     self.metadata = metadata
     self.props = props
     self.viewportPx = viewportPx
     maxFrames = max(1, min(metadata["maxFrames"] as? Int ?? 180, 900))
+    let maxFidelity = (metadata["maxFidelity"] as? Bool) == true
+    captureRawPixels = maxFidelity || (metadata["captureRawPixels"] as? Bool) == true
+    captureRawFrames = maxFidelity
+      || (metadata["captureRawFrames"] as? Bool) == true
+      || captureRawPixels
 
     try fileManager.createDirectory(at: frameDir, withIntermediateDirectories: true)
+    if captureRawFrames {
+      try fileManager.createDirectory(at: rawFrameDir, withIntermediateDirectories: true)
+    }
   }
 
   func reserveFrameSlot() -> ReplayKitFrameSlot? {
@@ -204,19 +224,255 @@ private final class ReplayKitCaptureSession {
     let index = nextFrameIndex
     nextFrameIndex += 1
     let name = String(format: "%06d.png", index)
-    return ReplayKitFrameSlot(index: index, url: frameDir.appendingPathComponent(name))
+    return ReplayKitFrameSlot(
+      index: index,
+      pngUrl: frameDir.appendingPathComponent(name),
+      rawSourceUrl: captureRawFrames
+        ? rawFrameDir.appendingPathComponent(String(format: "%06d.source.raw", index))
+        : nil,
+      rawDisplayUrl: captureRawPixels
+        ? rawFrameDir.appendingPathComponent(String(format: "%06d.display.rgba", index))
+        : nil
+    )
   }
 
-  func commitFrame(slot: ReplayKitFrameSlot, ptsSeconds: Double, width: Int, height: Int, sha256: String) {
+  func captureRawFrame(from imageBuffer: CVPixelBuffer, slot: ReplayKitFrameSlot) -> [String: Any]? {
+    guard let rawSourceUrl = slot.rawSourceUrl else {
+      return nil
+    }
+
+    let pixelFormat = CVPixelBufferGetPixelFormatType(imageBuffer)
+    let sourceFormat = Self.pixelFormatName(for: pixelFormat)
+    let sourceCapture = captureRawBuffer(from: imageBuffer, sourceFormat: sourceFormat)
+    guard let sourceCapture else {
+      return nil
+    }
+
+    do {
+      try sourceCapture.data.write(to: rawSourceUrl, options: .atomic)
+    } catch {
+      recordError("Could not write source raw frame \(slot.index): \(error.localizedDescription)")
+      return nil
+    }
+
+    var displayManifest: [String: Any]?
+    if let rawDisplayUrl = slot.rawDisplayUrl,
+       let display = captureDisplayRGBA(from: imageBuffer) {
+      do {
+        try display.data.write(to: rawDisplayUrl, options: .atomic)
+        displayManifest = [
+          "path": relativePath(for: rawDisplayUrl),
+          "format": Self.kCVPixelFormatType_32RGBAString,
+          "colorSpace": "display-p3",
+          "width": display.width,
+          "height": display.height,
+          "bytesPerRow": display.bytesPerRow,
+          "byteCount": display.byteCount,
+          "sha256": Self.sha256Hex(display.data)
+        ]
+      } catch {
+        recordError("Could not write display raw frame \(slot.index): \(error.localizedDescription)")
+      }
+    }
+
+    var manifest: [String: Any] = [
+      "path": relativePath(for: rawSourceUrl),
+      "format": sourceCapture.format,
+      "sourceFormat": sourceFormat,
+      "colorSpace": "source-native",
+      "width": sourceCapture.width,
+      "height": sourceCapture.height,
+      "bytesPerRow": sourceCapture.bytesPerRow,
+      "byteCount": sourceCapture.byteCount,
+      "sha256": Self.sha256Hex(sourceCapture.data)
+    ]
+
+    if let sourcePlanes = sourceCapture.sourcePlanes {
+      manifest["source_planes"] = sourcePlanes
+    }
+    if let displayManifest {
+      manifest["display"] = displayManifest
+    }
+    return manifest
+  }
+
+  private func captureRawBuffer(from imageBuffer: CVPixelBuffer, sourceFormat: String) -> RawBufferCapture? {
+    if CVPixelBufferGetPlaneCount(imageBuffer) > 1 {
+      return capturePlanarRawBuffer(from: imageBuffer)
+    }
+    return captureSinglePlaneRawBuffer(from: imageBuffer, sourceFormat: sourceFormat)
+  }
+
+  private func captureSinglePlaneRawBuffer(
+    from imageBuffer: CVPixelBuffer,
+    sourceFormat: String
+  ) -> RawBufferCapture? {
+    let width = CVPixelBufferGetWidth(imageBuffer)
+    let height = CVPixelBufferGetHeight(imageBuffer)
+    guard width > 0, height > 0 else {
+      return nil
+    }
+    let lockResult = CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+    guard lockResult == kCVReturnSuccess else {
+      return nil
+    }
+    defer {
+      CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
+    }
+
+    guard let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer) else {
+      return nil
+    }
+    let bytesPerRow = CVPixelBufferGetBytesPerRow(imageBuffer)
+    let byteCount = bytesPerRow * height
+    guard byteCount > 0 else {
+      return nil
+    }
+    let bytes = Data(bytes: baseAddress, count: byteCount)
+    return RawBufferCapture(
+      data: bytes,
+      width: width,
+      height: height,
+      bytesPerRow: bytesPerRow,
+      byteCount: byteCount,
+      format: sourceFormat,
+      sourcePlanes: [
+        [
+          "index": 0,
+          "format": sourceFormat,
+          "width": width,
+          "height": height,
+          "bytesPerRow": bytesPerRow,
+          "byteCount": byteCount,
+          "byteOffset": 0,
+          "sha256": Self.sha256Hex(bytes)
+        ]
+      ]
+    )
+  }
+
+  private func capturePlanarRawBuffer(from imageBuffer: CVPixelBuffer) -> RawBufferCapture? {
+    let planeCount = CVPixelBufferGetPlaneCount(imageBuffer)
+    guard planeCount > 1 else {
+      return nil
+    }
+
+    let width = CVPixelBufferGetWidth(imageBuffer)
+    let height = CVPixelBufferGetHeight(imageBuffer)
+    guard width > 0, height > 0 else {
+      return nil
+    }
+    let pixelFormat = CVPixelBufferGetPixelFormatType(imageBuffer)
+    let lockResult = CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+    guard lockResult == kCVReturnSuccess else {
+      return nil
+    }
+    defer {
+      CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
+    }
+
+    var packed = Data()
+    var sourcePlanes: [[String: Any]] = []
+    var maxBytesPerRow = 0
+    for planeIndex in 0..<planeCount {
+      guard let planeAddress = CVPixelBufferGetBaseAddressOfPlane(imageBuffer, planeIndex) else {
+        return nil
+      }
+      let planeWidth = CVPixelBufferGetWidthOfPlane(imageBuffer, planeIndex)
+      let planeHeight = CVPixelBufferGetHeightOfPlane(imageBuffer, planeIndex)
+      let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(imageBuffer, planeIndex)
+      guard planeWidth > 0, planeHeight > 0, bytesPerRow > 0 else {
+        return nil
+      }
+      let planeByteCount = bytesPerRow * planeHeight
+      let planeData = Data(bytes: planeAddress, count: planeByteCount)
+      let planeManifest: [String: Any] = [
+        "index": planeIndex,
+        "format": Self.rawPlaneFormat(for: pixelFormat, index: planeIndex),
+        "width": planeWidth,
+        "height": planeHeight,
+        "bytesPerRow": bytesPerRow,
+        "byteCount": planeByteCount,
+        "byteOffset": packed.count,
+        "sha256": Self.sha256Hex(planeData)
+      ]
+      packed.append(planeData)
+      sourcePlanes.append(planeManifest)
+      maxBytesPerRow = max(maxBytesPerRow, bytesPerRow)
+    }
+
+    return RawBufferCapture(
+      data: packed,
+      width: width,
+      height: height,
+      bytesPerRow: maxBytesPerRow,
+      byteCount: packed.count,
+      format: Self.pixelFormatName(for: pixelFormat),
+      sourcePlanes: sourcePlanes
+    )
+  }
+
+  private func captureDisplayRGBA(from imageBuffer: CVPixelBuffer) -> RGBACaptureResult? {
+    let ciImage = CIImage(cvPixelBuffer: imageBuffer, options: nil)
+    let extent = ciImage.extent.integral
+    let renderWidth = Int(extent.width)
+    let renderHeight = Int(extent.height)
+    guard renderWidth > 0, renderHeight > 0 else {
+      return nil
+    }
+    let bytesPerRow = renderWidth * 4
+    let byteCount = bytesPerRow * renderHeight
+    var raw = Data(count: byteCount)
+    let didRender = raw.withUnsafeMutableBytes { bytes in
+      let ptr = bytes.bindMemory(to: UInt8.self).baseAddress
+      guard let base = ptr else {
+        return false
+      }
+      ciContext.render(
+        ciImage,
+        toBitmap: base,
+        rowBytes: bytesPerRow,
+        bounds: extent,
+        format: .RGBA8,
+        colorSpace: Self.displayP3ColorSpace()
+      )
+      return true
+    }
+    if !didRender {
+      return nil
+    }
+    return RGBACaptureResult(
+      data: raw,
+      width: renderWidth,
+      height: renderHeight,
+      bytesPerRow: bytesPerRow,
+      byteCount: byteCount
+    )
+  }
+
+  func commitFrame(
+    slot: ReplayKitFrameSlot,
+    ptsSeconds: Double,
+    width: Int,
+    height: Int,
+    sha256: String,
+    rawFrame: [String: Any]?
+  ) {
     lock.lock()
-    frameRecords.append([
+    var record: [String: Any] = [
       "index": slot.index,
       "ptsSeconds": ptsSeconds,
-      "png": slot.url.path,
+      "png": relativePath(for: slot.pngUrl),
       "sha256": sha256,
       "width": width,
       "height": height
-    ])
+    ]
+
+    if let rawFrame {
+      record["raw"] = rawFrame
+    }
+
+    frameRecords.append(record)
     lock.unlock()
   }
 
@@ -273,6 +529,7 @@ private final class ReplayKitCaptureSession {
     try maskData.write(to: maskURL, options: .atomic)
 
     let jsonURL = sessionDir.appendingPathComponent("\(id).capture.json")
+    let frameManifestURL = sessionDir.appendingPathComponent("frame_manifest.json")
     let sustainedDurationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
     let refreshHz = Double(UIScreen.main.maximumFramesPerSecond)
     let finalThermalState = Self.thermalStateString(ProcessInfo.processInfo.thermalState)
@@ -282,7 +539,7 @@ private final class ReplayKitCaptureSession {
       "sequence_paths": frames.compactMap { $0["png"] as? String },
       "sequence_timestamps_ms": Self.sequenceTimestampsMS(frames),
       "mask_pack_sha256": Self.sha256Hex(maskData),
-      "mask_pack_path": maskURL.path,
+      "mask_pack_path": relativePath(for: maskURL),
       "touch_phase": touchPhase,
       "animation_t": 0,
       "sustained_duration_ms": sustainedDurationMs
@@ -298,6 +555,11 @@ private final class ReplayKitCaptureSession {
     }
     if let captureTimelineSHA256 = metadata["captureTimelineSha256"] as? String {
       framePack["capture_timeline_sha256"] = captureTimelineSHA256
+    }
+    if captureRawFrames {
+      let manifest = try writeFrameManifest(to: frameManifestURL, frames: frames)
+      framePack["frame_manifest_path"] = manifest.path
+      framePack["frame_manifest_sha256"] = manifest.sha256
     }
 
     var environment: [String: Any] = [
@@ -470,6 +732,57 @@ private final class ReplayKitCaptureSession {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 
+  private func writeFrameManifest(to manifestURL: URL, frames: [[String: Any]]) throws -> [String: String] {
+    let manifest: [String: Any] = [
+      "schema_version": "1.0.0",
+      "frame_count": frames.count,
+      "frames": frames
+    ]
+    let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    try manifestData.write(to: manifestURL, options: .atomic)
+    return [
+      "path": relativePath(for: manifestURL),
+      "sha256": Self.sha256Hex(manifestData)
+    ]
+  }
+
+  private func relativePath(for url: URL) -> String {
+    let base = sessionDir.standardizedFileURL.path
+    let path = url.standardizedFileURL.path
+    let prefix = base.hasSuffix("/") ? base : "\(base)/"
+    if path.hasPrefix(prefix) {
+      return String(path.dropFirst(prefix.count))
+    }
+    return path
+  }
+
+  private static func pixelFormatName(for pixelFormat: OSType) -> String {
+    switch pixelFormat {
+    case kCVPixelFormatType_32BGRA:
+      "kCVPixelFormatType_32BGRA"
+    case kCVPixelFormatType_32ARGB:
+      "kCVPixelFormatType_32ARGB"
+    case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
+      "kCVPixelFormatType_420YpCbCr8BiPlanarFullRange"
+    case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
+      "kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange"
+    default:
+      String(format: "0x%08X", pixelFormat)
+    }
+  }
+
+  private static func rawPlaneFormat(for pixelFormat: OSType, index: Int) -> String {
+    switch pixelFormat {
+    case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+         kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
+      return index == 0 ? "Y_PLANE" : "UV_PLANE_PACKED"
+    default:
+      return "plane_\(index)"
+    }
+  }
+
+  private static let kCVPixelFormatType_32RGBAString = "kCVPixelFormatType_32RGBA"
+
   private static func sequenceTimestampsMS(_ frames: [[String: Any]]) -> [Double] {
     let seconds = frames.compactMap { $0["ptsSeconds"] as? Double }
     guard let first = seconds.first else {
@@ -576,6 +889,10 @@ private final class ReplayKitCaptureSession {
     }
   }
 
+  private static func displayP3ColorSpace() -> CGColorSpace {
+    CGColorSpace(name: CGColorSpace.displayP3) ?? CGColorSpaceCreateDeviceRGB()
+  }
+
   private static func displayP3ICCSHA256() -> String? {
     guard let colorSpace = CGColorSpace(name: CGColorSpace.displayP3),
           let iccData = colorSpace.copyICCData() as Data? else {
@@ -587,5 +904,25 @@ private final class ReplayKitCaptureSession {
 
 private struct ReplayKitFrameSlot {
   let index: Int
-  let url: URL
+  let pngUrl: URL
+  let rawSourceUrl: URL?
+  let rawDisplayUrl: URL?
+}
+
+private struct RawBufferCapture {
+  let data: Data
+  let width: Int
+  let height: Int
+  let bytesPerRow: Int
+  let byteCount: Int
+  let format: String
+  let sourcePlanes: [[String: Any]]?
+}
+
+private struct RGBACaptureResult {
+  let data: Data
+  let width: Int
+  let height: Int
+  let bytesPerRow: Int
+  let byteCount: Int
 }

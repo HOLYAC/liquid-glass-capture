@@ -66,7 +66,7 @@ export function buildPhysicalDeviceLanePlan({
     tasks: normalizedTasks,
     operator_commands: normalizedTasks.flatMap((task) =>
       commandMatrixForTask(task).map(({ role, suffix }) =>
-        `npm run ios:capture -- --rig ${task.rig_id} --scene ${task.scene_id} --state ${task.state_id} --device physical --capture compositor --repeat ${task.repeat_count_requested}${role ? ` --device-role ${role}` : ""} --out ./artifacts/device-lane/${task.lane_task_id}${suffix}.plan.json`
+        `npm run ios:capture -- --rig ${task.rig_id} --scene ${task.scene_id} --state ${task.state_id} --device physical --capture compositor --repeat ${task.repeat_count_requested}${role ? ` --device-role ${role}` : ""} --max-fidelity --capture-raw-frames --capture-raw-pixels --max-frames 900 --out ./artifacts/device-lane/${task.lane_task_id}${suffix}.plan.json`
       )
     )
   };
@@ -225,6 +225,10 @@ function verifyTaskManifests(task, manifestRecords, policy) {
 function verifyTaskManifest(task, manifestRecord, policy) {
   const manifest = manifestRecord.manifest ?? manifestRecord;
   const failures = [];
+  const requiresRawManifest = manifest.max_fidelity === true ||
+    manifest.capture_raw_frames === true ||
+    manifest.capture_raw_pixels === true;
+  const requiresRawDisplay = manifest.capture_raw_pixels === true || manifest.max_fidelity === true;
   if (manifest.kind !== "repeat_capture_manifest") failures.push(`${task.lane_task_id}:MANIFEST_KIND_NOT_REPEAT_CAPTURE`);
   if ((manifest.repeat_count_observed ?? 0) < task.repeat_count_requested) failures.push(`${task.lane_task_id}:REPEAT_COUNT_INCOMPLETE`);
   if (!Array.isArray(manifest.artifact_json_paths) || manifest.artifact_json_paths.length < task.repeat_count_requested) {
@@ -236,7 +240,7 @@ function verifyTaskManifest(task, manifestRecord, policy) {
   const artifactReports = [];
   for (const [index, rawPath] of (manifest.artifact_json_paths ?? []).entries()) {
     const artifactPath = isAbsolute(rawPath) ? rawPath : resolve(manifestDir, rawPath);
-    const report = verifyArtifactForTask(task, artifactPath, index, policy);
+    const report = verifyArtifactForTask(task, artifactPath, index, policy, requiresRawManifest, requiresRawDisplay);
     failures.push(...report.failures);
     artifactReports.push(report);
   }
@@ -256,7 +260,7 @@ function verifyTaskManifest(task, manifestRecord, policy) {
   };
 }
 
-function verifyArtifactForTask(task, artifactPath, index, policy) {
+function verifyArtifactForTask(task, artifactPath, index, policy, requiresRawFrameManifest, requiresRawDisplay) {
   const failures = [];
   if (!existsSync(artifactPath)) {
     return {
@@ -301,6 +305,36 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
   ) {
     failures.push(`${task.lane_task_id}:ARTIFACT_${index}_TRAJECTORY_SOURCE_MISMATCH`);
   }
+  if (requiresRawFrameManifest) {
+    const artifactDir = dirname(artifactPath);
+    if (!artifact.frame_pack?.frame_manifest_path) {
+      failures.push(`${task.lane_task_id}:ARTIFACT_${index}_RAW_MANIFEST_PATH_MISSING`);
+    }
+    if (!artifact.frame_pack?.frame_manifest_sha256) {
+      failures.push(`${task.lane_task_id}:ARTIFACT_${index}_RAW_MANIFEST_SHA_MISSING`);
+    }
+    if (artifact.frame_pack?.frame_manifest_path && artifact.frame_pack?.frame_manifest_sha256) {
+      verifyHash(
+        failures,
+        `${task.lane_task_id}:ARTIFACT_${index}_FRAME_MANIFEST`,
+        artifactDir,
+        artifact.frame_pack.frame_manifest_path,
+        artifact.frame_pack.frame_manifest_sha256
+      );
+      verifyRawFrameManifest(
+        failures,
+        task.lane_task_id,
+        index,
+        artifactDir,
+        artifact.frame_pack.frame_manifest_path,
+        artifact.frame_pack.frame_manifest_sha256,
+        {
+          requiresRawDisplay,
+          sequencePaths: artifact.frame_pack?.sequence_paths ?? []
+        }
+      );
+    }
+  }
   failures.push(...verifySustainedArtifactFields(task, artifact, index));
   failures.push(...verifySceneContractFields(task, artifact, index));
   for (const integrityFailure of validateCaptureArtifactIntegrity(artifact)) {
@@ -330,6 +364,175 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
     hashes_verified: hashFailures.length === 0,
     failures
   };
+}
+
+function verifyRawFrameManifest(
+  failures,
+  taskId,
+  artifactIndex,
+  artifactDir,
+  frameManifestPath,
+  frameManifestSha,
+  options = {}
+) {
+  const baseLabel = `${taskId}:ARTIFACT_${artifactIndex}_FRAME_MANIFEST`;
+  const manifestPath = resolveMaybe(artifactDir, frameManifestPath);
+  if (!existsSync(manifestPath)) {
+    failures.push(`${baseLabel}_MANIFEST_MISSING`);
+    return;
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    failures.push(`${baseLabel}_JSON_INVALID:${error.message}`);
+    return;
+  }
+
+  if (manifest.schema_version !== "1.0.0" && manifest.schema_version !== "1.2.0") {
+    failures.push(`${baseLabel}_SCHEMA_VERSION_UNEXPECTED_${String(manifest.schema_version ?? "missing")}`);
+  }
+  if (!Number.isFinite(manifest.frame_count) || manifest.frame_count < 0) {
+    failures.push(`${baseLabel}_FRAME_COUNT_INVALID`);
+  }
+  if (!Array.isArray(manifest.frames)) {
+    failures.push(`${baseLabel}_FRAMES_NOT_ARRAY`);
+    return;
+  }
+  if (Number.isFinite(manifest.frame_count) && manifest.frames.length !== manifest.frame_count) {
+    failures.push(`${baseLabel}_FRAME_COUNT_MISMATCH`);
+  }
+
+  const requiresRawDisplay = options.requiresRawDisplay === true;
+  const expectedSequencePaths = Array.isArray(options.sequencePaths) ? options.sequencePaths : [];
+  const expectedSequenceMap = new Map();
+  for (let frameIndex = 0; frameIndex < expectedSequencePaths.length; frameIndex += 1) {
+    const sequencePath = expectedSequencePaths[frameIndex];
+    if (typeof sequencePath === "string" && sequencePath.length > 0) {
+      const expectedPath = resolveMaybe(artifactDir, sequencePath);
+      expectedSequenceMap.set(frameIndex, expectedPath);
+    }
+  }
+  const sequenceMatches = new Set();
+  const seenIndices = new Set();
+
+  for (let entryIndex = 0; entryIndex < manifest.frames.length; entryIndex += 1) {
+    const frame = manifest.frames[entryIndex];
+    const frameLabel = `${baseLabel}_FRAME_${entryIndex}`;
+    const framePath = resolveMaybe(artifactDir, frame?.png);
+
+    if (!Number.isFinite(frame?.index) || !Number.isInteger(frame.index) || frame.index < 0) {
+      failures.push(`${frameLabel}_INDEX_INVALID`);
+    } else {
+      if (seenIndices.has(frame.index)) {
+        failures.push(`${frameLabel}_INDEX_DUPLICATE`);
+      } else {
+        seenIndices.add(frame.index);
+      }
+      const expectedPngPath = expectedSequenceMap.get(frame.index);
+      if (expectedPngPath !== undefined && typeof frame?.png === "string") {
+        if (framePath !== expectedPngPath) {
+          failures.push(`${frameLabel}_PNG_PATH_MISMATCH_SEQUENCE`);
+        } else {
+          sequenceMatches.add(expectedPngPath);
+        }
+      }
+      if (expectedPngPath !== undefined && (typeof frame?.png !== "string" || frame.png.length === 0)) {
+        failures.push(`${frameLabel}_PNG_PATH_MISSING`);
+      }
+    }
+
+    if (typeof frame?.width !== "number" || frame.width <= 0) {
+      failures.push(`${frameLabel}_WIDTH_INVALID`);
+    }
+    if (typeof frame?.height !== "number" || frame.height <= 0) {
+      failures.push(`${frameLabel}_HEIGHT_INVALID`);
+    }
+
+    if (typeof frame?.png !== "string" || frame.png.length === 0) {
+      failures.push(`${frameLabel}_PNG_PATH_MISSING`);
+    } else if (!existsSync(framePath)) {
+      failures.push(`${frameLabel}_PNG_MISSING`);
+    } else if (typeof frame?.sha256 !== "string" || frame.sha256.length === 0) {
+      failures.push(`${frameLabel}_PNG_SHA_MISSING`);
+    } else {
+      verifyHash(failures, `${frameLabel}_PNG`, artifactDir, frame.png, frame.sha256);
+    }
+
+    if (frame?.raw == null) {
+      failures.push(`${frameLabel}_RAW_MISSING`);
+      continue;
+    }
+    if (typeof frame.raw !== "object") {
+      failures.push(`${frameLabel}_RAW_NOT_OBJECT`);
+      continue;
+    }
+
+    if (typeof frame.raw?.path !== "string" || frame.raw.path.length === 0) {
+      failures.push(`${frameLabel}_RAW_PATH_MISSING`);
+    } else {
+      verifyHash(failures, `${frameLabel}_RAW`, artifactDir, frame.raw.path, frame.raw.sha256);
+    }
+    if (typeof frame.raw?.sha256 !== "string" || frame.raw.sha256.length === 0) {
+      failures.push(`${frameLabel}_RAW_SHA_MISSING`);
+    }
+    if (typeof frame.raw?.width !== "number" || frame.raw.width <= 0) {
+      failures.push(`${frameLabel}_RAW_WIDTH_INVALID`);
+    }
+    if (typeof frame.raw?.height !== "number" || frame.raw.height <= 0) {
+      failures.push(`${frameLabel}_RAW_HEIGHT_INVALID`);
+    }
+    if (typeof frame.raw?.bytesPerRow !== "number" || frame.raw.bytesPerRow <= 0) {
+      failures.push(`${frameLabel}_RAW_BYTES_PER_ROW_INVALID`);
+    }
+    if (typeof frame.raw?.byteCount !== "number" || frame.raw.byteCount <= 0) {
+      failures.push(`${frameLabel}_RAW_BYTE_COUNT_INVALID`);
+    }
+    if (frame.raw.source_planes != null && !Array.isArray(frame.raw.source_planes)) {
+      failures.push(`${frameLabel}_SOURCE_PLANES_NOT_ARRAY`);
+    }
+
+    if (frame.raw.display) {
+      if (typeof frame.raw.display !== "object") {
+        failures.push(`${frameLabel}_DISPLAY_NOT_OBJECT`);
+      } else {
+        if (typeof frame.raw.display?.path !== "string" || frame.raw.display.path.length === 0) {
+          failures.push(`${frameLabel}_DISPLAY_PATH_MISSING`);
+          if (requiresRawDisplay) {
+            failures.push(`${frameLabel}_DISPLAY_REQUIRED`);
+          }
+        } else {
+          verifyHash(failures, `${frameLabel}_DISPLAY`, artifactDir, frame.raw.display.path, frame.raw.display.sha256);
+        }
+        if (typeof frame.raw.display?.sha256 !== "string" || frame.raw.display.sha256.length === 0) {
+          failures.push(`${frameLabel}_DISPLAY_SHA_MISSING`);
+        }
+      }
+    } else if (requiresRawDisplay) {
+      failures.push(`${frameLabel}_DISPLAY_REQUIRED`);
+    }
+  }
+
+  if (expectedSequencePaths.length > 0 && expectedSequencePaths.length !== manifest.frames.length) {
+    failures.push(`${baseLabel}_FRAME_COUNT_SEQUENCE_MISMATCH`);
+  }
+  for (let frameIndex = 0; frameIndex < expectedSequencePaths.length; frameIndex += 1) {
+    const expectedPath = expectedSequenceMap.get(frameIndex);
+    if (expectedPath && !sequenceMatches.has(expectedPath)) {
+      failures.push(`${baseLabel}_SEQUENCE_FRAME_${frameIndex}_MISSING`);
+    }
+    if (expectedPath && !existsSync(expectedPath)) {
+      failures.push(`${baseLabel}_SEQUENCE_FRAME_${frameIndex}_PATH_MISSING`);
+    }
+  }
+
+  if (frameManifestSha && frameManifestSha.length) {
+    const actual = sha256File(manifestPath);
+    if (actual.toLowerCase() !== String(frameManifestSha).toLowerCase()) {
+      failures.push(`${baseLabel}_SHA_MISMATCH`);
+    }
+  }
 }
 
 function verifyDeviceMatrix(task, manifestReports) {

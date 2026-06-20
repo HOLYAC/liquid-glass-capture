@@ -114,6 +114,7 @@ export function renderInspectViewer(inputPath) {
         ${imageUri ? `<img class="frame" src="${imageUri}" alt="capture frame">` : `<div class="missing">no frame png</div>`}
       </div>
     `),
+    section("Frame Manifest", frameManifestPanel(absolute, artifact)),
     section("Mask Overlay", maskOverlay(record)),
     section("Identity", table(rows)),
     section("Color Pipeline", table(objectRows(artifact.color))),
@@ -233,14 +234,24 @@ export function writeViewerSelfTestArtifacts() {
   writePng(candidatePng, width, height, candidatePixels);
   const referenceSequence = writeViewerMotionSequence(dir, "viewer-reference-seq", width, height, 0);
   const candidateSequence = writeViewerMotionSequence(dir, "viewer-candidate-seq", width, height, 4);
+  const referenceFrameManifest = writeViewerFrameManifest(dir, "viewer-reference", referenceSequence);
+  const candidateFrameManifest = writeViewerFrameManifest(dir, "viewer-candidate", candidateSequence);
   const referenceTrace = writeViewerTracePackage(dir, "viewer-reference");
   const candidateTrace = writeViewerTracePackage(dir, "viewer-candidate");
 
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const referenceArtifact = join(dir, "viewer-reference.capture.json");
   const candidateArtifact = join(dir, "viewer-candidate.capture.json");
-  writeFileSync(referenceArtifact, `${JSON.stringify(makeSelfTestArtifact("R0", referencePng, maskPath, referenceSequence, referenceTrace), null, 2)}\n`);
-  writeFileSync(candidateArtifact, `${JSON.stringify(makeSelfTestArtifact("R1", candidatePng, maskPath, candidateSequence, candidateTrace), null, 2)}\n`);
+  writeFileSync(referenceArtifact, `${JSON.stringify(
+    makeSelfTestArtifact("R0", referencePng, maskPath, { ...referenceSequence, frameManifest: referenceFrameManifest }, referenceTrace),
+    null,
+    2
+  )}\n`);
+  writeFileSync(candidateArtifact, `${JSON.stringify(
+    makeSelfTestArtifact("R1", candidatePng, maskPath, { ...candidateSequence, frameManifest: candidateFrameManifest }, candidateTrace),
+    null,
+    2
+  )}\n`);
   return {
     referenceArtifact,
     candidateArtifact
@@ -535,6 +546,144 @@ function renderArtifactStoreViewer(path, report) {
     section("Failures", table((report.failures ?? []).map((failure, index) => [index, failure]))),
     section("Raw Store Report", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
+}
+
+function frameManifestPanel(artifactPath, artifact) {
+  const manifest = resolveFrameManifest(artifactPath, artifact);
+  const rows = [
+    ["frame_manifest_path", artifact.frame_pack?.frame_manifest_path ?? ""],
+    ["frame_manifest_sha256", artifact.frame_pack?.frame_manifest_sha256 ?? ""],
+    ["repo_relative_path", manifest.repoRelativePath],
+    ["manifest_path", manifest.path],
+    ["path_exists", String(manifest.pathExists)],
+    ["schema_version", manifest.schemaVersion],
+    ["frame_pack_count", manifest.framePackCount],
+    ["frame_manifest_count", manifest.frameCount],
+    ["frame_count_match", String(!manifest.mismatch)],
+    ["failures", manifest.failures.join(", ")]
+  ];
+
+  const previewRows = (manifest.frames ?? []).slice(0, 8).map((frame) => {
+    const hasRaw = Boolean(frame.raw?.path);
+    const hasDisplay = Boolean(frame.raw?.display?.path);
+    return [
+      frame.index,
+      frame.png,
+      String(hasRaw),
+      String(hasDisplay),
+      frame.raw?.format ?? "",
+      frame.raw?.sha256 ?? "",
+      frame.raw?.display?.sha256 ?? ""
+    ];
+  });
+  const preview = previewRows.length > 0
+    ? table([
+      ["index", "png", "has_raw", "has_display", "raw_format", "raw_sha256", "display_sha256"],
+      ...previewRows
+    ])
+    : "<div class=\"missing\">frame manifest data unavailable</div>";
+
+  const tone = manifest.failures.length === 0 ? "ok" : "warn";
+  const link = manifest.path
+    ? `<p><a id="frame-manifest-link" href="${escapeHtml(pathToFileURL(manifest.path).href)}">open frame manifest package</a></p>`
+    : "";
+
+  return `
+    <div id="frame-manifest-panel" class="trace-panel ${tone}">
+      ${link}
+      ${table(rows)}
+      <p><strong>Frame manifest sample</strong></p>
+      ${preview}
+      ${rawFileManifestLinks(manifest)}
+    </div>
+  `;
+}
+
+function resolveFrameManifest(artifactPath, artifact) {
+  const framePack = artifact.frame_pack ?? {};
+  const manifestRelativePath = framePack.frame_manifest_path;
+  const manifestPath = typeof manifestRelativePath === "string" && manifestRelativePath.length > 0
+    ? isAbsolute(manifestRelativePath) ? manifestRelativePath : resolve(dirname(artifactPath), manifestRelativePath)
+    : "";
+  const failures = [];
+  let schemaVersion = "";
+  let frameCount = 0;
+  let frames = [];
+  let mismatch = false;
+  let pathExists = false;
+  let repoRelativePath = "";
+
+  if (manifestPath) {
+    repoRelativePath = relative(dirname(artifactPath), manifestPath).replace(/\\/g, "/");
+    pathExists = existsSync(manifestPath);
+    if (!pathExists) {
+      failures.push("FRAME_MANIFEST_PATH_UNREADABLE");
+    } else {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        schemaVersion = manifest?.schema_version ?? "";
+        frameCount = manifest?.frame_count;
+        if (!Number.isFinite(frameCount) || frameCount < 0) {
+          failures.push("FRAME_MANIFEST_FRAME_COUNT_INVALID");
+        } else if (!Array.isArray(manifest?.frames)) {
+          failures.push("FRAME_MANIFEST_FRAMES_NOT_ARRAY");
+        } else {
+          frames = manifest.frames;
+          if (frames.length !== frameCount) {
+            failures.push("FRAME_MANIFEST_FRAME_COUNT_MISMATCH");
+            mismatch = true;
+          }
+          if (framePack.frame_manifest_sha256) {
+            const actualFrameManifestSha = sha256File(manifestPath);
+            if (String(actualFrameManifestSha).toLowerCase() !== String(framePack.frame_manifest_sha256).toLowerCase()) {
+              failures.push("FRAME_MANIFEST_SHA256_MISMATCH");
+            }
+          }
+        }
+      } catch (error) {
+        failures.push(`FRAME_MANIFEST_UNREADABLE:${error.message}`);
+      }
+    }
+  } else {
+    failures.push("FRAME_MANIFEST_PATH_MISSING");
+  }
+
+  return {
+    path: manifestPath,
+    repoRelativePath,
+    failures,
+    pathExists,
+    framePackCount: framePack.sequence_paths?.length ?? 0,
+    frameCount,
+    mismatch,
+    schemaVersion,
+    frames,
+    resolveFramePath(rawPath) {
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
+        return "";
+      }
+      return isAbsolute(rawPath) ? rawPath : resolve(dirname(artifactPath), rawPath);
+    }
+  };
+}
+
+function rawFileManifestLinks(manifest) {
+  if (!Array.isArray(manifest.frames)) {
+    return "";
+  }
+  const links = [];
+  for (let index = 0; index < Math.min(4, manifest.frames.length); index += 1) {
+    const frame = manifest.frames[index];
+    const rawPath = manifest.resolveFramePath(frame?.raw?.path);
+    const displayPath = manifest.resolveFramePath(frame?.raw?.display?.path);
+    if (rawPath) {
+      links.push(`<a href="${escapeHtml(pathToFileURL(rawPath).href)}">frame-${frame.index}-raw</a>`);
+    }
+    if (displayPath) {
+      links.push(`<a href="${escapeHtml(pathToFileURL(displayPath).href)}">frame-${frame.index}-display-raw</a>`);
+    }
+  }
+  return links.length > 0 ? `<p>${links.join(" | ")}</p>` : "";
 }
 
 function renderBaselineViewer(path, report) {
@@ -856,6 +1005,28 @@ function markerLine(x, top, bottom, color, label) {
     <text x="${x + 4}" y="${bottom - 6}" fill="${color}" font-size="10">${escapeHtml(label)}</text>`;
 }
 
+function writeViewerFrameManifest(dir, prefix, sequence) {
+  const manifestPath = join(dir, `${prefix}.frame_manifest.json`);
+  const frames = sequence.paths.map((path, index) => ({
+    index,
+    ptsSeconds: Number.isFinite(sequence.timestamps_ms[index]) ? sequence.timestamps_ms[index] / 1000 : undefined,
+    png: path,
+    sha256: sha256File(path),
+    width: sequence.width,
+    height: sequence.height
+  }));
+  const manifest = {
+    schema_version: "1.0.0",
+    frame_count: frames.length,
+    frames
+  };
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return {
+    path: manifestPath,
+    sha256: sha256File(manifestPath)
+  };
+}
+
 function writeViewerMotionSequence(dir, prefix, width, height, staticBias) {
   const positions = [4, 14, 14, 14, 14, 14];
   const paths = [];
@@ -880,7 +1051,9 @@ function writeViewerMotionSequence(dir, prefix, width, height, staticBias) {
 
   return {
     paths,
-    timestamps_ms: [0, 16.67, 33.33, 50, 66.67, 83.33]
+    timestamps_ms: [0, 16.67, 33.33, 50, 66.67, 83.33],
+    width,
+    height
   };
 }
 
@@ -1161,6 +1334,8 @@ function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence, trace) {
       base_png_path: pngPath,
       sequence_paths: sequence.paths,
       sequence_timestamps_ms: sequence.timestamps_ms,
+      frame_manifest_path: sequence.frameManifest?.path ?? "",
+      frame_manifest_sha256: sequence.frameManifest?.sha256 ?? "",
       trajectory_source_sha256: s03PressTrajectorySha256,
       mask_pack_sha256: sha256File(maskPath),
       mask_pack_path: maskPath,

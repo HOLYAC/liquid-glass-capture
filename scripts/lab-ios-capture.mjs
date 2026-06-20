@@ -30,6 +30,7 @@ function main() {
       manifest,
       out: args.out
     });
+    assertRawFlagSemantics();
     console.log(`${report.status.toUpperCase()} ${report.jsonPath ?? ""}`.trim());
     if (report.status !== "pass") process.exit(1);
     return;
@@ -45,6 +46,9 @@ function writeCapturePlan(request) {
   const baselineClass = request.repeat >= 300 ? "prod_p99" : request.repeat === 24 ? "sustained" : "mvl";
   const captureDurationMs = baselineClass === "sustained" ? 60_000 : 900;
   const cooldownMs = baselineClass === "sustained" ? 60_000 : 750;
+  const rawFramesEnabled = request.maxFidelity || request.captureRawFrames || request.captureRawPixels;
+  const rawPixelsEnabled = request.maxFidelity || request.captureRawPixels;
+  const maxFrames = request.maxFrames ?? (rawFramesEnabled ? 900 : 180);
   const sceneMetadata = metadataForGlassSceneState(request.scene, request.state);
   const metadata = {
     schemaVersion: "1.2.0",
@@ -56,8 +60,18 @@ function writeCapturePlan(request) {
     baselineClass,
     requiresNominalThermal: true,
     captureDurationMs,
-    cooldownMs
+    cooldownMs,
+    maxFrames,
+    maxFidelity: request.maxFidelity,
+    captureRawFrames: rawFramesEnabled,
+    captureRawPixels: rawPixelsEnabled
   };
+
+  const outputFlags = [];
+  if (request.maxFidelity) outputFlags.push("--max-fidelity");
+  if (rawFramesEnabled) outputFlags.push("--capture-raw-frames");
+  if (rawPixelsEnabled) outputFlags.push("--capture-raw-pixels");
+  const outputPathSuffix = outputFlags.length > 0 ? ` ${outputFlags.join(" ")}` : "";
 
   const plan = {
     schema_version: "1.2.0",
@@ -84,7 +98,7 @@ function writeCapturePlan(request) {
     metadata,
     output_contract: {
       manifest_kind: "repeat_capture_manifest",
-      use_after_capture: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --device-role ${request.deviceRole} --manifest <repeat-manifest.json>`,
+      use_after_capture: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --device-role ${request.deviceRole} --max-frames ${maxFrames}${outputPathSuffix} --manifest <repeat-manifest.json>`,
       baseline_command: `npm run metrics:baseline -- --ref-manifest <r0-repeat-manifest.json> --probe-manifest <r1-repeat-manifest.json> --class ${baselineClass} --repeat ${request.repeat} --out ./baselines/current.json`
     }
   };
@@ -111,6 +125,18 @@ function verifyManifest(request) {
   if ((manifest.repeat_count_observed ?? 0) < request.repeat) failures.push("REPEAT_COUNT_INCOMPLETE");
   if (!Array.isArray(manifest.artifact_json_paths) || manifest.artifact_json_paths.length < request.repeat) {
     failures.push("ARTIFACT_PATHS_INCOMPLETE");
+  }
+  const requestedRawFrames = request.maxFidelity || request.captureRawFrames || request.captureRawPixels;
+  const requestedRawPixels = request.maxFidelity || request.captureRawPixels;
+  if (request.maxFidelity && manifest.max_fidelity !== true) failures.push("MANIFEST_MAX_FIDELITY_MISSING");
+  if (requestedRawFrames) {
+    if (manifest.capture_raw_frames !== true) failures.push("MANIFEST_CAPTURE_RAW_FRAMES_MISSING");
+  }
+  if (requestedRawPixels) {
+    if (manifest.capture_raw_pixels !== true) failures.push("MANIFEST_CAPTURE_RAW_PIXELS_MISSING");
+  }
+  if (requestedRawFrames || requestedRawPixels) {
+    if (typeof manifest.max_frames !== "number" || manifest.max_frames <= 0) failures.push("MANIFEST_MAX_FRAMES_MISSING");
   }
 
   const report = {
@@ -150,6 +176,10 @@ function normalizeRequest(args) {
     capture: args.capture ?? "compositor",
     deviceRole: args.deviceRole ?? "mvl_primary",
     repeat: args.repeat ?? 50,
+    maxFidelity: Boolean(args.maxFidelity),
+    captureRawFrames: Boolean(args.captureRawFrames),
+    captureRawPixels: Boolean(args.captureRawPixels),
+    maxFrames: args.maxFrames ?? null,
     manifest: args.manifest,
     out: args.out
   };
@@ -162,6 +192,11 @@ function normalizeRequest(args) {
   if (!validCaptureKinds.has(request.capture)) throw new Error("Only --capture compositor is implemented");
   if (!validDeviceMatrixRoles.has(request.deviceRole)) throw new Error(`Unsupported --device-role: ${request.deviceRole}`);
   if (!Number.isFinite(request.repeat) || request.repeat < 1) throw new Error("--repeat must be a positive number");
+  if (request.maxFrames !== null) {
+    if (!Number.isFinite(request.maxFrames) || request.maxFrames < 1) {
+      throw new Error("--max-frames must be a positive number");
+    }
+  }
   return request;
 }
 
@@ -190,6 +225,88 @@ function writeSelfTestManifest() {
   return manifestPath;
 }
 
+function assertRawFlagSemantics() {
+  const dir = join(repoRoot, "artifacts", "lab-self-test", "ios-capture");
+  const base = {
+    rig: "R0",
+    scene: "S01_SEARCH",
+    state: "rest",
+    device: "physical",
+    capture: "compositor",
+    deviceRole: "mvl_primary",
+    repeat: 3,
+    manifest: undefined
+  };
+
+  const rawFramesPlan = writeCapturePlan({
+    ...base,
+    maxFidelity: false,
+    captureRawFrames: true,
+    captureRawPixels: false,
+    maxFrames: null,
+    out: join(dir, "raw-frames.plan.json")
+  });
+  assertPlan(rawFramesPlan, {
+    maxFidelity: false,
+    captureRawFrames: true,
+    captureRawPixels: false,
+    includes: ["--capture-raw-frames"],
+    excludes: ["--max-fidelity", "--capture-raw-pixels"]
+  });
+
+  const rawPixelsPlan = writeCapturePlan({
+    ...base,
+    maxFidelity: false,
+    captureRawFrames: false,
+    captureRawPixels: true,
+    maxFrames: null,
+    out: join(dir, "raw-pixels.plan.json")
+  });
+  assertPlan(rawPixelsPlan, {
+    maxFidelity: false,
+    captureRawFrames: true,
+    captureRawPixels: true,
+    includes: ["--capture-raw-frames", "--capture-raw-pixels"],
+    excludes: ["--max-fidelity"]
+  });
+
+  const maxFidelityPlan = writeCapturePlan({
+    ...base,
+    maxFidelity: true,
+    captureRawFrames: false,
+    captureRawPixels: false,
+    maxFrames: null,
+    out: join(dir, "max-fidelity.plan.json")
+  });
+  assertPlan(maxFidelityPlan, {
+    maxFidelity: true,
+    captureRawFrames: true,
+    captureRawPixels: true,
+    includes: ["--max-fidelity", "--capture-raw-frames", "--capture-raw-pixels"],
+    excludes: []
+  });
+}
+
+function assertPlan(plan, expected) {
+  const metadata = plan.metadata ?? {};
+  if (metadata.maxFidelity !== expected.maxFidelity) {
+    throw new Error("ios-capture raw flag self-test failed maxFidelity semantics");
+  }
+  if (metadata.captureRawFrames !== expected.captureRawFrames) {
+    throw new Error("ios-capture raw flag self-test failed captureRawFrames semantics");
+  }
+  if (metadata.captureRawPixels !== expected.captureRawPixels) {
+    throw new Error("ios-capture raw flag self-test failed captureRawPixels semantics");
+  }
+  const command = plan.output_contract?.use_after_capture ?? "";
+  for (const flag of expected.includes) {
+    if (!command.includes(flag)) throw new Error(`ios-capture plan command missing ${flag}`);
+  }
+  for (const flag of expected.excludes) {
+    if (command.includes(flag)) throw new Error(`ios-capture plan command should not include ${flag}`);
+  }
+}
+
 function parseArgs(args) {
   const parsed = {};
   for (let index = 0; index < args.length; index += 1) {
@@ -202,6 +319,12 @@ function parseArgs(args) {
     else if (arg === "--capture") parsed.capture = args[++index];
     else if (arg === "--device-role") parsed.deviceRole = args[++index];
     else if (arg === "--repeat") parsed.repeat = Number(args[++index]);
+    else if (arg === "--max-fidelity") parsed.maxFidelity = true;
+    else if (arg === "--capture-raw-frames") parsed.captureRawFrames = true;
+    else if (arg === "--capture-raw-pixels") parsed.captureRawPixels = true;
+    else if (arg === "--max-frames") {
+      parsed.maxFrames = Number(args[++index]);
+    }
     else if (arg === "--manifest") parsed.manifest = args[++index];
     else if (arg === "--out") parsed.out = args[++index];
     else throw new Error(`Unknown argument: ${arg}`);

@@ -368,11 +368,24 @@ export default function App() {
   const [deviceMatrixRole, setDeviceMatrixRole] = useState<DeviceMatrixRole>("mvl_primary");
   const [lastReferenceArtifact, setLastReferenceArtifact] = useState<string | null>(null);
   const [lastCandidateArtifact, setLastCandidateArtifact] = useState<string | null>(null);
+  const [maxFidelityCapture, setMaxFidelityCapture] = useState(true);
   const scene = useMemo(() => sceneSpecFor(sceneId), [sceneId]);
 
   const scenario = useMemo(
-    () => [rig, scene.sceneId, scene.stateId, scene.substrate, scene.shape, scene.phase, mode, interactive ? "interactive" : "static", tint, deviceMatrixRole].join("__"),
-    [rig, scene, mode, interactive, tint, deviceMatrixRole]
+    () => [
+      rig,
+      scene.sceneId,
+      scene.stateId,
+      scene.substrate,
+      scene.shape,
+      scene.phase,
+      mode,
+      interactive ? "interactive" : "static",
+      tint,
+      deviceMatrixRole,
+      maxFidelityCapture ? "maxfidelity" : "standard"
+    ].join("__"),
+    [rig, scene, mode, interactive, tint, deviceMatrixRole, maxFidelityCapture]
   );
 
   function applyScene(nextSceneId: SceneId) {
@@ -469,7 +482,10 @@ export default function App() {
           captureKind: "compositor",
           touchPhase: scene.touchPhase,
           nullQualification: scene.sceneId === "S00_NULL" ? "pass" : "fail",
-          maxFrames: 180,
+          maxFrames: maxFidelityCapture ? 900 : 180,
+          maxFidelity: maxFidelityCapture,
+          captureRawFrames: maxFidelityCapture,
+          captureRawPixels: maxFidelityCapture,
           appearance: "dark",
           deviceMatrixRole
         };
@@ -514,7 +530,10 @@ export default function App() {
       baselineClass,
       requiresNominalThermal: true,
       deviceMatrixRole,
-      maxFrames: baselineClass === "sustained" ? 900 : 90,
+      maxFidelity: maxFidelityCapture,
+      captureRawFrames: maxFidelityCapture,
+      captureRawPixels: maxFidelityCapture,
+      maxFrames: baselineClass === "sustained" || maxFidelityCapture ? 900 : 180,
       appearance: "dark"
     };
     addSceneMetadata(metadata, scene);
@@ -608,6 +627,7 @@ export default function App() {
               <Chip label="tint" value={tint} onPress={() => setTint(nextValue(tints, tint))} />
               <Chip label="interactive" value={String(interactive)} onPress={() => setInteractive((value) => !value)} />
               <Chip label="autoplay" value={String(autoplay)} onPress={() => setAutoplay((value) => !value)} />
+              <Chip label="max-fidelity" value={String(maxFidelityCapture)} onPress={() => setMaxFidelityCapture((value) => !value)} />
               <Chip label="repeat" value={String(repeatCount)} onPress={() => setRepeatCount(nextValue(repeatCounts, repeatCount))} />
               <Chip label="device" value={deviceMatrixRole} onPress={() => setDeviceMatrixRole(nextValue(deviceMatrixRoles, deviceMatrixRole))} />
               <Chip label="controls" value="hide" onPress={() => setControls(false)} />

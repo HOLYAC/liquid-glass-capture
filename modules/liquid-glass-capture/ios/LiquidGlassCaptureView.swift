@@ -599,6 +599,12 @@ public final class LiquidGlassCaptureView: ExpoView {
       ] as [String: Any]
     }
 
+    let maxFidelity = (metadata["maxFidelity"] as? Bool) == true
+    let captureRawPixels = maxFidelity || (metadata["captureRawPixels"] as? Bool) == true
+    let captureRawFrames = maxFidelity
+      || (metadata["captureRawFrames"] as? Bool) == true
+      || captureRawPixels
+
     var manifest: [String: Any] = [
       "schema_version": "1.2.0",
       "kind": "repeat_capture_manifest",
@@ -615,6 +621,10 @@ public final class LiquidGlassCaptureView: ExpoView {
       "repeat_count_observed": artifactJsonPaths.count,
       "capture_duration_ms": captureDurationMs,
       "cooldown_ms": cooldownMs,
+      "max_fidelity": maxFidelity,
+      "capture_raw_frames": captureRawFrames,
+      "capture_raw_pixels": captureRawPixels,
+      "max_frames": metadata["maxFrames"] as? Int ?? 0,
       "started_at_ns": "\(startedAtNs)",
       "finished_at_ns": "\(UInt64(Date().timeIntervalSince1970 * 1_000_000_000))",
       "thermal": [

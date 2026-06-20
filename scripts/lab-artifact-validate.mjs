@@ -44,6 +44,8 @@ function main() {
     assertPendingIntegrityRejected(artifact);
     assertCanonicalIntegrityTamperRejected(artifact);
     assertEnergyTraceHashRejected(artifact);
+    assertFrameManifestValidated(artifact);
+    assertFrameManifestRawHashMismatchRejected(artifact);
     console.log(`PASS ${artifact}`);
     return;
   }
@@ -206,6 +208,162 @@ function validateFramePack(errors, framePack, artifactDir, artifact) {
   }
   if (framePack.capture_timeline_sha256 !== undefined) {
     requireSha256(errors, "frame_pack.capture_timeline_sha256", framePack.capture_timeline_sha256);
+  }
+  if (framePack.frame_manifest_path !== undefined || framePack.frame_manifest_sha256 !== undefined) {
+    requireString(errors, "frame_pack.frame_manifest_path", framePack.frame_manifest_path);
+    requireSha256(errors, "frame_pack.frame_manifest_sha256", framePack.frame_manifest_sha256);
+  }
+  if (framePack.frame_manifest_path !== undefined && framePack.frame_manifest_sha256 !== undefined) {
+    verifyPathHash(
+      errors,
+      artifactDir,
+      "frame_pack.frame_manifest",
+      framePack.frame_manifest_path,
+      framePack.frame_manifest_sha256
+    );
+    validateFrameManifest(errors, artifactDir, framePack);
+  }
+}
+
+function validateFrameManifest(errors, artifactDir, framePack) {
+  if (!framePack?.frame_manifest_path) {
+    return;
+  }
+  const frameManifestPath = isAbsolute(framePack.frame_manifest_path)
+    ? framePack.frame_manifest_path
+    : resolve(artifactDir, framePack.frame_manifest_path);
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(frameManifestPath, "utf8"));
+  } catch (error) {
+    errors.push(`frame_pack.frame_manifest JSON invalid: ${error.message}`);
+    return;
+  }
+
+  if (!manifest || typeof manifest !== "object") {
+    errors.push("frame_pack.frame_manifest must be an object");
+    return;
+  }
+  requireString(errors, "frame_pack.frame_manifest.schema_version", manifest.schema_version);
+  requireNumber(errors, "frame_pack.frame_manifest.frame_count", manifest.frame_count);
+  if (!Array.isArray(manifest.frames)) {
+    errors.push("frame_pack.frame_manifest.frames must be an array");
+    return;
+  }
+  if (manifest.frame_count !== manifest.frames.length) {
+    errors.push(`frame_pack.frame_manifest.frame_count (${manifest.frame_count}) does not match frames length (${manifest.frames.length})`);
+  }
+  for (const frame of manifest.frames) {
+    if (!frame || typeof frame !== "object") {
+      errors.push("frame_pack.frame_manifest.frames must contain only objects");
+      continue;
+    }
+    requireNumber(errors, "frame_pack.frame_manifest.frames[].index", frame.index);
+    requireString(errors, "frame_pack.frame_manifest.frames[].png", frame.png);
+    requireString(errors, "frame_pack.frame_manifest.frames[].sha256", frame.sha256);
+    if (frame.raw === undefined) {
+      errors.push("frame_pack.frame_manifest.frames[].raw is required when frame manifest is present");
+    }
+    if (frame.raw !== undefined) {
+      if (!frame.raw || typeof frame.raw !== "object") {
+        errors.push("frame_pack.frame_manifest.frames[].raw must be an object when present");
+        continue;
+      }
+      const raw = frame.raw;
+      requireString(errors, "frame_pack.frame_manifest.frames[].raw.path", raw.path);
+      requireString(errors, "frame_pack.frame_manifest.frames[].raw.format", raw.format);
+      if (raw.colorSpace !== undefined) {
+        requireString(errors, "frame_pack.frame_manifest.frames[].raw.colorSpace", raw.colorSpace);
+      }
+      requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.width", raw.width);
+      requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.height", raw.height);
+      requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.bytesPerRow", raw.bytesPerRow);
+      requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.byteCount", raw.byteCount);
+      requireSha256(errors, "frame_pack.frame_manifest.frames[].raw.sha256", raw.sha256);
+      if (raw.path) {
+        verifyPathHash(
+          errors,
+          artifactDir,
+          "frame_pack.frame_manifest.frames[].raw.path",
+          raw.path,
+          raw.sha256
+        );
+      }
+      if (raw.sourceFormat !== undefined) {
+        requireString(errors, "frame_pack.frame_manifest.frames[].raw.sourceFormat", raw.sourceFormat);
+      }
+      if (raw.display !== undefined) {
+        if (!raw.display || typeof raw.display !== "object") {
+          errors.push("frame_pack.frame_manifest.frames[].raw.display must be an object when present");
+          continue;
+        }
+        requireString(errors, "frame_pack.frame_manifest.frames[].raw.display.path", raw.display.path);
+        requireString(errors, "frame_pack.frame_manifest.frames[].raw.display.format", raw.display.format);
+        if (raw.display.colorSpace !== undefined) {
+          requireString(errors, "frame_pack.frame_manifest.frames[].raw.display.colorSpace", raw.display.colorSpace);
+        }
+        requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.display.width", raw.display.width);
+        requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.display.height", raw.display.height);
+        requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.display.bytesPerRow", raw.display.bytesPerRow);
+        requireNumber(errors, "frame_pack.frame_manifest.frames[].raw.display.byteCount", raw.display.byteCount);
+        requireSha256(errors, "frame_pack.frame_manifest.frames[].raw.display.sha256", raw.display.sha256);
+        if (raw.display.path) {
+          verifyPathHash(
+            errors,
+            artifactDir,
+            "frame_pack.frame_manifest.frames[].raw.display.path",
+            raw.display.path,
+            raw.display.sha256
+          );
+        }
+      }
+      if (raw.source_planes !== undefined) {
+        if (!Array.isArray(raw.source_planes)) {
+          errors.push("frame_pack.frame_manifest.frames[].raw.source_planes must be an array when present");
+          continue;
+        }
+        const sourcePlanes = raw.source_planes;
+        for (const [index, plane] of sourcePlanes.entries()) {
+          if (!plane || typeof plane !== "object") {
+            errors.push("frame_pack.frame_manifest.frames[].raw.source_planes must contain only objects");
+            continue;
+          }
+          requireNumber(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].index`, plane.index);
+          requireString(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].format`, plane.format);
+          requireNumber(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].width`, plane.width);
+          requireNumber(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].height`, plane.height);
+          requireNumber(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].bytesPerRow`, plane.bytesPerRow);
+          requireNumber(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].byteCount`, plane.byteCount);
+          requireNumber(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].byteOffset`, plane.byteOffset);
+          requireSha256(errors, `frame_pack.frame_manifest.frames[].raw.source_planes[${index}].sha256`, plane.sha256);
+        }
+        if (sourcePlanes.length > 0) {
+          sourcePlanes
+            .slice()
+            .sort((left, right) => Number(left.index ?? 0) - Number(right.index ?? 0))
+            .reduce((cursor, plane) => {
+              const expectedOffset = Number.isFinite(cursor) ? cursor : 0;
+              const planeOffset = Number(plane.byteOffset ?? -1);
+              const planeSize = Number(plane.byteCount ?? -1);
+              if (planeOffset !== expectedOffset) {
+                errors.push(
+                  `frame_pack.frame_manifest.frames[].raw.source_planes.byteOffset sequence mismatch: expected ${expectedOffset}, got ${planeOffset}`
+                );
+              }
+              if (planeSize > 0 && planeOffset >= 0) {
+                return planeOffset + planeSize;
+              }
+              return cursor;
+            }, 0);
+          const totalPlaneBytes = sourcePlanes.reduce((sum, plane) => sum + Number(plane.byteCount || 0), 0);
+          if (raw.byteCount !== totalPlaneBytes) {
+            errors.push(
+              `frame_pack.frame_manifest.frames[].raw.byteCount (${raw.byteCount}) does not equal sum(raw.source_planes.byteCount) (${totalPlaneBytes})`
+            );
+          }
+        }
+      }
+    }
   }
 }
 
@@ -418,19 +576,84 @@ function writeSelfTestArtifact() {
   writePng(pngPath, width, height, pixels);
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const tracePath = join(dir, "power.trace.json");
+  const frameManifestPath = join(dir, "frame_manifest.json");
+  const rawPath = join(dir, "frame_000000.source.raw");
+  const displayPath = join(dir, "frame_000000.display.rgba");
+  const rawData = Buffer.from(pixels);
+  const displayData = Buffer.from(pixels);
+  writeFileSync(rawPath, rawData);
+  writeFileSync(displayPath, displayData);
+
+  writeFileSync(
+    frameManifestPath,
+    JSON.stringify(
+      {
+        schema_version: "1.0.0",
+        frame_count: 1,
+        frames: [
+          {
+            index: 0,
+            ptsSeconds: 0,
+            png: pngPath,
+            sha256: sha256File(pngPath),
+            width,
+            height,
+            raw: {
+              path: rawPath,
+              format: "kCVPixelFormatType_32RGBA",
+              sourceFormat: "kCVPixelFormatType_32RGBA",
+              width,
+              height,
+              bytesPerRow: width * 4,
+              byteCount: rawData.length,
+              sha256: sha256File(rawPath),
+              source_planes: [
+                {
+                  index: 0,
+                  format: "RGBA",
+                  width,
+                  height,
+                  bytesPerRow: width * 4,
+                  byteCount: rawData.length,
+                  byteOffset: 0,
+                  sha256: sha256File(rawPath)
+                }
+              ],
+              display: {
+                path: displayPath,
+                format: "kCVPixelFormatType_32RGBA",
+                width,
+                height,
+                bytesPerRow: width * 4,
+                byteCount: displayData.length,
+                sha256: sha256File(displayPath)
+              }
+            }
+          }
+        ]
+      },
+      null,
+      2
+    )
+  );
   writeFileSync(tracePath, `${JSON.stringify({
     tool: "instruments_power_profiler",
     sample_count: 2,
     average_power_mw: 118.5
   }, null, 2)}\n`);
   const artifactPath = join(dir, "native.capture.json");
-  const artifact = makeSelfTestArtifact(pngPath, maskPath, tracePath);
+  const artifact = makeSelfTestArtifact({
+    pngPath,
+    maskPath,
+    tracePath,
+    frameManifestPath
+  });
   finalizeCaptureArtifactIntegrity(artifact);
   writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
   return artifactPath;
 }
 
-function makeSelfTestArtifact(pngPath, maskPath, tracePath) {
+function makeSelfTestArtifact({ pngPath, maskPath, tracePath, frameManifestPath }) {
   return {
     schema_version: "1.2.0",
     id: "self-test-native-s00",
@@ -481,6 +704,8 @@ function makeSelfTestArtifact(pngPath, maskPath, tracePath) {
       base_png_path: pngPath,
       mask_pack_sha256: sha256File(maskPath),
       mask_pack_path: maskPath,
+      frame_manifest_path: frameManifestPath,
+      frame_manifest_sha256: sha256File(frameManifestPath),
       touch_phase: "rest",
       animation_t: 0,
       capture_timeline_pack_id: "glass_capture_timeline_pack_v1",
@@ -539,6 +764,33 @@ function assertEnergyTraceHashRejected(artifactPath) {
   const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
   if (!errors.some((error) => error.includes("energy.trace_sha256 mismatch"))) {
     throw new Error("artifact validator self-test failed to reject energy trace hash mismatch");
+  }
+}
+
+function assertFrameManifestValidated(artifactPath) {
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
+  if (!Array.isArray(errors) || errors.length !== 0) {
+    throw new Error("artifact validator self-test failed to validate generated frame manifest");
+  }
+}
+
+function assertFrameManifestRawHashMismatchRejected(artifactPath) {
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  const manifestPath = resolve(dirname(artifactPath), artifact.frame_pack.frame_manifest_path);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const frame = manifest.frames[0];
+  frame.raw.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+  const badManifestPath = join(dirname(manifestPath), "frame_manifest_bad_raw.json");
+  writeFileSync(
+    badManifestPath,
+    JSON.stringify(manifest, null, 2)
+  );
+  artifact.frame_pack.frame_manifest_path = badManifestPath;
+  artifact.frame_pack.frame_manifest_sha256 = sha256File(badManifestPath);
+  const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
+  if (!errors.some((error) => error.includes("frame_pack.frame_manifest.frames[].raw.path_sha256 mismatch"))) {
+    throw new Error("artifact validator self-test failed to reject frame manifest raw hash mismatch");
   }
 }
 

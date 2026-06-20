@@ -75,6 +75,7 @@ function assertInspectViewerContract(path) {
   for (const required of [
     'id="energy-trace-panel"',
     'id="energy-trace-link"',
+    'id="frame-manifest-panel"',
     'id="mask-overlay"',
     ...requiredGlassMaskIds,
     "instruments_power_profiler",

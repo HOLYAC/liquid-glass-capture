@@ -54,6 +54,56 @@ export type IdentifiabilityTag =
 
 export type CaptureKind = "compositor" | "framebuffer" | "layer_snapshot";
 
+export type RawPlaneManifest = {
+  index: number;
+  format: string;
+  width: number;
+  height: number;
+  bytesPerRow: number;
+  byteCount: number;
+  byteOffset: number;
+  sha256: string;
+};
+
+export type RawDisplayManifest = {
+  path: string;
+  format: string;
+  colorSpace?: string;
+  width: number;
+  height: number;
+  bytesPerRow: number;
+  byteCount: number;
+  sha256: string;
+};
+
+export type RawFrameManifest = {
+  path: string;
+  format: string;
+  colorSpace?: string;
+  width: number;
+  height: number;
+  bytesPerRow: number;
+  byteCount: number;
+  sha256: string;
+  sourceFormat?: string;
+  source_planes?: RawPlaneManifest[];
+  display?: RawDisplayManifest;
+};
+
+export type FrameManifest = {
+  schema_version: string;
+  frame_count: number;
+  frames: Array<{
+    index: number;
+    ptsSeconds?: number;
+    png: string;
+    sha256: string;
+    width: number;
+    height: number;
+    raw?: RawFrameManifest;
+  }>;
+};
+
 export type ShaderPipeline =
   | "uniform_calibration"
   | "baked_verdict"
@@ -125,6 +175,9 @@ export interface CaptureArtifact {
     sequence_timestamps_ms?: number[];
     mask_pack_sha256: string;
     mask_pack_path: string;
+    frame_manifest?: FrameManifest;
+    frame_manifest_path?: string;
+    frame_manifest_sha256?: string;
     touch_phase: TouchPhase;
     animation_t: number;
     sustained_duration_ms?: number;
