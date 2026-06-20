@@ -51,6 +51,7 @@ function normalizeRequest(args) {
     bootstrap: Boolean(args.bootstrap),
     skipDeviceCheck: Boolean(args.skipDeviceCheck),
     skipVerify: Boolean(args.skipVerify),
+    minStartedAtNs: args.minStartedAtNs ?? null,
     waitMs,
     pollMs,
     udid: args.udid ?? null,
@@ -101,7 +102,8 @@ function isRetryableReport(value) {
   if (failed.length === 0) return false;
   return failed.every((check) =>
     check.name === "connected_ios_device" ||
-    check.name === "pull_liquid_glass_captures"
+    check.name === "pull_liquid_glass_captures" ||
+    check.evidence?.retryable === true
   );
 }
 
@@ -315,13 +317,16 @@ function runProofDoctor(request) {
   const result = spawnSync(process.execPath, [
     join(repoRoot, "scripts", "lab-proof-doctor.mjs"),
     "--capture-root",
-    request.outRoot
+    request.outRoot,
+    ...minStartedAtArgs(request.minStartedAtNs)
   ], {
     cwd: repoRoot,
     encoding: "utf8"
   });
   if (result.status !== 0) {
-    return commandFailure("verify_pulled_capture", "proof:doctor rejected the pulled capture", result);
+    return commandFailure("verify_pulled_capture", "proof:doctor rejected the pulled capture", result, {
+      retryable: proofDoctorRejectedOnlyStaleCapture()
+    });
   }
   return {
     name: "verify_pulled_capture",
@@ -332,6 +337,21 @@ function runProofDoctor(request) {
       stderr_tail: tailLines(result.stderr)
     }
   };
+}
+
+function minStartedAtArgs(value) {
+  return value == null ? [] : ["--min-started-at-ns", value.toString()];
+}
+
+function proofDoctorRejectedOnlyStaleCapture() {
+  const verifyPath = join(repoRoot, "artifacts", "proof-doctor", "ios-max-fidelity-proof.verify.json");
+  try {
+    const report = JSON.parse(readFileSync(verifyPath, "utf8"));
+    const failures = Array.isArray(report.failures) ? report.failures : [];
+    return failures.length > 0 && failures.every((failure) => failure === "MANIFEST_NOT_FRESH_FOR_PROOF_RUN");
+  } catch {
+    return false;
+  }
 }
 
 function report(status, request, checks) {
@@ -480,6 +500,7 @@ function parseArgs(argv) {
     else if (token === "--wait") args.waitMs = defaultWaitMs;
     else if (token === "--wait-ms") args.waitMs = Number(readNext(argv, ++index, token));
     else if (token === "--poll-ms") args.pollMs = Number(readNext(argv, ++index, token));
+    else if (token === "--min-started-at-ns") args.minStartedAtNs = BigInt(readNext(argv, ++index, token));
     else if (token === "--tool") args.tool = readNext(argv, ++index, token);
     else if (token === "--bundle-id") args.bundleId = readNext(argv, ++index, token);
     else if (token === "--remote") args.remotePath = readNext(argv, ++index, token);

@@ -82,7 +82,8 @@ Steps:
 gh workflow run build-unsigned-ios-ipa.yml --ref <branch>
 ```
 
-4. Prepare the launch packet for the current branch:
+4. Prepare the launch packet for the current branch, or use the full proof
+   runner from the raw-capture section below:
 
 ```bash
 npm run proof:prepare
@@ -120,7 +121,20 @@ Then scan the QR code with that development client.
 Use this first. It is the shortest end-to-end proof that the installed iPhone
 app can produce the raw pixel evidence this lab was built for.
 
-1. Prepare the launch packet:
+1. Preferred one-command route:
+
+```bash
+npm run proof:run
+```
+
+This refreshes the current-head launch packet, prints the IPA path, starts a
+freshness-locked USB wait, rejects older captures from before this run, pulls
+`Documents/LiquidGlassCaptures`, and verifies the result. After the command
+prints `INSTALL ...`, sideload that IPA, open **Liquid Glass Capture**, press
+`B`, keep the iPhone unlocked/trusted over USB, and wait for
+`PASS_VERIFIED_CAPTURE`.
+
+2. Manual route: prepare the launch packet:
 
 ```bash
 npm run proof:prepare
@@ -132,10 +146,10 @@ defaults, and one-repeat proof plan agree. The report lives at
 paths for that specific build are written to
 `./artifacts/proof-doctor/PHONE_HANDOFF.md`.
 
-2. Sideload `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa`, then
+3. Sideload `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa`, then
    open **Liquid Glass Capture** on the iPhone.
 
-3. The app opens with the proof defaults:
+4. The app opens with the proof defaults:
 
 ```text
 scene=S01_SEARCH
@@ -149,7 +163,7 @@ Press `B`. The status line prints the generated repeat-manifest path. If you
 changed the app state earlier, press `2` to show controls and restore those
 values before pressing `B`.
 
-4. Preferred USB pull: start the waiting command, then connect the iPhone,
+5. Lower-level USB pull: start the waiting command, then connect the iPhone,
    unlock it, tap **Trust This Computer**, and let the command pull the app
    Documents folder and verify it:
 
@@ -160,9 +174,10 @@ npm run phone:wait
 This installs `pymobiledevice3` into `./artifacts/tooling/` if missing, waits
 up to 15 minutes for a trusted USB iPhone, pulls `Documents/LiquidGlassCaptures`
 from bundle id `com.zaeba.liquidglasscapture` into `./artifacts/iphone/`, then
-runs `proof:doctor`.
+runs `proof:doctor`. Prefer `proof:run` when starting a fresh capture because it
+passes a freshness timestamp and will not accept older copied captures.
 
-5. Manual fallback: start the watcher, then copy the app Documents folder into
+6. Manual fallback: start the watcher, then copy the app Documents folder into
    this repo under `./artifacts/iphone/`:
 
 ```bash
@@ -177,7 +192,7 @@ npm run proof:watch
    `LiquidGlassCaptures`. `proof:watch` waits up to 15 minutes and continues
    verification as soon as the folder appears.
 
-6. Verify the newest copied manifest. The command finds the latest
+7. Verify the newest copied manifest. The command finds the latest
    `LiquidGlassCaptures/Series/*.repeat-manifest.json` by the manifest's
    `finished_at_ns` / `started_at_ns`, then follows its sibling
    `../Sessions/...` artifact paths:
@@ -192,7 +207,7 @@ and checked their SHA-256 hashes. A missing raw file or hash mismatch is a
 failure. On pass, the command also prints an `INSPECT ...` line for the newest
 capture.
 
-7. Open the capture with the printed command, or read `next.inspect` from
+8. Open the capture with the printed command, or read `next.inspect` from
    `./artifacts/proof-doctor/proof-doctor.report.json`. It has this shape:
 
 ```bash

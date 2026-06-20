@@ -154,6 +154,7 @@ function verifyManifest(request) {
     .filter((value) => typeof value === "string" && value.length > 0)
     .map((value) => resolveMaybe(manifestDir, value));
   const latestArtifactJsonPath = resolvedArtifactJsonPaths.at(-1) ?? null;
+  const minStartedAtNs = request.minStartedAtNs ?? null;
   const failures = [];
   if (manifest.kind !== "repeat_capture_manifest") failures.push("MANIFEST_KIND_NOT_REPEAT_CAPTURE");
   if (manifest.rig_id !== request.rig) failures.push("RIG_MISMATCH");
@@ -164,6 +165,14 @@ function verifyManifest(request) {
   if ((manifest.repeat_count_observed ?? 0) < request.repeat) failures.push("REPEAT_COUNT_INCOMPLETE");
   if (!Array.isArray(manifest.artifact_json_paths) || manifest.artifact_json_paths.length < request.repeat) {
     failures.push("ARTIFACT_PATHS_INCOMPLETE");
+  }
+  if (minStartedAtNs !== null) {
+    const manifestTime = manifestFreshnessKey(manifest);
+    if (manifestTime === null) {
+      failures.push("MANIFEST_FRESHNESS_TIMESTAMP_MISSING");
+    } else if (manifestTime < minStartedAtNs) {
+      failures.push("MANIFEST_NOT_FRESH_FOR_PROOF_RUN");
+    }
   }
   const requestedRawFrames = request.maxFidelity || request.captureRawFrames || request.captureRawPixels;
   const requestedRawPixels = request.maxFidelity || request.captureRawPixels;
@@ -198,7 +207,8 @@ function verifyManifest(request) {
       state_id: request.state,
       capture_kind: request.capture,
       device_matrix_role: request.deviceRole,
-      repeat_count_requested: request.repeat
+      repeat_count_requested: request.repeat,
+      min_started_at_ns: minStartedAtNs === null ? null : minStartedAtNs.toString()
     },
     observed: {
       repeat_count_observed: manifest.repeat_count_observed ?? 0,
@@ -357,6 +367,7 @@ function normalizeRequest(args) {
     captureRawFrames: Boolean(args.captureRawFrames),
     captureRawPixels: Boolean(args.captureRawPixels),
     maxFrames: args.maxFrames ?? null,
+    minStartedAtNs: args.minStartedAtNs ?? null,
     manifest: args.manifest ?? (captureRoot ? findLatestRepeatManifest(captureRoot) : undefined),
     captureRoot,
     out: args.out
@@ -374,6 +385,9 @@ function normalizeRequest(args) {
     if (!Number.isFinite(request.maxFrames) || request.maxFrames < 1) {
       throw new Error("--max-frames must be a positive number");
     }
+  }
+  if (request.minStartedAtNs !== null && request.minStartedAtNs < 0n) {
+    throw new Error("--min-started-at-ns must be a non-negative integer");
   }
   return request;
 }
@@ -403,13 +417,20 @@ function findLatestRepeatManifest(captureRoot) {
 function repeatManifestOrderKey(path) {
   try {
     const manifest = JSON.parse(readFileSync(path, "utf8"));
-    const raw = manifest.finished_at_ns ?? manifest.started_at_ns;
-    if (typeof raw === "string" && /^\d+$/.test(raw)) return BigInt(raw);
-    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return BigInt(Math.round(raw));
+    const key = manifestFreshnessKey(manifest);
+    if (key !== null) return key;
   } catch {
     // Fall back to filesystem mtime below.
   }
   return BigInt(Math.round(statSync(path).mtimeMs * 1_000_000));
+}
+
+function manifestFreshnessKey(manifest) {
+  const raw = manifest?.finished_at_ns ?? manifest?.started_at_ns;
+  if (typeof raw === "bigint" && raw >= 0n) return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw)) return BigInt(raw);
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return BigInt(Math.round(raw));
+  return null;
 }
 
 function shellQuote(value) {
@@ -562,6 +583,8 @@ function assertRawManifestVerification() {
     repeat_count_requested: 1,
     repeat_count_observed: 1,
     artifact_json_paths: ["a.capture.json"],
+    started_at_ns: "100",
+    finished_at_ns: "200",
     max_fidelity: false,
     capture_raw_frames: true,
     capture_raw_pixels: true,
@@ -579,6 +602,7 @@ function assertRawManifestVerification() {
     captureRawFrames: false,
     captureRawPixels: true,
     maxFrames: 1,
+    minStartedAtNs: null,
     manifest: repeatManifestPath
   };
   const passReport = verifyManifest(baseRequest);
@@ -587,6 +611,20 @@ function assertRawManifestVerification() {
   }
   if (passReport.capture_count !== 1) {
     throw new Error("ios-capture raw manifest self-test failed to report capture_count");
+  }
+  const freshReport = verifyManifest({
+    ...baseRequest,
+    minStartedAtNs: 150n
+  });
+  if (freshReport.status !== "pass") {
+    throw new Error(`ios-capture raw manifest freshness self-test should pass: ${freshReport.failures.join(", ")}`);
+  }
+  const staleReport = verifyManifest({
+    ...baseRequest,
+    minStartedAtNs: 201n
+  });
+  if (staleReport.status !== "fail" || !staleReport.failures.includes("MANIFEST_NOT_FRESH_FOR_PROOF_RUN")) {
+    throw new Error("ios-capture raw manifest self-test failed to reject stale proof-run manifest");
   }
 
   const badFrameManifestPath = join(dir, "frame_manifest_missing_display.json");
@@ -733,6 +771,7 @@ function assertCaptureRootDiscovery() {
     captureRawFrames: false,
     captureRawPixels: false,
     maxFrames: 1,
+    minStartedAtNs: null,
     captureRoot: root
   });
   if (request.manifest !== latestManifestPath) {
@@ -808,6 +847,7 @@ function parseArgs(args) {
     else if (arg === "--max-frames") {
       parsed.maxFrames = Number(args[++index]);
     }
+    else if (arg === "--min-started-at-ns") parsed.minStartedAtNs = BigInt(args[++index]);
     else if (arg === "--manifest") parsed.manifest = args[++index];
     else if (arg === "--capture-root") parsed.captureRoot = args[++index];
     else if (arg === "--out") parsed.out = args[++index];
