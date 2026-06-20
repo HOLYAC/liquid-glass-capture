@@ -140,6 +140,7 @@ npm run ci:glass -- --out ./artifacts/ci/glass-gate.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
 npm run glass:diff -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/viewer/r0-r1.diff.html
+npm run glass:explain -- --verdict ./artifacts/g8-verdict.report.json --out ./artifacts/viewer/g8.explain.json
 npm run lab:self-test
 ```
 
@@ -159,7 +160,7 @@ G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
 Scene Contract: fixed background, geometry, and capture timeline packs for every scene/state
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
-Viewer: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
+Viewer/DX: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, mask overlay, temporal phase plot, frame-budget timeline, gate-local failure-chain explain, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
 ```
 
 Current scene-contract scope locks a fixed background pack, a
