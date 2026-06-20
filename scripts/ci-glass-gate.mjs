@@ -136,6 +136,7 @@ function isGlassAffectingPath(file) {
     path.startsWith("packages/color-pipeline/") ||
     path.startsWith("packages/metric-stack/") ||
     path.startsWith("packages/energy-stack/") ||
+    path.startsWith("packages/solver/") ||
     path.startsWith("packages/review-stack/") ||
     path.startsWith("packages/verdict-stack/") ||
     path.startsWith("scripts/lab-") ||

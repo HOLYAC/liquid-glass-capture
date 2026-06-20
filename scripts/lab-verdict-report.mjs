@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { readCaptureArtifact } from "./lib/lab-artifact.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
+import { buildSolverReport } from "../packages/solver/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
 import { makePassingPacket } from "./lab-review-packet.mjs";
 
@@ -27,7 +28,7 @@ function main() {
   }
 
   if (!args.candidate || args.gates.length === 0) {
-    console.error("usage: node scripts/lab-verdict-report.mjs --candidate <capture.json> --gate <g2.json> ... [--review <g7.json>] [--baseline <baseline.json>] [--out report.json]");
+    console.error("usage: node scripts/lab-verdict-report.mjs --candidate <capture.json> --gate <g2.json> ... [--solver <solver.json>] [--review <g7.json>] [--baseline <baseline.json>] [--out report.json]");
     console.error("       node scripts/lab-verdict-report.mjs --self-test [--out report.json]");
     process.exit(2);
   }
@@ -44,11 +45,13 @@ function buildReportFromFiles(args) {
     allowLayerSnapshot: true
   });
   const gateReports = args.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
+  const solverReport = args.solver ? JSON.parse(readFileSync(resolve(args.solver), "utf8")) : undefined;
   const reviewReport = args.review ? JSON.parse(readFileSync(resolve(args.review), "utf8")) : undefined;
   const baselineReport = args.baseline ? JSON.parse(readFileSync(resolve(args.baseline), "utf8")) : undefined;
   return buildVerdictReport({
     candidateRecord,
     gateReports,
+    solverReport,
     reviewReport,
     baselineReport,
     preflightFailures: candidateRecord.preflight_failures
@@ -75,10 +78,13 @@ function writeSelfTestFixture(outPath) {
   const reviewReport = evaluateReviewPacket(reviewPacket);
   const review = join(dir, "g7-review.report.json");
   writeFileSync(review, `${JSON.stringify(reviewReport, null, 2)}\n`);
+  const solver = join(dir, "solver.pareto.report.json");
+  writeFileSync(solver, `${JSON.stringify(makeSolverReport(), null, 2)}\n`);
 
   return {
     candidate,
     gates,
+    solver,
     review,
     out: outPath ? resolve(outPath) : join(dir, "g8-verdict.report.json")
   };
@@ -147,6 +153,7 @@ function makeCandidateArtifact(pngPath, maskPath) {
     },
     shader: {
       pipeline: "baked_verdict",
+      solver_candidate_id: "self-test-c1-g8-verdict",
       baked_shader_hash: "self-test",
       identifiability: {
         blur_radius: "MEASURED",
@@ -171,6 +178,48 @@ function makeCandidateArtifact(pngPath, maskPath) {
   };
 }
 
+function makeSolverReport() {
+  return buildSolverReport({
+    candidates: [
+      {
+        schema_version: "1.2.0",
+        kind: "solver_candidate",
+        id: "self-test-c1-g8-verdict",
+        rig_id: "C1",
+        parameters: {
+          blur_radius: 18,
+          tint: 0.12
+        },
+        parameter_evidence: {
+          blur_radius: {
+            local_sensitivity: 0.12,
+            confidence: 0.95,
+            normalized_interval_width: 0.08
+          },
+          tint: {
+            local_sensitivity: 0.04,
+            confidence: 0.72,
+            normalized_interval_width: 0.32
+          }
+        },
+        objectives: {
+          runtime_cost_ms: 12.1,
+          energy_cost: 1.9
+        },
+        background_sweep: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_HF"].map((sceneId, index) => ({
+          scene_id: sceneId,
+          background_id: `${sceneId.toLowerCase()}_g8_self_test`,
+          metrics: {
+            static_loss: 0.008 + index * 0.0005,
+            optics_loss: 0.010 + index * 0.0005,
+            temporal_loss: 0.003
+          }
+        }))
+      }
+    ]
+  });
+}
+
 function makeGateReport(gate) {
   return {
     schema_version: "1.2.0",
@@ -185,6 +234,12 @@ function makeGateReport(gate) {
 function assertVerdictGuardRails(fixture, passReport) {
   if (passReport.technical_class !== "SHADER_PASS" || passReport.verdict_class !== "PROD_PASS") {
     throw new Error("G8 guardrail failed: positive self-test did not produce SHADER_PASS + PROD_PASS");
+  }
+  if (passReport.solver?.selected_candidate_id !== "self-test-c1-g8-verdict") {
+    throw new Error("G8 guardrail failed: solver selected candidate missing from verdict");
+  }
+  if (!passReport.claim_constraints.some((constraint) => constraint.parameter === "tint" && constraint.parameter_level_match_claim === "forbidden")) {
+    throw new Error("G8 guardrail failed: solver claim constraints missing from verdict");
   }
 
   const gateReports = fixture.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
@@ -247,6 +302,7 @@ function parseArgs(args) {
     if (arg === "--self-test") parsed.selfTest = true;
     else if (arg === "--candidate") parsed.candidate = args[++index];
     else if (arg === "--gate") parsed.gates.push(args[++index]);
+    else if (arg === "--solver") parsed.solver = args[++index];
     else if (arg === "--review") parsed.review = args[++index];
     else if (arg === "--baseline") parsed.baseline = args[++index];
     else if (arg === "--out") parsed.out = args[++index];

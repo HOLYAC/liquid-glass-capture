@@ -50,6 +50,9 @@ export function renderInspectViewer(inputPath) {
   if (json.kind === "g8_verdict_report") {
     return renderVerdictViewer(absolute, json);
   }
+  if (json.kind === "solver_pareto_report") {
+    return renderSolverViewer(absolute, json);
+  }
 
   const record = readCaptureArtifact(absolute, {
     allowInvalid: true,
@@ -234,10 +237,47 @@ function renderVerdictViewer(path, report) {
     ])),
     section("Gates", table(objectRows(report.gates ?? {}))),
     section("Device", table(objectRows(report.device ?? {}))),
+    section("Solver", table(objectRows(report.solver ?? { status: "not_recorded" }))),
     section("Identifiability", table(objectRows(report.identifiability ?? { status: "not_recorded" }))),
+    section("Claim Constraints", table((report.claim_constraints ?? []).map((constraint) => [
+      constraint.parameter,
+      `${constraint.tag}: ${constraint.allowed_claim}`
+    ]))),
     section("Baseline", table(objectRows(report.baseline ?? { status: "not_recorded" }))),
     section("Blockers", table((report.blockers ?? []).map((blocker, index) => [index, blocker]))),
     section("Raw Verdict", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
+  ]);
+}
+
+function renderSolverViewer(path, report) {
+  return page("Solver Inspect", [
+    hero("Solver Inspect", report.selected_candidate?.id ?? relative(repoRoot, path), [
+      statusPill("solver", report.status ?? "unknown"),
+      statusPill("pareto", String(report.pareto_front?.length ?? 0)),
+      statusPill("candidates", String(report.candidate_count ?? 0))
+    ]),
+    section("Selection", table([
+      ["status", report.status],
+      ["selected_candidate", report.selected_candidate?.id ?? ""],
+      ["candidate_count", report.candidate_count ?? 0],
+      ["pareto_count", report.pareto_front?.length ?? 0],
+      ["source", relative(repoRoot, path)]
+    ])),
+    section("Background Sweep", table([
+      ["required_scene_ids", (report.background_sweep?.required_scene_ids ?? []).join(", ")],
+      ["observed_scene_ids", (report.background_sweep?.observed_scene_ids ?? []).join(", ")]
+    ])),
+    section("Pareto Front", table((report.pareto_front ?? []).map((candidate) => [
+      candidate.id,
+      JSON.stringify(candidate.objectives)
+    ]))),
+    section("Identifiability", table(objectRows(report.parameter_identifiability ?? { status: "not_recorded" }))),
+    section("Claim Constraints", table((report.claim_constraints ?? []).map((constraint) => [
+      constraint.parameter,
+      `${constraint.tag}: ${constraint.allowed_claim}`
+    ]))),
+    section("Failures", table((report.failures ?? []).map((failure, index) => [index, failure]))),
+    section("Raw Solver Report", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
 }
 

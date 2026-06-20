@@ -1,6 +1,6 @@
 const requiredTechnicalGates = ["G2", "G3", "G4", "G5", "G6"];
 
-export function buildVerdictReport({ candidateRecord, gateReports = [], reviewReport, baselineReport, preflightFailures = [] }) {
+export function buildVerdictReport({ candidateRecord, gateReports = [], reviewReport, baselineReport, solverReport, preflightFailures = [] }) {
   const artifact = candidateRecord.artifact ?? candidateRecord;
   const failures = [...preflightFailures];
   const blockers = [];
@@ -25,6 +25,18 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       blockers.push(...(report.failures ?? [`${report.gate}_FAILED`]));
     }
   }
+  if (solverReport) {
+    if (solverReport.kind !== "solver_pareto_report") {
+      failures.push("G8_SOLVER_REPORT_KIND_INVALID");
+    } else if (solverReport.status !== "pass") {
+      blockers.push("G8_SOLVER_REPORT_FAILED", ...(solverReport.failures ?? []));
+    }
+    const selectedCandidateId = solverReport.selected_candidate?.id;
+    const artifactSolverCandidateId = artifact.shader?.solver_candidate_id ?? artifact.solver_candidate_id ?? artifact.id;
+    if (artifact.rig_id === "C1" && selectedCandidateId && artifactSolverCandidateId !== selectedCandidateId) {
+      failures.push("G8_C1_NOT_SELECTED_SOLVER_CANDIDATE");
+    }
+  }
 
   const invalid = failures.length > 0;
   const hardFailed = blockers.length > 0;
@@ -32,6 +44,7 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
   const designClass = designClassFromReview(reviewReport, invalid || hardFailed);
   const verdictClass = verdictClassFromState({ invalid, hardFailed, reviewReport, designClass });
   const energyGate = gateMap.get("G6");
+  const solverIdentifiability = solverReport?.parameter_identifiability ?? {};
 
   return {
     schema_version: "1.2.0",
@@ -57,7 +70,11 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       energy: energyStatus(energyGate),
       design: designStatus(designClass)
     },
-    identifiability: artifact.shader?.identifiability ?? {},
+    solver: solverReport ? solverSummary(solverReport) : { status: "not_recorded" },
+    identifiability: Object.keys(solverIdentifiability).length > 0
+      ? solverIdentifiability
+      : artifact.shader?.identifiability ?? {},
+    claim_constraints: solverReport?.claim_constraints ?? [],
     baseline: baselineReport
       ? {
           namespace: baselineReport.baseline_namespace,
@@ -90,6 +107,18 @@ function deriveTechnicalClass(artifact) {
   if (artifact.rig_id === "R1" || artifact.rig_id === "DOM_C") return "WEBKIT_PASS";
   if (artifact.rig_id === "C1") return "SHADER_PASS";
   return "INVALID";
+}
+
+function solverSummary(report) {
+  return {
+    status: report.status,
+    selected_candidate_id: report.selected_candidate?.id ?? null,
+    pareto_count: report.pareto_front?.length ?? 0,
+    candidate_count: report.candidate_count ?? 0,
+    required_degeneracy_scene_ids: report.background_sweep?.required_scene_ids ?? [],
+    observed_scene_ids: report.background_sweep?.observed_scene_ids ?? [],
+    claim_constraint_count: report.claim_constraints?.length ?? 0
+  };
 }
 
 function verdictClassFromState({ invalid, hardFailed, reviewReport, designClass }) {

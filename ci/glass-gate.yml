@@ -43,6 +43,7 @@ glass_affecting_paths:
   - packages/color-pipeline/**
   - packages/metric-stack/**
   - packages/energy-stack/**
+  - packages/solver/**
   - packages/review-stack/**
   - packages/verdict-stack/**
   - scripts/lab-*.mjs

@@ -116,8 +116,9 @@ npm run metrics:optics -- --reference ./artifacts/r0.capture.json --candidate ./
 npm run metrics:temporal -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g4-temporal.report.json
 npm run metrics:runtime -- --artifact ./artifacts/c1.capture.json --out ./artifacts/g5-runtime.report.json
 npm run energy:stress -- --artifact ./artifacts/c1-sustained.capture.json --sustained --out ./artifacts/g6-energy.report.json
+npm run solver:rank -- --candidate ./artifacts/c0-candidate-a.json --candidate ./artifacts/c0-candidate-b.json --out ./artifacts/solver.pareto.report.json
 npm run review:packet -- --packet ./artifacts/g7-review.packet.json --out ./artifacts/g7-review.report.json
-npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
+npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --solver ./artifacts/solver.pareto.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
 npm run ci:glass -- --out ./artifacts/ci/glass-gate.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
@@ -134,6 +135,7 @@ G3: inferred edge lensing, blur falloff, chromatic fringe, highlight/shadow, alp
 G4: motion-energy phase, press overshoot/damping/settle time, frame pacing, trajectory-source lock
 G5: full-frame p95/dropped-frame runtime gate from artifact perf fields
 G6: short/sustained stress, thermal gate, sustained degradation, energy trace availability policy
+Solver: background-sweep loss over S07-S11, Pareto front, knee selection, identifiability lattice, claim constraints
 G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
@@ -159,14 +161,24 @@ is reported in-band and becomes a hard failure only when the command is run with
 `--require-energy-trace`; Instruments Power Profiler and MetricKit adapters are
 the next layer, not silently faked here.
 
+Current solver scope ranks externally generated C0/C1 candidate records rather
+than pretending the CMA-ES/TPE renderer loop is complete. It refuses single
+background scoring by requiring the S07-S11 degeneracy-breaking sweep, emits a
+Pareto front across visual loss, runtime, and energy, selects a knee point, and
+marks each parameter as `MEASURED`, `BOUNDED_AMBIGUOUS`,
+`PROBABLE_UNDER_PRIOR`, or `AMBIGUOUS`. Non-measured parameters may support a
+fit-level result, but not a parameter-level "matched Apple" claim.
+
 Current G7 scope validates a review packet rather than free-form taste: every
 block needs scene, state, mask, artifact pointer, reviewer category, written
 reason, owner, and ticket. Naked objections like "looks off" or "не нравится"
 fail the gate.
 
 Current G8 scope emits the two-axis verdict report. It refuses simulator/replay
-verdicts, refuses C1 without `baked_verdict`, and keeps DOM_C in `WEBKIT_PASS`
-instead of allowing a fake SwiftUI claim.
+verdicts, refuses C1 without `baked_verdict`, keeps DOM_C in `WEBKIT_PASS`
+instead of allowing a fake SwiftUI claim, and carries solver-selected candidate
+plus identifiability claim constraints into the final report when a solver
+report is provided.
 
 Current CI scope is the source guillotine in `.github/workflows/glass-gate.yml`
 with policy in `ci/glass-gate.yml`. It runs typecheck, the full lab self-test,
