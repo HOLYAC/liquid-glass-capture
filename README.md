@@ -242,6 +242,9 @@ thermal state before each baseline iteration.
 The baseline script marks reports as `partial` until enough physical captures
 exist for the requested class (`mvl = 50`, `prod_p99 = 300`, `sustained = 24`).
 That is intentional: a partial baseline is useful evidence, not a final verdict.
+Each metric summary carries a deterministic bootstrap `p99_ci95_upper`, the
+versioned MAD outlier policy used for rejection, and the retained raw/rejected
+comparison samples so a threshold cannot hide behind deleted evidence.
 
 ## Production / TestFlight
 

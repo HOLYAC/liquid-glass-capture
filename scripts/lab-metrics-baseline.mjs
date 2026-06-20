@@ -16,6 +16,24 @@ const requestedRepeat = Object.freeze({
   prod_p99: 300,
   sustained: 24
 });
+const outlierPolicy = Object.freeze({
+  policy_id: "baseline_mad_outlier_policy_v1",
+  method: "median_absolute_deviation_fence",
+  minimum_sample_count: 8,
+  normal_consistency_scale: 1.4826,
+  max_modified_z: 6,
+  zero_mad_behavior: "accept_all",
+  raw_samples_retained: true,
+  rejected_samples_retained: true
+});
+const bootstrapPolicy = Object.freeze({
+  policy_id: "baseline_p99_bootstrap_ci_v1",
+  statistic: "p99",
+  statistic_quantile: 0.99,
+  confidence: 0.95,
+  iterations: 400,
+  seed_namespace: "apple_glass_baseline_metric_report_v1"
+});
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main();
@@ -54,13 +72,23 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
 
   for (let left = 0; left < referenceRecords.length; left += 1) {
     for (let right = left + 1; right < referenceRecords.length; right += 1) {
-      referenceReports.push(compareRecords(referenceRecords[left], referenceRecords[right]));
+      referenceReports.push(makeMetricSample({
+        sampleKind: "instrument_noise",
+        referenceIndex: left,
+        candidateIndex: right,
+        metrics: compareRecords(referenceRecords[left], referenceRecords[right])
+      }));
     }
   }
 
-  for (const reference of referenceRecords) {
-    for (const probe of probeRecords) {
-      candidateReports.push(compareRecords(reference, probe));
+  for (let referenceIndex = 0; referenceIndex < referenceRecords.length; referenceIndex += 1) {
+    for (let probeIndex = 0; probeIndex < probeRecords.length; probeIndex += 1) {
+      candidateReports.push(makeMetricSample({
+        sampleKind: "candidate_gap",
+        referenceIndex,
+        candidateIndex: probeIndex,
+        metrics: compareRecords(referenceRecords[referenceIndex], probeRecords[probeIndex])
+      }));
     }
   }
 
@@ -89,13 +117,20 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
     probe_artifacts: probeRecords.map(artifactIdentity),
     instrument_noise: summarizeReports(referenceReports),
     candidate_gap: summarizeReports(candidateReports),
+    statistics: {
+      outlier_policy: outlierPolicy,
+      bootstrap_policy: bootstrapPolicy
+    },
     raw_report_counts: {
       reference_pair_count: referenceReports.length,
       candidate_pair_count: candidateReports.length
     },
     immutability: {
       raw_artifacts_retained: true,
-      outlier_rejection: "not_applied",
+      raw_metric_samples_retained: true,
+      rejected_samples_retained: true,
+      outlier_rejection: outlierPolicy.policy_id,
+      bootstrap_ci: bootstrapPolicy.policy_id,
       baseline_owner: "unassigned"
     }
   };
@@ -112,23 +147,166 @@ function compareRecords(reference, candidate) {
   return flattenMetricReport(report);
 }
 
-function summarizeReports(reports) {
-  if (reports.length === 0) {
+function makeMetricSample({ sampleKind, referenceIndex, candidateIndex, metrics }) {
+  return {
+    sample_id: `${sampleKind}-${referenceIndex}-${candidateIndex}`,
+    sample_kind: sampleKind,
+    reference_index: referenceIndex,
+    candidate_index: candidateIndex,
+    metrics
+  };
+}
+
+function summarizeReports(samples) {
+  if (samples.length === 0) {
     return {
       count: 0,
+      raw_samples: [],
+      rejected_samples: [],
       metrics: {}
     };
   }
 
-  const keys = Object.keys(reports[0]);
+  const keys = Object.keys(samples[0].metrics);
   const metrics = {};
+  const rejectedSamples = [];
   for (const key of keys) {
-    metrics[key] = summarizeMetricSeries(reports.map((report) => report[key]));
+    const metricSummary = summarizeMetricSamples(samples, key);
+    metrics[key] = metricSummary;
+    rejectedSamples.push(...metricSummary.rejected_samples);
   }
 
   return {
-    count: reports.length,
+    count: samples.length,
+    raw_samples: samples.map((sample) => ({
+      sample_id: sample.sample_id,
+      sample_kind: sample.sample_kind,
+      reference_index: sample.reference_index,
+      candidate_index: sample.candidate_index,
+      metrics: sample.metrics
+    })),
+    rejected_samples: rejectedSamples,
     metrics
+  };
+}
+
+function summarizeMetricSamples(samples, metricId) {
+  const metricSamples = samples
+    .map((sample) => ({
+      sample_id: sample.sample_id,
+      sample_kind: sample.sample_kind,
+      reference_index: sample.reference_index,
+      candidate_index: sample.candidate_index,
+      value: sample.metrics[metricId]
+    }))
+    .filter((sample) => Number.isFinite(sample.value));
+  const classified = classifyOutliers(metricSamples, metricId);
+  const acceptedValues = classified.accepted.map((sample) => sample.value);
+  const summary = summarizeMetricSeries(acceptedValues);
+  return {
+    ...summary,
+    raw_sample_count: metricSamples.length,
+    accepted_sample_count: classified.accepted.length,
+    rejected_sample_count: classified.rejected.length,
+    p99_ci95_upper: bootstrapP99CiUpper(acceptedValues, metricId),
+    outlier_policy_id: outlierPolicy.policy_id,
+    bootstrap_policy_id: bootstrapPolicy.policy_id,
+    rejected_samples: classified.rejected
+  };
+}
+
+function classifyOutliers(samples, metricId) {
+  if (samples.length < outlierPolicy.minimum_sample_count) {
+    return {
+      accepted: samples,
+      rejected: []
+    };
+  }
+
+  const values = samples.map((sample) => sample.value);
+  const median = quantile(values, 0.5);
+  const deviations = values.map((value) => Math.abs(value - median));
+  const mad = quantile(deviations, 0.5);
+  if (!(mad > 0)) {
+    return {
+      accepted: samples,
+      rejected: []
+    };
+  }
+
+  const scale = mad * outlierPolicy.normal_consistency_scale;
+  const accepted = [];
+  const rejected = [];
+  for (const sample of samples) {
+    const modifiedZ = Math.abs(sample.value - median) / scale;
+    if (modifiedZ > outlierPolicy.max_modified_z) {
+      rejected.push({
+        ...sample,
+        metric_id: metricId,
+        policy_id: outlierPolicy.policy_id,
+        reason: "modified_z_above_policy_fence",
+        median,
+        mad,
+        modified_z: modifiedZ,
+        max_modified_z: outlierPolicy.max_modified_z
+      });
+    }
+    else {
+      accepted.push(sample);
+    }
+  }
+
+  return {
+    accepted: accepted.length > 0 ? accepted : samples,
+    rejected: accepted.length > 0 ? rejected : []
+  };
+}
+
+function bootstrapP99CiUpper(values, metricId) {
+  if (values.length === 0) return null;
+  if (values.length === 1) return values[0];
+  const rng = makeSeededRng(stableSeed([
+    bootstrapPolicy.seed_namespace,
+    metricId,
+    values.length,
+    values.map((value) => value.toPrecision(17)).join(",")
+  ].join("|")));
+  const p99Values = [];
+  for (let iteration = 0; iteration < bootstrapPolicy.iterations; iteration += 1) {
+    const resample = [];
+    for (let index = 0; index < values.length; index += 1) {
+      resample.push(values[Math.floor(rng() * values.length)]);
+    }
+    p99Values.push(quantile(resample, bootstrapPolicy.statistic_quantile));
+  }
+  return quantile(p99Values, bootstrapPolicy.confidence);
+}
+
+function quantile(values, q) {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = (sorted.length - 1) * q;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  const weight = index - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+
+function stableSeed(input) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function makeSeededRng(seed) {
+  let state = seed || 1;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
   };
 }
 
