@@ -586,15 +586,28 @@ public final class LiquidGlassCaptureView: ExpoView {
     try fileManager.createDirectory(at: seriesDir, withIntermediateDirectories: true)
 
     let jsonURL = seriesDir.appendingPathComponent("\(seriesId).repeat-manifest.json")
-    let artifactJsonPaths = artifacts.compactMap { $0["jsonPath"] as? String }
+    let artifactJsonPathsDevice = artifacts.compactMap { $0["jsonPath"] as? String }
+    let artifactJsonPaths = artifactJsonPathsDevice.map {
+      Self.relativePath(from: seriesDir, to: URL(fileURLWithPath: $0))
+    }
     let artifactSummaries = artifacts.map { artifact in
+      let jsonPathDevice = artifact["jsonPath"] as? String ?? ""
+      let sessionDirDevice = artifact["sessionDir"] as? String ?? ""
+      let jsonPath = jsonPathDevice.isEmpty
+        ? ""
+        : Self.relativePath(from: seriesDir, to: URL(fileURLWithPath: jsonPathDevice))
+      let sessionDir = sessionDirDevice.isEmpty
+        ? ""
+        : Self.relativePath(from: seriesDir, to: URL(fileURLWithPath: sessionDirDevice))
       [
         "id": artifact["id"] as? String ?? "",
         "rig_id": artifact["rig_id"] as? String ?? "",
         "scene_id": artifact["scene_id"] as? String ?? "",
         "state_id": artifact["state_id"] as? String ?? "",
-        "jsonPath": artifact["jsonPath"] as? String ?? "",
-        "sessionDir": artifact["sessionDir"] as? String ?? "",
+        "jsonPath": jsonPath,
+        "jsonPath_device": jsonPathDevice,
+        "sessionDir": sessionDir,
+        "sessionDir_device": sessionDirDevice,
         "frameCount": artifact["frameCount"] as? Int ?? 0
       ] as [String: Any]
     }
@@ -639,6 +652,7 @@ public final class LiquidGlassCaptureView: ExpoView {
         "sustained_repeat_n": 24
       ],
       "artifact_json_paths": artifactJsonPaths,
+      "artifact_json_paths_device": artifactJsonPathsDevice,
       "artifacts": artifactSummaries,
       "failures": failures
     ]
@@ -649,6 +663,21 @@ public final class LiquidGlassCaptureView: ExpoView {
     try jsonData.write(to: jsonURL, options: .atomic)
     manifest["jsonPath"] = jsonURL.path
     return manifest
+  }
+
+  private static func relativePath(from baseDir: URL, to target: URL) -> String {
+    let baseComponents = baseDir.standardizedFileURL.pathComponents
+    let targetComponents = target.standardizedFileURL.pathComponents
+    var commonCount = 0
+    while commonCount < baseComponents.count &&
+      commonCount < targetComponents.count &&
+      baseComponents[commonCount] == targetComponents[commonCount] {
+      commonCount += 1
+    }
+
+    var parts = Array(repeating: "..", count: baseComponents.count - commonCount)
+    parts.append(contentsOf: targetComponents.dropFirst(commonCount))
+    return parts.isEmpty ? "." : parts.joined(separator: "/")
   }
 
   private static func thermalStateString(_ state: ProcessInfo.ThermalState) -> String {

@@ -93,14 +93,34 @@ function writeCapturePlan(request) {
       open_controls: true,
       set_rig: request.rig,
       set_scene_state: `${request.scene}/${request.state}`,
+      set_max_fidelity: request.maxFidelity,
       set_device_matrix_role: request.deviceRole,
       set_repeat: request.repeat,
       press_button: "B"
     },
+    artifact_transfer: {
+      app_documents_root: "Liquid Glass Capture/Documents",
+      capture_root: "LiquidGlassCaptures",
+      repeat_manifests: "LiquidGlassCaptures/Series/*.repeat-manifest.json",
+      session_artifacts: "LiquidGlassCaptures/Sessions/<capture-id>/",
+      access_note: "app.json enables UIFileSharingEnabled and LSSupportsOpeningDocumentsInPlace, so copy the LiquidGlassCaptures folder from the app Documents container via Files/iTunes/Sideloadly file browser"
+    },
     metadata,
     output_contract: {
       manifest_kind: "repeat_capture_manifest",
+      raw_required: rawFramesEnabled,
+      display_raw_required: rawPixelsEnabled,
+      proof: [
+        "repeat manifest status must be complete",
+        "repeat manifest must point to every capture artifact JSON",
+        "each capture artifact must carry frame_pack.frame_manifest_path + frame_manifest_sha256",
+        "each frame_manifest frame must carry raw.path + raw.sha256",
+        rawPixelsEnabled
+          ? "each frame_manifest frame must also carry raw.display.path + raw.display.sha256"
+          : "display raw is not required for this request"
+      ],
       use_after_capture: `npm run ios:capture -- --rig ${request.rig} --scene ${request.scene} --state ${request.state} --device physical --capture compositor --repeat ${request.repeat} --device-role ${request.deviceRole} --max-frames ${maxFrames}${outputPathSuffix} --manifest <repeat-manifest.json>`,
+      inspect_after_pass: "npm run glass:inspect -- <first-or-last-capture.json> --out ./artifacts/viewer/max-fidelity.inspect.html",
       baseline_command: `npm run metrics:baseline -- --ref-manifest <r0-repeat-manifest.json> --probe-manifest <r1-repeat-manifest.json> --class ${baselineClass} --repeat ${request.repeat} --out ./baselines/current.json`
     }
   };

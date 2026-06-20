@@ -100,6 +100,65 @@ npx expo start --dev-client
 
 Scan the QR code with the installed development client.
 
+## Max-Fidelity Raw Capture Proof
+
+Use this first. It is the shortest end-to-end proof that the installed iPhone
+app can produce the raw pixel evidence this lab was built for.
+
+1. Build or download the latest `LiquidGlassCapture-unsigned-ipa` artifact from
+   the GitHub `Build unsigned iOS IPA` workflow, then sideload it.
+2. Start the dev client:
+
+```bash
+npx expo start --dev-client
+```
+
+3. Generate the one-repeat proof plan:
+
+```bash
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --out ./artifacts/ios-max-fidelity-proof.plan.json
+```
+
+4. In the app, show controls with `2`, set:
+
+```text
+scene=S01_SEARCH
+rig=R0
+device=mvl_primary
+repeat=1
+max-fidelity=true
+```
+
+Then press `B`. The status line prints the generated repeat-manifest path.
+
+5. Copy the app Documents folder `LiquidGlassCaptures` to this repo under
+   `./artifacts/iphone/LiquidGlassCaptures`. File sharing is enabled in
+   `app.json` (`UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace`),
+   so the folder is reachable through Files/iTunes/Sideloadly-style file
+   browsers.
+
+6. Verify the copied manifest. The repeat manifest lives under
+   `LiquidGlassCaptures/Series` and points to sibling `../Sessions/...`
+   artifacts:
+
+```bash
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --manifest ./artifacts/iphone/LiquidGlassCaptures/Series/<name>.repeat-manifest.json --out ./artifacts/ios-max-fidelity-proof.verify.json
+```
+
+`PASS` here means the verifier read the repeat manifest, every capture JSON,
+`frame_manifest.json`, every `.source.raw`, every `.display.rgba`, and checked
+their SHA-256 hashes. A missing raw file or hash mismatch is a failure.
+
+7. Open the capture:
+
+```bash
+npm run glass:inspect -- ./artifacts/iphone/LiquidGlassCaptures/Sessions/<capture-id>/<capture-id>.capture.json --out ./artifacts/viewer/max-fidelity.inspect.html
+```
+
+For MVL evidence, repeat the same route with `--repeat 50`. Production P99 is
+`--repeat 300`; sustained is `--repeat 24` and intentionally uses 60s captures
+plus cooldown.
+
 ## Lab Commands
 
 The local lab scripts implement the first machine-checkable part of the
@@ -118,6 +177,8 @@ npm run trajectory:build -- --self-test
 npm run material:probe -- --self-test
 npm run artifact:validate -- ./artifacts/sample.capture.json
 npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --out ./artifacts/ios-max-fidelity-proof.plan.json
+npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 1 --device-role mvl_primary --max-fidelity --manifest ./artifacts/iphone/LiquidGlassCaptures/Series/<name>.repeat-manifest.json --out ./artifacts/ios-max-fidelity-proof.verify.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --out ./artifacts/ios-capture-plan.json
 npm run ios:capture -- --rig C1 --scene S07_BUSY_PHOTO --state busy_photo_rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --out ./artifacts/ios-capture-s07-plan.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --manifest ./artifacts/r0.repeat-manifest.json

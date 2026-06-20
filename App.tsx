@@ -552,10 +552,13 @@ export default function App() {
       const manifestPath = typeof payload.jsonPath === "string" ? payload.jsonPath : "repeat manifest written";
       setCaptureStatus(manifestPath);
 
-      const artifactPaths = Array.isArray(payload.artifact_json_paths)
+      const deviceArtifactPaths = Array.isArray(payload.artifact_json_paths_device)
+        ? payload.artifact_json_paths_device.filter((value): value is string => typeof value === "string")
+        : [];
+      const portableArtifactPaths = Array.isArray(payload.artifact_json_paths)
         ? payload.artifact_json_paths.filter((value): value is string => typeof value === "string")
         : [];
-      const lastArtifact = artifactPaths.at(-1) ?? null;
+      const lastArtifact = deviceArtifactPaths.at(-1) ?? portableArtifactPaths.at(-1) ?? null;
       if (lastArtifact) {
         if (rig === "R0") {
           setLastReferenceArtifact(lastArtifact);
