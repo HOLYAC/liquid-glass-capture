@@ -17,6 +17,7 @@ import { sceneStateKey } from "../packages/scene-contract/src/index.mjs";
 import { readArtifactStoreIndex, writeArtifactStore } from "../packages/artifact-store/src/index.mjs";
 import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
+import { buildBaselineReport } from "./lab-metrics-baseline.mjs";
 import { makePassingPacket } from "./lab-review-packet.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -103,6 +104,7 @@ function writeSelfTestFixture(outPath) {
   });
   const deviceLane = join(dir, "physical-device-lane.report.json");
   writeFileSync(deviceLane, `${JSON.stringify(makePhysicalDeviceLaneReport(candidate), null, 2)}\n`);
+  const baseline = writeBaselineFixture(dir, maskPath);
 
   return {
     candidate,
@@ -111,8 +113,39 @@ function writeSelfTestFixture(outPath) {
     storeIndex: storeWrite.index_path,
     deviceLane,
     review,
+    baseline,
     out: outPath ? resolve(outPath) : join(dir, "g8-verdict.report.json")
   };
+}
+
+function writeBaselineFixture(dir, maskPath) {
+  const refs = [];
+  const probes = [];
+  for (let index = 0; index < 3; index += 1) {
+    const refPng = join(dir, `baseline-r0-${index}.png`);
+    const probePng = join(dir, `baseline-r1-${index}.png`);
+    writePng(refPng, 10, 10, makeBaselinePixels(10, 10, 0));
+    writePng(probePng, 10, 10, makeBaselinePixels(10, 10, index === 2 ? 1 : 0));
+
+    const refArtifact = join(dir, `baseline-r0-${index}.capture.json`);
+    const probeArtifact = join(dir, `baseline-r1-${index}.capture.json`);
+    writeFileSync(refArtifact, `${JSON.stringify(makeBaselineArtifact("R0", refPng, maskPath, index), null, 2)}\n`);
+    writeFileSync(probeArtifact, `${JSON.stringify(makeBaselineArtifact("R1", probePng, maskPath, index), null, 2)}\n`);
+    refs.push(refArtifact);
+    probes.push(probeArtifact);
+  }
+
+  const baseline = join(dir, "baseline.metric.report.json");
+  buildBaselineReport({
+    refs,
+    probes,
+    out: baseline,
+    baselineClass: "mvl",
+    repeatOverride: 3,
+    owner: "g8-self-test-owner",
+    approvalId: "g8-self-test-approval"
+  });
+  return baseline;
 }
 
 function makePixels(width, height) {
@@ -127,6 +160,73 @@ function makePixels(width, height) {
     }
   }
   return pixels;
+}
+
+function makeBaselinePixels(width, height, delta) {
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = 52 + x + delta;
+      pixels[offset + 1] = 92 + y;
+      pixels[offset + 2] = 132;
+      pixels[offset + 3] = 255;
+    }
+  }
+  return pixels;
+}
+
+function makeBaselineArtifact(rigId, pngPath, maskPath, index) {
+  return {
+    schema_version: "1.2.0",
+    id: `self-test-${rigId.toLowerCase()}-g8-baseline-${index}`,
+    rig_id: rigId,
+    scene_id: "S01_SEARCH",
+    state_id: "rest",
+    git_commit: "self-test",
+    capture_kind: "compositor",
+    null_qualification: "pass",
+    device_info: {
+      model_name: "Self Test Device",
+      model_identifier: "iPhone-self-test",
+      os_name: "iOS",
+      os_version: "26.0",
+      os_build: "self-test",
+      sdk_build: "self-test",
+      screen_scale: 3,
+      refresh_hz: 60,
+      thermal_state_start: "nominal",
+      thermal_state_end: "nominal",
+      low_power_mode: false
+    },
+    environment: {
+      appearance: "dark",
+      reduce_transparency: false,
+      reduce_motion: false,
+      content_seed: `g8-baseline-self-test-${index}`,
+      viewport_px: { width: 10, height: 10 },
+      capture_timestamp_ns: String(index)
+    },
+    color: {
+      embedded_icc_profile: "Display P3",
+      icc_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      working_space: "display-p3-linear",
+      stored_transfer: "srgb-transfer",
+      white_point: "D65"
+    },
+    frame_pack: {
+      base_png_sha256: sha256File(pngPath),
+      base_png_path: pngPath,
+      mask_pack_sha256: sha256File(maskPath),
+      mask_pack_path: maskPath,
+      touch_phase: "rest",
+      animation_t: 0
+    },
+    integrity: {
+      artifact_sha256: "self-test-pending",
+      producer_version: "lab-verdict-report.baseline.self-test"
+    }
+  };
 }
 
 function makeCandidateArtifact(pngPath, maskPath) {
@@ -322,13 +422,44 @@ function assertVerdictGuardRails(fixture, passReport) {
   if (passReport.physical_device_lane.scene_contract_verified !== true) {
     throw new Error("G8 guardrail failed: scene-contract evidence missing from verdict");
   }
+  if (passReport.baseline?.status !== "complete" ||
+      passReport.baseline?.approval_status !== "approved" ||
+      passReport.baseline?.freeze_verified !== true) {
+    throw new Error("G8 guardrail failed: locked baseline evidence missing from verdict");
+  }
 
   const gateReports = fixture.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
   const reviewReport = JSON.parse(readFileSync(resolve(fixture.review), "utf8"));
+  const baselineReport = JSON.parse(readFileSync(resolve(fixture.baseline), "utf8"));
   const baseRecord = readCaptureArtifact(fixture.candidate, {
     allowInvalid: true,
     allowLayerSnapshot: true
   });
+
+  const missingBaselineReport = buildVerdictReport({
+    candidateRecord: baseRecord,
+    gateReports,
+    reviewReport,
+    baselineReport: undefined,
+    preflightFailures: []
+  });
+  if (missingBaselineReport.status !== "fail" || !missingBaselineReport.blockers.includes("G8_BASELINE_REPORT_MISSING")) {
+    throw new Error("G8 guardrail failed: missing baseline did not block verdict");
+  }
+
+  const tamperedBaselineReport = buildVerdictReport({
+    candidateRecord: baseRecord,
+    gateReports,
+    reviewReport,
+    baselineReport: {
+      ...baselineReport,
+      repeat_n_observed: baselineReport.repeat_n_observed + 1
+    },
+    preflightFailures: []
+  });
+  if (tamperedBaselineReport.status !== "fail" || !tamperedBaselineReport.blockers.includes("G8_BASELINE_FREEZE_HASH_MISMATCH")) {
+    throw new Error("G8 guardrail failed: tampered baseline hash did not block verdict");
+  }
 
   const calibrationRecord = {
     ...baseRecord,
@@ -344,6 +475,7 @@ function assertVerdictGuardRails(fixture, passReport) {
     candidateRecord: calibrationRecord,
     gateReports,
     reviewReport,
+    baselineReport,
     preflightFailures: []
   });
   if (calibrationReport.verdict_class !== "INVALID" || !calibrationReport.blockers.includes("G8_C1_REQUIRES_BAKED_VERDICT_SHADER")) {
@@ -364,6 +496,7 @@ function assertVerdictGuardRails(fixture, passReport) {
     candidateRecord: domRecord,
     gateReports,
     reviewReport,
+    baselineReport,
     preflightFailures: []
   });
   if (domReport.technical_class !== "WEBKIT_PASS" || domReport.technical_class === "SWIFTUI_PASS") {

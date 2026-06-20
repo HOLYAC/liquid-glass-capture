@@ -1,4 +1,5 @@
 import { retentionSummaryForHash } from "../../artifact-store/src/index.mjs";
+import { createHash } from "node:crypto";
 
 const requiredTechnicalGates = ["G2", "G3", "G4", "G5", "G6"];
 
@@ -47,6 +48,9 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       blockers.push(...(physicalDeviceLaneReport.failures ?? []));
     }
   }
+  const baselineValidation = validateBaselineReport(baselineReport);
+  failures.push(...baselineValidation.failures);
+  blockers.push(...baselineValidation.blockers);
 
   const invalid = failures.length > 0;
   const hardFailed = blockers.length > 0;
@@ -90,9 +94,14 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       ? {
           namespace: baselineReport.baseline_namespace,
           status: baselineReport.baseline_status,
-          repeat_n_observed: baselineReport.repeat_n_observed
+          repeat_n_observed: baselineReport.repeat_n_observed,
+          approval_status: baselineReport.baseline_approval?.approval_status ?? "not_recorded",
+          freeze_sha256: baselineReport.baseline_freeze?.content_sha256 ?? null,
+          freeze_verified: baselineValidation.freeze_verified,
+          threshold_policy: baselineReport.statistics?.threshold_policy?.policy_id ?? null,
+          final_p99_allowed: baselineReport.repeat_policy?.final_p99_allowed === true
         }
-      : { status: "not_recorded" },
+      : { status: "missing", freeze_verified: false },
     artifacts: {
       candidate: {
         id: artifact.id,
@@ -108,6 +117,69 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
     retention: buildRetentionBlock({ artifactStoreIndex, candidateRecord, artifact }),
     reports: Object.fromEntries(gateReports.map((report) => [report.gate, report.kind ?? "gate_report"]))
   };
+}
+
+function validateBaselineReport(report) {
+  const failures = [];
+  const blockers = [];
+  if (!report) {
+    blockers.push("G8_BASELINE_REPORT_MISSING");
+    return { failures, blockers, freeze_verified: false };
+  }
+  if (report.kind !== "baseline_metric_report") failures.push("G8_BASELINE_REPORT_KIND_INVALID");
+  if (report.baseline_status !== "complete") blockers.push("G8_BASELINE_NOT_COMPLETE");
+  if (report.baseline_approval?.approval_status !== "approved") {
+    blockers.push("G8_BASELINE_OWNER_APPROVAL_MISSING");
+  }
+  if (!report.baseline_identity) blockers.push("G8_BASELINE_IDENTITY_MISSING");
+  if (!report.threshold_derivation?.metric_thresholds) blockers.push("G8_BASELINE_THRESHOLDS_MISSING");
+  if (report.immutability?.frozen_by_hash !== true) blockers.push("G8_BASELINE_NOT_FROZEN");
+  if (typeof report.baseline_freeze?.content_sha256 !== "string") {
+    blockers.push("G8_BASELINE_FREEZE_HASH_MISSING");
+    return { failures, blockers, freeze_verified: false };
+  }
+
+  const actualFreezeHash = baselineContentSha256(report);
+  const freezeVerified = actualFreezeHash === report.baseline_freeze.content_sha256;
+  if (!freezeVerified) blockers.push("G8_BASELINE_FREEZE_HASH_MISMATCH");
+  blockers.push(...(report.failures ?? []).map((failure) => `G8_BASELINE_FAILURE:${failure}`));
+  return {
+    failures,
+    blockers,
+    freeze_verified: freezeVerified
+  };
+}
+
+function baselineContentSha256(report) {
+  return createHash("sha256")
+    .update(canonicalJson(baselineFreezePayload(report)))
+    .digest("hex");
+}
+
+function baselineFreezePayload(report) {
+  const payload = { ...report };
+  delete payload.baseline_freeze;
+  if (payload.immutability && typeof payload.immutability === "object") {
+    payload.immutability = { ...payload.immutability };
+    delete payload.immutability.frozen_by_hash;
+    delete payload.immutability.baseline_content_sha256;
+    delete payload.immutability.baseline_retention_class;
+  }
+  return payload;
+}
+
+function canonicalJson(value) {
+  return JSON.stringify(canonicalize(value));
+}
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value;
+  const result = {};
+  for (const key of Object.keys(value).sort()) {
+    if (value[key] !== undefined) result[key] = canonicalize(value[key]);
+  }
+  return result;
 }
 
 function deriveTechnicalClass(artifact) {

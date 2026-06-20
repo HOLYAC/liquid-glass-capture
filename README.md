@@ -225,7 +225,9 @@ plus identifiability claim constraints into the final report when a solver
 report is provided. When an artifact-store index is provided, G8 also carries
 the candidate retention entry instead of pretending retention was recorded.
 When a physical-device lane report is provided, non-pass lane status blocks the
-final verdict instead of being buried as a note.
+final verdict instead of being buried as a note. G8 now also requires a locked
+baseline report: missing, non-complete, unapproved, unfrozen, or hash-tampered
+baselines block the final verdict.
 
 Current CI scope is the source guillotine in `.github/workflows/glass-gate.yml`
 with policy in `ci/glass-gate.yml`. It runs typecheck, the full lab self-test,
