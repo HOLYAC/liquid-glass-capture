@@ -53,6 +53,9 @@ export function renderInspectViewer(inputPath) {
   if (json.kind === "solver_pareto_report") {
     return renderSolverViewer(absolute, json);
   }
+  if (json.kind === "physical_device_lane_report" || json.kind === "physical_device_lane_plan" || json.kind === "physical_device_lane_self_test_report") {
+    return renderPhysicalDeviceLaneViewer(absolute, json);
+  }
   if (
     json.kind === "artifact_store_index" ||
     json.kind === "artifact_store_write_report" ||
@@ -247,6 +250,7 @@ function renderVerdictViewer(path, report) {
     section("Gates", table(objectRows(report.gates ?? {}))),
     section("Device", table(objectRows(report.device ?? {}))),
     section("Solver", table(objectRows(report.solver ?? { status: "not_recorded" }))),
+    section("Physical Device Lane", table(objectRows(report.physical_device_lane ?? { status: "not_recorded" }))),
     section("Identifiability", table(objectRows(report.identifiability ?? { status: "not_recorded" }))),
     section("Claim Constraints", table((report.claim_constraints ?? []).map((constraint) => [
       constraint.parameter,
@@ -288,6 +292,39 @@ function renderSolverViewer(path, report) {
     ]))),
     section("Failures", table((report.failures ?? []).map((failure, index) => [index, failure]))),
     section("Raw Solver Report", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
+  ]);
+}
+
+function renderPhysicalDeviceLaneViewer(path, report) {
+  const taskReports = report.task_reports ?? report.positive_report?.task_reports ?? [];
+  const tasks = report.tasks ?? [];
+  return page("Physical Device Lane", [
+    hero("Physical Device Lane", report.lane_class ?? relative(repoRoot, path), [
+      statusPill("lane", report.status ?? "pending"),
+      statusPill("tasks", String(report.task_count ?? tasks.length ?? taskReports.length ?? 0)),
+      statusPill("kind", report.kind ?? "unknown")
+    ]),
+    section("Summary", table([
+      ["kind", report.kind],
+      ["status", report.status],
+      ["lane_class", report.lane_class ?? ""],
+      ["task_count", report.task_count ?? tasks.length ?? taskReports.length ?? ""],
+      ["gate_status", report.gates?.status ?? ""],
+      ["source", relative(repoRoot, path)]
+    ])),
+    section("Evidence", table(objectRows(report.evidence ?? {
+      status: report.kind === "physical_device_lane_plan" ? "plan_only_pending_collection" : "not_recorded"
+    }))),
+    section("Tasks", table(tasks.map((task) => [
+      task.lane_task_id,
+      `${task.rig_id} ${task.scene_id}/${task.state_id} repeat=${task.repeat_count_requested}`
+    ]))),
+    section("Task Reports", table(taskReports.map((task) => [
+      task.lane_task_id,
+      `${task.status} artifacts=${task.artifacts?.length ?? 0} failures=${task.failures?.length ?? 0}`
+    ]))),
+    section("Failures", table((report.failures ?? report.simulator_negative_report?.failures ?? []).map((failure, index) => [index, failure]))),
+    section("Raw Physical Lane", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
   ]);
 }
 

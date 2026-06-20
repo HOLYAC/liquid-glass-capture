@@ -7,10 +7,12 @@ import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
 import { readArtifactStoreIndex, writeArtifactStore } from "../packages/artifact-store/src/index.mjs";
+import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
 import { makePassingPacket } from "./lab-review-packet.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main();
@@ -29,7 +31,7 @@ function main() {
   }
 
   if (!args.candidate || args.gates.length === 0) {
-    console.error("usage: node scripts/lab-verdict-report.mjs --candidate <capture.json> --gate <g2.json> ... [--solver <solver.json>] [--store-index <index.json>] [--review <g7.json>] [--baseline <baseline.json>] [--out report.json]");
+    console.error("usage: node scripts/lab-verdict-report.mjs --candidate <capture.json> --gate <g2.json> ... [--solver <solver.json>] [--store-index <index.json>] [--device-lane <lane.json>] [--review <g7.json>] [--baseline <baseline.json>] [--out report.json]");
     console.error("       node scripts/lab-verdict-report.mjs --self-test [--out report.json]");
     process.exit(2);
   }
@@ -48,6 +50,7 @@ function buildReportFromFiles(args) {
   const gateReports = args.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
   const solverReport = args.solver ? JSON.parse(readFileSync(resolve(args.solver), "utf8")) : undefined;
   const artifactStoreIndex = args.storeIndex ? readArtifactStoreIndex(args.storeIndex) : undefined;
+  const physicalDeviceLaneReport = args.deviceLane ? JSON.parse(readFileSync(resolve(args.deviceLane), "utf8")) : undefined;
   const reviewReport = args.review ? JSON.parse(readFileSync(resolve(args.review), "utf8")) : undefined;
   const baselineReport = args.baseline ? JSON.parse(readFileSync(resolve(args.baseline), "utf8")) : undefined;
   return buildVerdictReport({
@@ -55,6 +58,7 @@ function buildReportFromFiles(args) {
     gateReports,
     solverReport,
     artifactStoreIndex,
+    physicalDeviceLaneReport,
     reviewReport,
     baselineReport,
     preflightFailures: candidateRecord.preflight_failures
@@ -89,12 +93,15 @@ function writeSelfTestFixture(outPath) {
     retentionClass: "raw_png_frame",
     generatedAt: "2026-01-01T00:00:00.000Z"
   });
+  const deviceLane = join(dir, "physical-device-lane.report.json");
+  writeFileSync(deviceLane, `${JSON.stringify(makePhysicalDeviceLaneReport(candidate), null, 2)}\n`);
 
   return {
     candidate,
     gates,
     solver,
     storeIndex: storeWrite.index_path,
+    deviceLane,
     review,
     out: outPath ? resolve(outPath) : join(dir, "g8-verdict.report.json")
   };
@@ -159,7 +166,8 @@ function makeCandidateArtifact(pngPath, maskPath) {
       mask_pack_path: maskPath,
       touch_phase: "press",
       animation_t: 1,
-      sustained_duration_ms: 60_000
+      sustained_duration_ms: 60_000,
+      trajectory_source_sha256: s03PressTrajectorySha256
     },
     shader: {
       pipeline: "baked_verdict",
@@ -186,6 +194,39 @@ function makeCandidateArtifact(pngPath, maskPath) {
       producer_version: "lab-verdict-report.self-test"
     }
   };
+}
+
+function makePhysicalDeviceLaneReport(candidatePath) {
+  const plan = buildPhysicalDeviceLanePlan({
+    laneClass: "smoke",
+    tasks: [
+      {
+        rig_id: "C1",
+        scene_id: "S03_PRESS",
+        state_id: "press",
+        repeat_count_requested: 1
+      }
+    ],
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    gitCommit: "self-test",
+    reason: "g8-verdict-self-test"
+  });
+  const manifest = {
+    schema_version: "1.2.0",
+    kind: "repeat_capture_manifest",
+    status: "complete",
+    rig_id: "C1",
+    scene_id: "S03_PRESS",
+    state_id: "press",
+    capture_kind: "compositor",
+    repeat_count_requested: 1,
+    repeat_count_observed: 1,
+    artifact_json_paths: [candidatePath]
+  };
+  return verifyPhysicalDeviceLane({
+    plan,
+    manifests: [{ path: join(dirname(candidatePath), "g8-device-lane.repeat-manifest.json"), manifest }]
+  });
 }
 
 function makeSolverReport() {
@@ -254,6 +295,9 @@ function assertVerdictGuardRails(fixture, passReport) {
   if (passReport.retention?.status !== "indexed" || passReport.retention.raw_artifacts_retained !== true) {
     throw new Error("G8 guardrail failed: artifact-store retention entry missing from verdict");
   }
+  if (passReport.physical_device_lane?.status !== "pass" || passReport.physical_device_lane.hashes_verified !== true) {
+    throw new Error("G8 guardrail failed: physical-device lane evidence missing from verdict");
+  }
 
   const gateReports = fixture.gates.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
   const reviewReport = JSON.parse(readFileSync(resolve(fixture.review), "utf8"));
@@ -317,6 +361,7 @@ function parseArgs(args) {
     else if (arg === "--gate") parsed.gates.push(args[++index]);
     else if (arg === "--solver") parsed.solver = args[++index];
     else if (arg === "--store-index") parsed.storeIndex = args[++index];
+    else if (arg === "--device-lane") parsed.deviceLane = args[++index];
     else if (arg === "--review") parsed.review = args[++index];
     else if (arg === "--baseline") parsed.baseline = args[++index];
     else if (arg === "--out") parsed.out = args[++index];

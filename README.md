@@ -120,8 +120,10 @@ npm run solver:rank -- --candidate ./artifacts/c0-candidate-a.json --candidate .
 npm run artifact:store -- --put ./artifacts/c1.capture.png --class raw_png_frame --store ./artifacts/store --out ./artifacts/store/write.report.json
 npm run artifact:store -- --verify-index ./artifacts/store/index.json --out ./artifacts/store/verify.report.json
 npm run artifact:store -- --plan-retention ./artifacts/store/index.json --out ./artifacts/store/retention-plan.json
+npm run device:lane -- --lane mvl --git-commit <sha> --out ./artifacts/device-lane/mvl.plan.json
+npm run device:lane -- --plan ./artifacts/device-lane/mvl.plan.json --manifest ./artifacts/r0.repeat-manifest.json --manifest ./artifacts/r1.repeat-manifest.json --manifest ./artifacts/c1.repeat-manifest.json --manifest ./artifacts/domc.repeat-manifest.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --out ./artifacts/device-lane/mvl.report.json
 npm run review:packet -- --packet ./artifacts/g7-review.packet.json --out ./artifacts/g7-review.report.json
-npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --solver ./artifacts/solver.pareto.report.json --store-index ./artifacts/store/index.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
+npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --solver ./artifacts/solver.pareto.report.json --store-index ./artifacts/store/index.json --device-lane ./artifacts/device-lane/mvl.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
 npm run ci:glass -- --out ./artifacts/ci/glass-gate.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
@@ -140,6 +142,7 @@ G5: full-frame p95/dropped-frame runtime gate from artifact perf fields
 G6: short/sustained stress, thermal gate, sustained degradation, energy trace availability policy
 Solver: background-sweep loss over S07-S11, Pareto front, knee selection, identifiability lattice, claim constraints
 Artifact Store: content-addressed blob writer, immutable hash manifest, retention plan with tombstones
+Physical Lane: pending plan plus verifier for collected physical compositor/framebuffer repeat manifests
 G7: structured design/product sign-off packet; artifact-bound blockers only
 G8: final verdict report with separate technical/disposition/design classes
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
@@ -180,6 +183,14 @@ blobs; expired artifacts become delete candidates with tombstones and
 `hash_manifest_preserved=true`. Baselines and release-candidate artifacts are
 indefinite retention classes.
 
+Current physical-device lane scope creates a machine-readable capture plan and
+verifies collected repeat manifests artifact-by-artifact. It rejects simulator
+artifacts, rejects `layer_snapshot`, requires compositor/framebuffer capture,
+requires nominal thermal start, requires Low Power Mode off, verifies PNG and
+mask hashes, enforces the S03 trajectory source hash, and checks G2-G6 reports
+for MVL/prod/sustained lanes. Hosted GitHub CI still cannot mint this evidence;
+it names the required lane report as pending instead.
+
 Current G7 scope validates a review packet rather than free-form taste: every
 block needs scene, state, mask, artifact pointer, reviewer category, written
 reason, owner, and ticket. Naked objections like "looks off" or "не нравится"
@@ -191,14 +202,16 @@ instead of allowing a fake SwiftUI claim, and carries solver-selected candidate
 plus identifiability claim constraints into the final report when a solver
 report is provided. When an artifact-store index is provided, G8 also carries
 the candidate retention entry instead of pretending retention was recorded.
+When a physical-device lane report is provided, non-pass lane status blocks the
+final verdict instead of being buried as a note.
 
 Current CI scope is the source guillotine in `.github/workflows/glass-gate.yml`
 with policy in `ci/glass-gate.yml`. It runs typecheck, the full lab self-test,
 and workspace diff hygiene, then uploads `ci_glass_gate_report` as
 `glass-gate-report`. Hosted CI is not a physical-device verdict lane; when
 glass-affecting files change, the report marks physical capture as
-`pending_device_lane` rather than pretending a simulator or Linux runner can
-mint parity.
+`pending_device_lane` and `pending_physical_device_lane_report` rather than
+pretending a simulator or Linux runner can mint parity.
 
 The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
 capture repeatedly, writes a `repeat_capture_manifest`, and enforces nominal

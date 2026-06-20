@@ -76,6 +76,7 @@ function makeReport({ args, lane, changedFiles, commands, status, blockers }) {
     policy: {
       config_path: "ci/glass-gate.yml",
       physical_device_capture_required_for_final_verdict: lane.physical_device_capture_required,
+      physical_device_lane_required_for_final_verdict: lane.physical_device_capture_required,
       hosted_ci_scope: lane.physical_device_capture_required
         ? "source_guillotine_only_not_final_physical_verdict"
         : "source_guillotine",
@@ -87,6 +88,7 @@ function makeReport({ args, lane, changedFiles, commands, status, blockers }) {
       G0_G8_SELF_TEST: commandStatus(commands, "lab_self_test"),
       workspace_hygiene: commandStatus(commands, "diff_check"),
       physical_device_capture: lane.physical_device_capture_required ? "pending_device_lane" : "not_required",
+      physical_device_lane: lane.physical_device_capture_required ? "pending_physical_device_lane_report" : "not_required",
       flake_class: blockers.length === 0 ? "NONE" : "UNKNOWN"
     },
     commands,
@@ -138,6 +140,7 @@ function isGlassAffectingPath(file) {
     path.startsWith("packages/energy-stack/") ||
     path.startsWith("packages/solver/") ||
     path.startsWith("packages/artifact-store/") ||
+    path.startsWith("packages/device-lane/") ||
     path.startsWith("packages/review-stack/") ||
     path.startsWith("packages/verdict-stack/") ||
     path.startsWith("scripts/lab-") ||

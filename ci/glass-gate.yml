@@ -14,6 +14,7 @@ lanes:
       - npm run lab:self-test
       - git diff --check
     physical_device_capture: pending_device_lane
+    physical_device_lane_report: pending_physical_device_lane_report
   release:
     trigger: workflow_dispatch_or_main
     required_commands:
@@ -22,6 +23,7 @@ lanes:
       - git diff --check
     g7: required
     physical_device_capture: pending_device_lane
+    physical_device_lane_report: pending_physical_device_lane_report
   nightly:
     trigger: schedule
     required_commands:
@@ -45,6 +47,7 @@ glass_affecting_paths:
   - packages/energy-stack/**
   - packages/solver/**
   - packages/artifact-store/**
+  - packages/device-lane/**
   - packages/review-stack/**
   - packages/verdict-stack/**
   - scripts/lab-*.mjs

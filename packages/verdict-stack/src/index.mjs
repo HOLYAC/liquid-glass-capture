@@ -2,7 +2,7 @@ import { retentionSummaryForHash } from "../../artifact-store/src/index.mjs";
 
 const requiredTechnicalGates = ["G2", "G3", "G4", "G5", "G6"];
 
-export function buildVerdictReport({ candidateRecord, gateReports = [], reviewReport, baselineReport, solverReport, artifactStoreIndex, preflightFailures = [] }) {
+export function buildVerdictReport({ candidateRecord, gateReports = [], reviewReport, baselineReport, solverReport, artifactStoreIndex, physicalDeviceLaneReport, preflightFailures = [] }) {
   const artifact = candidateRecord.artifact ?? candidateRecord;
   const failures = [...preflightFailures];
   const blockers = [];
@@ -39,6 +39,14 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       failures.push("G8_C1_NOT_SELECTED_SOLVER_CANDIDATE");
     }
   }
+  if (physicalDeviceLaneReport) {
+    if (physicalDeviceLaneReport.kind !== "physical_device_lane_report") {
+      failures.push("G8_PHYSICAL_DEVICE_LANE_REPORT_KIND_INVALID");
+    } else if (physicalDeviceLaneReport.status !== "pass") {
+      blockers.push(`G8_PHYSICAL_DEVICE_LANE_${String(physicalDeviceLaneReport.status).toUpperCase()}`);
+      blockers.push(...(physicalDeviceLaneReport.failures ?? []));
+    }
+  }
 
   const invalid = failures.length > 0;
   const hardFailed = blockers.length > 0;
@@ -73,6 +81,7 @@ export function buildVerdictReport({ candidateRecord, gateReports = [], reviewRe
       design: designStatus(designClass)
     },
     solver: solverReport ? solverSummary(solverReport) : { status: "not_recorded" },
+    physical_device_lane: physicalDeviceLaneReport ? physicalDeviceLaneSummary(physicalDeviceLaneReport) : { status: "not_recorded" },
     identifiability: Object.keys(solverIdentifiability).length > 0
       ? solverIdentifiability
       : artifact.shader?.identifiability ?? {},
@@ -117,6 +126,19 @@ function solverSummary(report) {
     required_degeneracy_scene_ids: report.background_sweep?.required_scene_ids ?? [],
     observed_scene_ids: report.background_sweep?.observed_scene_ids ?? [],
     claim_constraint_count: report.claim_constraints?.length ?? 0
+  };
+}
+
+function physicalDeviceLaneSummary(report) {
+  return {
+    status: report.status,
+    lane_class: report.lane_class ?? null,
+    task_count: report.task_count ?? 0,
+    gate_status: report.gates?.status ?? "not_recorded",
+    simulator_forbidden: report.evidence?.simulator_forbidden === true,
+    layer_snapshot_forbidden: report.evidence?.layer_snapshot_forbidden === true,
+    hashes_verified: report.evidence?.hashes_verified === true,
+    failure_count: report.failures?.length ?? 0
   };
 }
 
