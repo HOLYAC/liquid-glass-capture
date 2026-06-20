@@ -13,11 +13,36 @@ export const physicalDeviceLanePolicy = Object.freeze({
   required_gate_ids: Object.freeze(["G2", "G3", "G4", "G5", "G6"]),
   required_capture_kinds: Object.freeze(["compositor", "framebuffer"]),
   physical_rigs: Object.freeze(["R0", "R1", "C1", "DOM_C"]),
+  scene_state_matrix: Object.freeze({
+    S00_NULL: Object.freeze(["s00_flat_grey", "s00_hard_edge", "s00_p3_ramp", "s00_smooth_gradient"]),
+    S01_SEARCH: Object.freeze(["rest"]),
+    S02_LOUPE: Object.freeze(["drag"]),
+    S03_PRESS: Object.freeze(["press"]),
+    S04_MORPH: Object.freeze(["morph"]),
+    S05_FLOATING_BAR: Object.freeze(["floating_rest"]),
+    S06_TINY_GLASS: Object.freeze(["tiny_rest"]),
+    S07_BUSY_PHOTO: Object.freeze(["busy_photo_rest"]),
+    S08_P3_GRADIENT: Object.freeze(["p3_gradient_rest"]),
+    S09_NEAR_WHITE: Object.freeze(["near_white_rest"]),
+    S10_NEAR_BLACK: Object.freeze(["near_black_rest"]),
+    S11_VIDEO_FRAME: Object.freeze(["video_frame_rest"]),
+    S12_SYSTEM_MATERIAL_ADJACENCY: Object.freeze(["system_material_rest"])
+  }),
   default_tasks: Object.freeze([
     { rig_id: "R0", scene_id: "S01_SEARCH", state_id: "rest" },
     { rig_id: "R1", scene_id: "S01_SEARCH", state_id: "rest" },
     { rig_id: "C1", scene_id: "S03_PRESS", state_id: "press" },
-    { rig_id: "DOM_C", scene_id: "S01_SEARCH", state_id: "rest" }
+    { rig_id: "DOM_C", scene_id: "S01_SEARCH", state_id: "rest" },
+    { rig_id: "C1", scene_id: "S02_LOUPE", state_id: "drag" },
+    { rig_id: "C1", scene_id: "S04_MORPH", state_id: "morph" },
+    { rig_id: "C1", scene_id: "S05_FLOATING_BAR", state_id: "floating_rest" },
+    { rig_id: "C1", scene_id: "S06_TINY_GLASS", state_id: "tiny_rest" },
+    { rig_id: "C1", scene_id: "S07_BUSY_PHOTO", state_id: "busy_photo_rest" },
+    { rig_id: "C1", scene_id: "S08_P3_GRADIENT", state_id: "p3_gradient_rest" },
+    { rig_id: "C1", scene_id: "S09_NEAR_WHITE", state_id: "near_white_rest" },
+    { rig_id: "C1", scene_id: "S10_NEAR_BLACK", state_id: "near_black_rest" },
+    { rig_id: "C1", scene_id: "S11_VIDEO_FRAME", state_id: "video_frame_rest" },
+    { rig_id: "C1", scene_id: "S12_SYSTEM_MATERIAL_ADJACENCY", state_id: "system_material_rest" }
   ]),
   trajectory_sha_by_scene: Object.freeze({
     S03_PRESS: "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd"
@@ -48,6 +73,7 @@ export function buildPhysicalDeviceLanePlan({
     policy: {
       required_gate_ids: policy.required_gate_ids,
       required_capture_kinds: policy.required_capture_kinds,
+      scene_state_matrix: policy.scene_state_matrix,
       derivation: policy.derivation
     },
     task_count: normalizedTasks.length,
@@ -128,6 +154,9 @@ function normalizeTask(task, index, lanePolicy, policy) {
   const repeat = task.repeat_count_requested ?? lanePolicy.repeat;
   if (!policy.physical_rigs.includes(rigId)) throw new Error(`task ${index}: unsupported physical rig ${rigId}`);
   if (!sceneId || !stateId) throw new Error(`task ${index}: scene_id and state_id are required`);
+  const validStates = policy.scene_state_matrix?.[sceneId];
+  if (!validStates) throw new Error(`task ${index}: unsupported scene ${sceneId}`);
+  if (!validStates.includes(stateId)) throw new Error(`task ${index}: state ${stateId} is not valid for ${sceneId}`);
   return {
     schema_version: "1.2.0",
     kind: "physical_device_lane_task",

@@ -204,6 +204,21 @@ public final class LiquidGlassCaptureView: ExpoView {
       framePack["trajectory_source_sha256"] = trajectorySourceSHA256
     }
 
+    var environment: [String: Any] = [
+      "appearance": traitCollection.userInterfaceStyle == .light ? "light" : "dark",
+      "reduce_transparency": UIAccessibility.isReduceTransparencyEnabled,
+      "reduce_motion": UIAccessibility.isReduceMotionEnabled,
+      "content_seed": metadata["contentSeed"] as? String ?? Self.contentSeed(for: stateId),
+      "viewport_px": [
+        "width": Int(bounds.width * format.scale),
+        "height": Int(bounds.height * format.scale)
+      ],
+      "capture_timestamp_ns": "\(UInt64(Date().timeIntervalSince1970 * 1_000_000_000))"
+    ]
+    if let backgroundAssetHash = metadata["backgroundAssetHash"] as? String {
+      environment["background_asset_hash"] = backgroundAssetHash
+    }
+
     var artifact: [String: Any] = [
       "schema_version": "1.2.0",
       "id": artifactId,
@@ -228,17 +243,7 @@ public final class LiquidGlassCaptureView: ExpoView {
         "thermal_state_start": Self.thermalStateString(ProcessInfo.processInfo.thermalState),
         "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
       ],
-      "environment": [
-        "appearance": traitCollection.userInterfaceStyle == .light ? "light" : "dark",
-        "reduce_transparency": UIAccessibility.isReduceTransparencyEnabled,
-        "reduce_motion": UIAccessibility.isReduceMotionEnabled,
-        "content_seed": Self.contentSeed(for: stateId),
-        "viewport_px": [
-          "width": Int(bounds.width * format.scale),
-          "height": Int(bounds.height * format.scale)
-        ],
-        "capture_timestamp_ns": "\(UInt64(Date().timeIntervalSince1970 * 1_000_000_000))"
-      ],
+      "environment": environment,
       "color": [
         "embedded_icc_profile": "Display P3",
         "icc_sha256": "unverified-layer-snapshot",
@@ -637,6 +642,30 @@ public final class LiquidGlassCaptureView: ExpoView {
       return "s00-p3-ramp-v1"
     case "s00_smooth_gradient":
       return "s00-smooth-gradient-v1"
+    case "rest":
+      return "s01-search-selection-v1"
+    case "drag":
+      return "s02-loupe-text-drag-v1"
+    case "press":
+      return "s03-press-control-v1"
+    case "morph":
+      return "s04-twin-capsule-morph-v1"
+    case "floating_rest":
+      return "s05-floating-bar-v1"
+    case "tiny_rest":
+      return "s06-tiny-control-v1"
+    case "busy_photo_rest":
+      return "s07-busy-photo-procedural-v1"
+    case "p3_gradient_rest":
+      return "s08-p3-saturated-gradient-v1"
+    case "near_white_rest":
+      return "s09-near-white-v1"
+    case "near_black_rest":
+      return "s10-near-black-v1"
+    case "video_frame_rest":
+      return "s11-video-high-frequency-procedural-v1"
+    case "system_material_rest":
+      return "s12-system-material-adjacency-procedural-v1"
     default:
       return "manual-\(stateId)"
     }
@@ -712,6 +741,15 @@ public enum SubstrateKind: String {
   case textWeights = "text_weights"
   case caretSelection = "caret_selection"
   case nativeTextSelection = "native_text_selection"
+  case loupeText = "loupe_text"
+  case floatingBarContent = "floating_bar_content"
+  case tinyControlContent = "tiny_control_content"
+  case busyPhoto = "busy_photo"
+  case p3SaturatedGradient = "p3_saturated_gradient"
+  case nearWhite = "near_white"
+  case nearBlack = "near_black"
+  case videoFrame = "video_frame"
+  case systemMaterialAdjacency = "system_material_adjacency"
   case noise
 }
 
@@ -893,6 +931,69 @@ struct CandidateWebRigView: UIViewRepresentable {
               ctx.fillRect(0, 0, w, h);
               return;
             }
+            if (substrate === "loupe_text") {
+              drawLoupeText(ctx, w, h);
+              return;
+            }
+            if (substrate === "floating_bar_content") {
+              drawFloatingBarContent(ctx, w, h);
+              return;
+            }
+            if (substrate === "tiny_control_content") {
+              drawTinyControlContent(ctx, w, h);
+              return;
+            }
+            if (substrate === "busy_photo") {
+              drawBusyPhoto(ctx, w, h);
+              return;
+            }
+            if (substrate === "p3_saturated_gradient") {
+              const g = ctx.createLinearGradient(0, 0, w, h);
+              g.addColorStop(0.0, "color(display-p3 1 0.05 0.18)");
+              g.addColorStop(0.24, "color(display-p3 1 0.72 0)");
+              g.addColorStop(0.50, "color(display-p3 0 0.95 0.58)");
+              g.addColorStop(0.74, "color(display-p3 0 0.38 1)");
+              g.addColorStop(1.0, "color(display-p3 0.92 0 1)");
+              ctx.fillStyle = g;
+              ctx.fillRect(0, 0, w, h);
+              return;
+            }
+            if (substrate === "near_white") {
+              ctx.fillStyle = "rgb(240,240,240)";
+              ctx.fillRect(0, 0, w, h);
+              for (let i = 0; i < 18; i++) {
+                ctx.fillStyle = `rgba(${210 + (i % 5) * 7}, ${210 + (i % 5) * 7}, ${210 + (i % 5) * 7}, 0.82)`;
+                roundRect(ctx, (i * 0.29 % 1) * w, (i * 0.47 % 1) * h, w * (0.16 + (i % 5) * 0.035), 18 + (i % 4) * 7, 16);
+                ctx.fill();
+              }
+              return;
+            }
+            if (substrate === "near_black") {
+              ctx.fillStyle = "rgb(4,4,4)";
+              ctx.fillRect(0, 0, w, h);
+              for (let i = 0; i < 42; i++) {
+                const r = 2 + (i % 7);
+                ctx.fillStyle = `rgba(${26 + (i % 6) * 6}, ${26 + (i % 6) * 6}, ${26 + (i % 6) * 6}, 0.86)`;
+                ctx.beginPath();
+                ctx.arc((i * 0.17 % 1) * w, (i * 0.43 % 1) * h, r, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              ctx.strokeStyle = "rgba(255,255,255,0.10)";
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.moveTo(0, h * 0.63);
+              ctx.lineTo(w, h * 0.57);
+              ctx.stroke();
+              return;
+            }
+            if (substrate === "video_frame") {
+              drawVideoFrame(ctx, w, h);
+              return;
+            }
+            if (substrate === "system_material_adjacency") {
+              drawSystemMaterialAdjacency(ctx, w, h);
+              return;
+            }
             ctx.fillStyle = "#000";
             ctx.fillRect(0, 0, w, h);
             const cell = Math.max(4, Math.round(4 * (window.devicePixelRatio || 1)));
@@ -901,6 +1002,136 @@ struct CandidateWebRigView: UIViewRepresentable {
                 ctx.fillStyle = ((x / cell + y / cell) % 2) < 1 ? "#ebebeb" : "#0f0f0f";
                 ctx.fillRect(x, y, cell, cell);
               }
+            }
+          }
+
+          function drawLoupeText(ctx, w, h) {
+            const g = ctx.createLinearGradient(0, 0, w, h);
+            g.addColorStop(0, "#0a0a0b");
+            g.addColorStop(0.48, "#202124");
+            g.addColorStop(1, "#050506");
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, w, h);
+            const boxW = Math.min(w * 0.78, 980 * (window.devicePixelRatio || 1));
+            const boxH = Math.min(h * 0.24, 220 * (window.devicePixelRatio || 1));
+            roundRect(ctx, (w - boxW) * 0.5, h * 0.46, boxW, boxH, 30 * (window.devicePixelRatio || 1));
+            ctx.fillStyle = "#151515";
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = `${38 * (window.devicePixelRatio || 1)}px -apple-system, system-ui`;
+            ctx.fillText("liquid glass measures the air between letters", (w - boxW) * 0.5 + 42, h * 0.46 + 62);
+            ctx.fillStyle = "#94d1ff";
+            ctx.font = `600 ${24 * (window.devicePixelRatio || 1)}px -apple-system, system-ui`;
+            ctx.fillText("drag vector / selection handle / magnified baseline", (w - boxW) * 0.5 + 42, h * 0.46 + 110);
+          }
+
+          function drawFloatingBarContent(ctx, w, h) {
+            const g = ctx.createLinearGradient(0, 0, 0, h);
+            g.addColorStop(0, "#06101a");
+            g.addColorStop(0.5, "#152021");
+            g.addColorStop(1, "#020406");
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, w, h);
+            const margin = Math.min(w * 0.08, 80 * (window.devicePixelRatio || 1));
+            for (let i = 0; i < 6; i++) {
+              const y = h * 0.16 + i * 104 * (window.devicePixelRatio || 1);
+              roundRect(ctx, margin, y, w - margin * 2, 86 * (window.devicePixelRatio || 1), 24 * (window.devicePixelRatio || 1));
+              ctx.fillStyle = i % 2 === 0 ? "#292929" : "#191919";
+              ctx.fill();
+              ctx.fillStyle = `hsl(${i * 52}, 72%, 62%)`;
+              ctx.beginPath();
+              ctx.arc(margin + 46, y + 43, 23 * (window.devicePixelRatio || 1), 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = "rgba(255,255,255,0.72)";
+              roundRect(ctx, margin + 92, y + 26, 220, 9, 5);
+              ctx.fill();
+              ctx.fillStyle = "rgba(255,255,255,0.26)";
+              roundRect(ctx, margin + 92, y + 48, 420, 7, 4);
+              ctx.fill();
+            }
+          }
+
+          function drawTinyControlContent(ctx, w, h) {
+            ctx.fillStyle = "#0c0c0c";
+            ctx.fillRect(0, 0, w, h);
+            const bw = 70 * (window.devicePixelRatio || 1);
+            const bh = 48 * (window.devicePixelRatio || 1);
+            const gap = 18 * (window.devicePixelRatio || 1);
+            const startX = (w - (bw * 5 + gap * 4)) * 0.5;
+            const startY = (h - (bh * 4 + gap * 3)) * 0.5;
+            for (let row = 0; row < 4; row++) {
+              for (let col = 0; col < 5; col++) {
+                const active = (row + col) % 3 === 0;
+                roundRect(ctx, startX + col * (bw + gap), startY + row * (bh + gap), bw, bh, 18);
+                ctx.fillStyle = active ? "#33b3f2" : "#2b2b2b";
+                ctx.fill();
+              }
+            }
+          }
+
+          function drawBusyPhoto(ctx, w, h) {
+            const g = ctx.createLinearGradient(0, 0, w, h);
+            g.addColorStop(0, "#081018");
+            g.addColorStop(0.5, "#384733");
+            g.addColorStop(1, "#0f0d14");
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, w, h);
+            for (let i = 0; i < 72; i++) {
+              const x = ((i * 37) % 100) / 100 * w;
+              const y = ((i * 61) % 100) / 100 * h;
+              const rw = w * (0.05 + (i % 7) * 0.012);
+              const rh = h * (0.035 + (i % 5) * 0.011);
+              roundRect(ctx, x - rw * 0.5, y - rh * 0.5, rw, rh, Math.min(rw, rh) * 0.34);
+              ctx.fillStyle = `hsla(${i * 19}, ${48 + (i % 4) * 9}%, ${44 + (i % 5) * 8}%, 0.72)`;
+              ctx.fill();
+              if (i % 4 === 0) {
+                ctx.strokeStyle = "rgba(255,255,255,0.18)";
+                ctx.beginPath();
+                ctx.arc(x + (i % 11) - 18, y - 18, 18, 0, Math.PI * 2);
+                ctx.stroke();
+              }
+            }
+          }
+
+          function drawVideoFrame(ctx, w, h) {
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, w, h);
+            const stripeW = Math.max(2, w / 120);
+            let x = 0;
+            let i = 0;
+            while (x < w) {
+              ctx.fillStyle = `hsl(${i * 47}, 72%, ${18 + (i % 9) * 7.5}%)`;
+              ctx.fillRect(x, 0, stripeW + 1, h);
+              x += stripeW;
+              i += 1;
+            }
+            for (let row = 0; row < 18; row++) {
+              ctx.fillStyle = row % 3 === 0 ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.09)";
+              ctx.fillRect(0, h * row / 18, w, 1);
+            }
+          }
+
+          function drawSystemMaterialAdjacency(ctx, w, h) {
+            const g = ctx.createLinearGradient(0, 0, w, h);
+            g.addColorStop(0, "#05080d");
+            g.addColorStop(0.5, "#1a1a1f");
+            g.addColorStop(1, "#08050a");
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, w, h);
+            const cardW = 230 * (window.devicePixelRatio || 1);
+            const gap = 22 * (window.devicePixelRatio || 1);
+            const start = (w - cardW * 3 - gap * 2) * 0.5;
+            for (let i = 0; i < 3; i++) {
+              const x = start + i * (cardW + gap);
+              const y = h * 0.34;
+              roundRect(ctx, x - 26, y - 58, cardW + 52, 240, 34);
+              ctx.fillStyle = "rgba(255,255,255,0.06)";
+              ctx.fill();
+              roundRect(ctx, x, y, cardW, 130 + i * 26, 26);
+              ctx.fillStyle = "rgba(255,255,255,0.18)";
+              ctx.fill();
+              ctx.strokeStyle = "rgba(255,255,255,0.18)";
+              ctx.stroke();
             }
           }
 
@@ -948,6 +1179,15 @@ struct CandidateWebRigView: UIViewRepresentable {
           .s00_hard_edge { background: linear-gradient(90deg, #000 0 50%, #fff 50% 100%); }
           .s00_p3_ramp { background: linear-gradient(90deg, color(display-p3 1 0 0), color(display-p3 0 1 0) 34%, color(display-p3 0 0 1) 67%, #fff); }
           .s00_smooth_gradient { background: linear-gradient(135deg, rgb(20,20,20), rgb(107,107,107) 38%, rgb(163,163,163) 62%, rgb(235,235,235)); }
+          .loupe_text { background: linear-gradient(135deg, #0a0a0b, #202124 48%, #050506); }
+          .floating_bar_content { background: repeating-linear-gradient(180deg, #06101a 0 92px, #152021 92px 184px, #020406 184px 276px); }
+          .tiny_control_content { background-color:#0c0c0c; background-image: radial-gradient(circle at 36% 46%, #33b3f2 0 18px, transparent 19px), radial-gradient(circle at 58% 52%, #333 0 24px, transparent 25px); }
+          .busy_photo { background: radial-gradient(circle at 20% 30%, #795d2a, transparent 19%), radial-gradient(circle at 70% 35%, #295f77, transparent 16%), radial-gradient(circle at 46% 70%, #7a294d, transparent 21%), linear-gradient(135deg, #081018, #384733 50%, #0f0d14); }
+          .p3_saturated_gradient { background: linear-gradient(135deg, color(display-p3 1 0.05 0.18), color(display-p3 1 0.72 0) 24%, color(display-p3 0 0.95 0.58) 50%, color(display-p3 0 0.38 1) 74%, color(display-p3 0.92 0 1)); }
+          .near_white { background: linear-gradient(135deg, #f2f2f2, #dedede 48%, #fafafa); }
+          .near_black { background: radial-gradient(circle at 70% 30%, #222, transparent 16%), linear-gradient(165deg, #030303, #111 52%, #050505); }
+          .video_frame { background-size: 7px 100%, 100% 32px; background-image: repeating-linear-gradient(90deg, #1d1d1d 0 2px, #724b98 2px 4px, #246674 4px 6px, #989225 6px 7px), repeating-linear-gradient(180deg, rgba(255,255,255,0.24) 0 1px, transparent 1px 32px); }
+          .system_material_adjacency { background: linear-gradient(135deg, #05080d, #1a1a1f 50%, #08050a); }
           .fallback { background-size: 8px 8px; background-image: linear-gradient(45deg, #ebebeb 25%, #0f0f0f 25%, #0f0f0f 50%, #ebebeb 50%, #ebebeb 75%, #0f0f0f 75%); }
           .black { background:#000; }
           .glass {
@@ -984,6 +1224,24 @@ struct CandidateWebRigView: UIViewRepresentable {
       return "s00_p3_ramp"
     case .s00SmoothGradient:
       return "s00_smooth_gradient"
+    case .loupeText:
+      return "loupe_text"
+    case .floatingBarContent:
+      return "floating_bar_content"
+    case .tinyControlContent:
+      return "tiny_control_content"
+    case .busyPhoto:
+      return "busy_photo"
+    case .p3SaturatedGradient:
+      return "p3_saturated_gradient"
+    case .nearWhite:
+      return "near_white"
+    case .nearBlack:
+      return "near_black"
+    case .videoFrame:
+      return "video_frame"
+    case .systemMaterialAdjacency:
+      return "system_material_adjacency"
     default:
       return "fallback"
     }
@@ -1019,6 +1277,24 @@ struct NativeSubstrateView: View {
         CaretSelection()
       case .nativeTextSelection:
         NativeTextSelection()
+      case .loupeText:
+        LoupeText()
+      case .floatingBarContent:
+        FloatingBarContent()
+      case .tinyControlContent:
+        TinyControlContent()
+      case .busyPhoto:
+        BusyPhotoSubstrate()
+      case .p3SaturatedGradient:
+        P3SaturatedGradient()
+      case .nearWhite:
+        NearWhiteSubstrate()
+      case .nearBlack:
+        NearBlackSubstrate()
+      case .videoFrame:
+        VideoFrameSubstrate()
+      case .systemMaterialAdjacency:
+        SystemMaterialAdjacencySubstrate()
       case .noise:
         NoiseSubstrate()
       }
@@ -1276,6 +1552,266 @@ struct NativeTextSelectionTextView: UIViewRepresentable {
       let location = textView.text.distance(from: textView.text.startIndex, to: range.lowerBound)
       let length = textView.text.distance(from: range.lowerBound, to: range.upperBound)
       textView.selectedRange = NSRange(location: location, length: length)
+    }
+  }
+}
+
+private func roundedPath(_ rect: CGRect, radius: CGFloat) -> Path {
+  var path = Path()
+  path.addRoundedRect(in: rect, cornerSize: CGSize(width: radius, height: radius))
+  return path
+}
+
+struct LoupeText: View {
+  var body: some View {
+    ZStack {
+      LinearGradient(
+        stops: [
+          .init(color: Color(white: 0.04), location: 0),
+          .init(color: Color(white: 0.12), location: 0.48),
+          .init(color: Color(white: 0.02), location: 1)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+      VStack(alignment: .leading, spacing: 10) {
+        Text("liquid glass measures the air between letters")
+          .font(.system(size: 38, weight: .regular))
+        Text("drag vector / selection handle / magnified baseline")
+          .font(.system(size: 24, weight: .semibold))
+          .foregroundStyle(Color(red: 0.58, green: 0.82, blue: 1.0))
+        Text("No single frame is enough. The lens has to stay truthful while the text moves.")
+          .font(.system(size: 20, weight: .regular))
+          .foregroundStyle(.white.opacity(0.72))
+      }
+      .foregroundStyle(.white)
+      .padding(42)
+      .frame(maxWidth: 980, alignment: .leading)
+      .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+      .overlay(
+        RoundedRectangle(cornerRadius: 30, style: .continuous)
+          .stroke(Color.white.opacity(0.12), lineWidth: 1)
+      )
+    }
+  }
+}
+
+struct FloatingBarContent: View {
+  var body: some View {
+    GeometryReader { proxy in
+      ZStack {
+        LinearGradient(
+          colors: [
+            Color(red: 0.02, green: 0.05, blue: 0.08),
+            Color(red: 0.08, green: 0.12, blue: 0.12),
+            Color(red: 0.01, green: 0.02, blue: 0.03)
+          ],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+        VStack(spacing: 18) {
+          ForEach(0..<6, id: \.self) { index in
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+              .fill(index.isMultiple(of: 2) ? Color(white: 0.16) : Color(white: 0.10))
+              .overlay(alignment: .leading) {
+                HStack(spacing: 18) {
+                  Circle()
+                    .fill(Color(hue: Double(index) / 7.0, saturation: 0.68, brightness: 0.92))
+                    .frame(width: 46, height: 46)
+                  VStack(alignment: .leading, spacing: 8) {
+                    Capsule().fill(.white.opacity(0.72)).frame(width: 220, height: 9)
+                    Capsule().fill(.white.opacity(0.26)).frame(width: 420, height: 7)
+                  }
+                }
+                .padding(.horizontal, 22)
+              }
+              .frame(height: 86)
+          }
+        }
+        .padding(.horizontal, min(proxy.size.width * 0.08, 80))
+      }
+    }
+  }
+}
+
+struct TinyControlContent: View {
+  var body: some View {
+    ZStack {
+      Color(white: 0.045)
+      VStack(spacing: 24) {
+        ForEach(0..<4, id: \.self) { row in
+          HStack(spacing: 18) {
+            ForEach(0..<5, id: \.self) { col in
+              let active = (row + col).isMultiple(of: 3)
+              RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(active ? Color(red: 0.20, green: 0.70, blue: 0.95) : Color(white: 0.17))
+                .frame(width: 70, height: 48)
+                .overlay(
+                  RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(active ? 0.42 : 0.12), lineWidth: 1)
+                )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+struct BusyPhotoSubstrate: View {
+  var body: some View {
+    Canvas { context, size in
+      let background = GraphicsContext.Shading.linearGradient(
+        Gradient(colors: [
+          Color(red: 0.03, green: 0.06, blue: 0.08),
+          Color(red: 0.22, green: 0.28, blue: 0.20),
+          Color(red: 0.06, green: 0.05, blue: 0.08)
+        ]),
+        startPoint: .zero,
+        endPoint: CGPoint(x: size.width, y: size.height)
+      )
+      context.fill(Path(CGRect(origin: .zero, size: size)), with: background)
+
+      for index in 0..<72 {
+        let f = CGFloat(index)
+        let x = size.width * CGFloat((index * 37 % 100)) / 100.0
+        let y = size.height * CGFloat((index * 61 % 100)) / 100.0
+        let w = size.width * (0.05 + CGFloat(index % 7) * 0.012)
+        let h = size.height * (0.035 + CGFloat(index % 5) * 0.011)
+        let hue = Double((index * 19) % 100) / 100.0
+        let rect = CGRect(x: x - w * 0.5, y: y - h * 0.5, width: w, height: h)
+        context.fill(
+          roundedPath(rect, radius: min(w, h) * 0.34),
+          with: .color(Color(hue: hue, saturation: 0.48 + Double(index % 4) * 0.09, brightness: 0.44 + Double(index % 5) * 0.08).opacity(0.72))
+        )
+        if index.isMultiple(of: 4) {
+          context.stroke(
+            Path(ellipseIn: CGRect(x: x + f.truncatingRemainder(dividingBy: 11) - 18, y: y - 18, width: 36, height: 36)),
+            with: .color(.white.opacity(0.18)),
+            lineWidth: 1.2
+          )
+        }
+      }
+    }
+  }
+}
+
+struct P3SaturatedGradient: View {
+  var body: some View {
+    Rectangle()
+      .fill(
+        LinearGradient(
+          stops: [
+            .init(color: Color(red: 1.0, green: 0.05, blue: 0.18), location: 0.0),
+            .init(color: Color(red: 1.0, green: 0.72, blue: 0.0), location: 0.24),
+            .init(color: Color(red: 0.0, green: 0.95, blue: 0.58), location: 0.50),
+            .init(color: Color(red: 0.0, green: 0.38, blue: 1.0), location: 0.74),
+            .init(color: Color(red: 0.92, green: 0.0, blue: 1.0), location: 1.0)
+          ],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+      )
+  }
+}
+
+struct NearWhiteSubstrate: View {
+  var body: some View {
+    Canvas { context, size in
+      context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(white: 0.94)))
+      for index in 0..<18 {
+        let width = size.width * (0.16 + CGFloat(index % 5) * 0.035)
+        let height = CGFloat(18 + (index % 4) * 7)
+        let x = size.width * CGFloat((index * 29 % 100)) / 100.0
+        let y = size.height * CGFloat((index * 47 % 100)) / 100.0
+        let value = 0.82 + Double(index % 5) * 0.028
+        context.fill(
+          roundedPath(CGRect(x: x, y: y, width: width, height: height), radius: height * 0.5),
+          with: .color(Color(white: value).opacity(0.82))
+        )
+      }
+    }
+  }
+}
+
+struct NearBlackSubstrate: View {
+  var body: some View {
+    Canvas { context, size in
+      context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(white: 0.015)))
+      for index in 0..<42 {
+        let x = size.width * CGFloat((index * 17 % 100)) / 100.0
+        let y = size.height * CGFloat((index * 43 % 100)) / 100.0
+        let radius = CGFloat(2 + (index % 7))
+        context.fill(
+          Path(ellipseIn: CGRect(x: x, y: y, width: radius * 2, height: radius * 2)),
+          with: .color(Color(white: 0.10 + Double(index % 6) * 0.025).opacity(0.86))
+        )
+      }
+      var horizon = Path()
+      horizon.move(to: CGPoint(x: 0, y: size.height * 0.63))
+      horizon.addLine(to: CGPoint(x: size.width, y: size.height * 0.57))
+      context.stroke(horizon, with: .color(.white.opacity(0.10)), lineWidth: 2)
+    }
+  }
+}
+
+struct VideoFrameSubstrate: View {
+  var body: some View {
+    Canvas { context, size in
+      context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
+      let stripeW = max(2, size.width / 120)
+      var x: CGFloat = 0
+      var index = 0
+      while x < size.width {
+        let hue = Double((index * 13) % 100) / 100.0
+        let brightness = 0.18 + Double(index % 9) * 0.075
+        context.fill(
+          Path(CGRect(x: x, y: 0, width: stripeW + 1, height: size.height)),
+          with: .color(Color(hue: hue, saturation: 0.72, brightness: brightness))
+        )
+        x += stripeW
+        index += 1
+      }
+      for row in 0..<18 {
+        let y = size.height * CGFloat(row) / 18.0
+        context.fill(
+          Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
+          with: .color(.white.opacity(row.isMultiple(of: 3) ? 0.30 : 0.09))
+        )
+      }
+    }
+  }
+}
+
+struct SystemMaterialAdjacencySubstrate: View {
+  var body: some View {
+    ZStack {
+      LinearGradient(
+        colors: [
+          Color(red: 0.02, green: 0.03, blue: 0.05),
+          Color(red: 0.10, green: 0.10, blue: 0.12),
+          Color(red: 0.03, green: 0.02, blue: 0.04)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+      HStack(spacing: 22) {
+        ForEach(0..<3, id: \.self) { index in
+          VStack(alignment: .leading, spacing: 18) {
+            Capsule().fill(.white.opacity(0.68)).frame(width: CGFloat(130 + index * 32), height: 10)
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+              .fill(.ultraThinMaterial)
+              .frame(width: 230, height: CGFloat(130 + index * 26))
+              .overlay(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                  .stroke(.white.opacity(0.18), lineWidth: 1)
+              )
+            Capsule().fill(.white.opacity(0.18)).frame(width: 180, height: 8)
+          }
+          .padding(26)
+          .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 34, style: .continuous))
+        }
+      }
     }
   }
 }

@@ -145,7 +145,7 @@ function makeCandidate(id, { lossBias, runtime, energy, blurSensitivity }) {
       runtime_cost_ms: runtime,
       energy_cost: energy
     },
-    background_sweep: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_HF"].map((sceneId, index) => ({
+    background_sweep: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_FRAME"].map((sceneId, index) => ({
       scene_id: sceneId,
       background_id: `${sceneId.toLowerCase()}_self_test`,
       metrics: {

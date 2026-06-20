@@ -105,10 +105,18 @@ Scan the QR code with the installed development client.
 The local lab scripts implement the first machine-checkable part of the
 v1.2 plan:
 
+The on-device scene surface now exposes the full v1.2 matrix: `S00_NULL`,
+`S01_SEARCH`, `S02_LOUPE`, `S03_PRESS`, `S04_MORPH`, `S05_FLOATING_BAR`,
+`S06_TINY_GLASS`, `S07_BUSY_PHOTO`, `S08_P3_GRADIENT`, `S09_NEAR_WHITE`,
+`S10_NEAR_BLACK`, `S11_VIDEO_FRAME`, and
+`S12_SYSTEM_MATERIAL_ADJACENCY`. Use the app's `scene` chip to select the
+matching fixed `scene/state/substrate/gesture` bundle before pressing `B`.
+
 ```bash
 npm run artifact:validate -- ./artifacts/sample.capture.json
 npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --out ./artifacts/ios-capture-plan.json
+npm run ios:capture -- --rig C1 --scene S07_BUSY_PHOTO --state busy_photo_rest --device physical --capture compositor --repeat 50 --out ./artifacts/ios-capture-s07-plan.json
 npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --manifest ./artifacts/r0.repeat-manifest.json
 npm run null:ladder -- --native ./artifacts/r0.capture.json --candidate ./artifacts/c0.capture.json --rung flat_p3_grey --out ./artifacts/null.report.json
 npm run metrics:compare -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g2.report.json

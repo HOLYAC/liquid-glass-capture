@@ -34,6 +34,15 @@ const substrates = [
   "text_weights",
   "caret_selection",
   "native_text_selection",
+  "loupe_text",
+  "floating_bar_content",
+  "tiny_control_content",
+  "busy_photo",
+  "p3_saturated_gradient",
+  "near_white",
+  "near_black",
+  "video_frame",
+  "system_material_adjacency",
   "noise"
 ] as const;
 const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
@@ -41,8 +50,220 @@ const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge
 const tints = ["none", "cyan", "amber", "red"] as const;
 const repeatCounts = [3, 10, 24, 50, 300] as const;
 const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
+const busyPhotoAssetHash = "77238364440e942b31adefec365389a6f2c25a9b0a5561945db9468f8337f148";
+const videoFrameAssetHash = "e976e690f06f8b955a86ab8e49d2fcef51f942c220e975a03c30d414702998a5";
+const systemMaterialAssetHash = "15cc42e8ad24fd0179d917962281292ea97ea735ceb12796f8eb681e92049fe6";
 
-type Choice = readonly string[];
+type SceneId =
+  | "S00_NULL"
+  | "S01_SEARCH"
+  | "S02_LOUPE"
+  | "S03_PRESS"
+  | "S04_MORPH"
+  | "S05_FLOATING_BAR"
+  | "S06_TINY_GLASS"
+  | "S07_BUSY_PHOTO"
+  | "S08_P3_GRADIENT"
+  | "S09_NEAR_WHITE"
+  | "S10_NEAR_BLACK"
+  | "S11_VIDEO_FRAME"
+  | "S12_SYSTEM_MATERIAL_ADJACENCY";
+type Substrate = (typeof substrates)[number];
+type Shape = (typeof shapes)[number];
+type Phase = (typeof phases)[number];
+type Mode = (typeof modes)[number];
+type Tint = (typeof tints)[number];
+type TouchPhase = "rest" | "press" | "drag" | "morph";
+type SceneSpec = {
+  sceneId: SceneId;
+  stateId: string;
+  substrate: Substrate;
+  shape: Shape;
+  phase: Phase;
+  mode: Mode;
+  tint: Tint;
+  interactive: boolean;
+  autoplay: boolean;
+  touchPhase: TouchPhase;
+  contentSeed: string;
+  backgroundAssetHash?: string;
+};
+
+const sceneSpecs = [
+  {
+    sceneId: "S00_NULL",
+    stateId: "s00_flat_grey",
+    substrate: "s00_flat_grey",
+    shape: "capsule",
+    phase: "rest",
+    mode: "substrate_only",
+    tint: "none",
+    interactive: false,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s00-flat-p3-grey-v1"
+  },
+  {
+    sceneId: "S01_SEARCH",
+    stateId: "rest",
+    substrate: "native_text_selection",
+    shape: "capsule",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: true,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s01-search-selection-v1"
+  },
+  {
+    sceneId: "S02_LOUPE",
+    stateId: "drag",
+    substrate: "loupe_text",
+    shape: "circle",
+    phase: "drag_right",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: true,
+    autoplay: true,
+    touchPhase: "drag",
+    contentSeed: "s02-loupe-text-drag-v1"
+  },
+  {
+    sceneId: "S03_PRESS",
+    stateId: "press",
+    substrate: "tiny_control_content",
+    shape: "capsule",
+    phase: "press",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: true,
+    autoplay: true,
+    touchPhase: "press",
+    contentSeed: "s03-press-control-v1"
+  },
+  {
+    sceneId: "S04_MORPH",
+    stateId: "morph",
+    substrate: "floating_bar_content",
+    shape: "twin_capsules",
+    phase: "morph_tall",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: true,
+    autoplay: true,
+    touchPhase: "morph",
+    contentSeed: "s04-twin-capsule-morph-v1"
+  },
+  {
+    sceneId: "S05_FLOATING_BAR",
+    stateId: "floating_rest",
+    substrate: "floating_bar_content",
+    shape: "capsule",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: true,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s05-floating-bar-v1"
+  },
+  {
+    sceneId: "S06_TINY_GLASS",
+    stateId: "tiny_rest",
+    substrate: "tiny_control_content",
+    shape: "circle",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: true,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s06-tiny-control-v1"
+  },
+  {
+    sceneId: "S07_BUSY_PHOTO",
+    stateId: "busy_photo_rest",
+    substrate: "busy_photo",
+    shape: "capsule",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: false,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s07-busy-photo-procedural-v1",
+    backgroundAssetHash: busyPhotoAssetHash
+  },
+  {
+    sceneId: "S08_P3_GRADIENT",
+    stateId: "p3_gradient_rest",
+    substrate: "p3_saturated_gradient",
+    shape: "capsule",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: false,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s08-p3-saturated-gradient-v1"
+  },
+  {
+    sceneId: "S09_NEAR_WHITE",
+    stateId: "near_white_rest",
+    substrate: "near_white",
+    shape: "capsule",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: false,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s09-near-white-v1"
+  },
+  {
+    sceneId: "S10_NEAR_BLACK",
+    stateId: "near_black_rest",
+    substrate: "near_black",
+    shape: "capsule",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: false,
+    autoplay: false,
+    touchPhase: "rest",
+    contentSeed: "s10-near-black-v1"
+  },
+  {
+    sceneId: "S11_VIDEO_FRAME",
+    stateId: "video_frame_rest",
+    substrate: "video_frame",
+    shape: "capsule",
+    phase: "rest",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: false,
+    autoplay: true,
+    touchPhase: "rest",
+    contentSeed: "s11-video-high-frequency-procedural-v1",
+    backgroundAssetHash: videoFrameAssetHash
+  },
+  {
+    sceneId: "S12_SYSTEM_MATERIAL_ADJACENCY",
+    stateId: "system_material_rest",
+    substrate: "system_material_adjacency",
+    shape: "twin_capsules",
+    phase: "merge_near",
+    mode: "glass_over_substrate",
+    tint: "none",
+    interactive: true,
+    autoplay: false,
+    touchPhase: "morph",
+    contentSeed: "s12-system-material-adjacency-procedural-v1",
+    backgroundAssetHash: systemMaterialAssetHash
+  }
+] as const satisfies readonly SceneSpec[];
+const sceneIds = sceneSpecs.map((scene) => scene.sceneId) as readonly SceneId[];
 
 const NativeLiquidGlassCaptureView = LiquidGlassCaptureView as React.ComponentType<
   LiquidGlassCaptureViewProps & {
@@ -54,53 +275,23 @@ function nextValue<T extends string | number>(values: readonly T[], current: T):
   return values[(values.indexOf(current) + 1) % values.length];
 }
 
-function contentSeedFor(substrate: string): string {
-  switch (substrate) {
-    case "s00_flat_grey":
-      return "s00-flat-p3-grey-v1";
-    case "s00_hard_edge":
-      return "s00-hard-edge-v1";
-    case "s00_p3_ramp":
-      return "s00-p3-ramp-v1";
-    case "s00_smooth_gradient":
-      return "s00-smooth-gradient-v1";
-    default:
-      return `manual-${substrate}`;
-  }
+function sceneSpecFor(sceneId: SceneId): SceneSpec {
+  return sceneSpecs.find((scene) => scene.sceneId === sceneId) ?? sceneSpecs[1];
 }
 
-function sceneIdFor(substrate: string, phase: string): "S00_NULL" | "S01_SEARCH" | "S03_PRESS" {
-  if (substrate.startsWith("s00_")) {
-    return "S00_NULL";
-  }
-  return phase === "press" ? "S03_PRESS" : "S01_SEARCH";
-}
-
-function stateIdFor(substrate: string, phase: string): string {
-  if (substrate.startsWith("s00_")) {
-    return substrate;
-  }
-  if (phase === "press") {
-    return "press";
-  }
-  if (phase.startsWith("drag")) {
-    return "drag";
-  }
-  if (phase.startsWith("merge") || phase.startsWith("morph")) {
-    return "morph";
-  }
-  return "rest";
-}
-
-function touchPhaseFor(phase: string): "rest" | "press" | "drag" | "morph" {
-  if (phase === "press") return "press";
-  if (phase.startsWith("drag")) return "drag";
-  if (phase.startsWith("merge") || phase.startsWith("morph")) return "morph";
-  return "rest";
-}
-
-function trajectoryShaFor(sceneId: string): string | undefined {
+function trajectoryShaFor(sceneId: SceneId): string | undefined {
   return sceneId === "S03_PRESS" ? s03PressTrajectorySha256 : undefined;
+}
+
+function addSceneMetadata(metadata: Record<string, unknown>, scene: SceneSpec) {
+  metadata["contentSeed"] = scene.contentSeed;
+  if (scene.backgroundAssetHash) {
+    metadata["backgroundAssetHash"] = scene.backgroundAssetHash;
+  }
+  const trajectorySourceSha256 = trajectoryShaFor(scene.sceneId);
+  if (trajectorySourceSha256) {
+    metadata["trajectorySourceSha256"] = trajectorySourceSha256;
+  }
 }
 
 function Chip({
@@ -122,14 +313,12 @@ function Chip({
 
 export default function App() {
   const glassRef = useRef<LiquidGlassCaptureViewHandle>(null);
+  const [sceneId, setSceneId] = useState<SceneId>("S01_SEARCH");
   const [rig, setRig] = useState<LiquidGlassCaptureRig>("R0");
-  const [mode, setMode] = useState<(typeof modes)[number]>("substrate_only");
-  const [substrate, setSubstrate] = useState<(typeof substrates)[number]>("native_text_selection");
-  const [shape, setShape] = useState<(typeof shapes)[number]>("twin_capsules");
-  const [phase, setPhase] = useState<(typeof phases)[number]>("merge_near");
-  const [tint, setTint] = useState<(typeof tints)[number]>("none");
+  const [mode, setMode] = useState<Mode>(sceneSpecFor("S01_SEARCH").mode);
+  const [tint, setTint] = useState<Tint>(sceneSpecFor("S01_SEARCH").tint);
   const [interactive, setInteractive] = useState(true);
-  const [autoplay, setAutoplay] = useState(true);
+  const [autoplay, setAutoplay] = useState(false);
   const [controls, setControls] = useState(false);
   const [touchCount, setTouchCount] = useState(0);
   const [captureStatus, setCaptureStatus] = useState("no capture");
@@ -138,41 +327,36 @@ export default function App() {
   const [repeatCount, setRepeatCount] = useState<(typeof repeatCounts)[number]>(50);
   const [lastReferenceArtifact, setLastReferenceArtifact] = useState<string | null>(null);
   const [lastCandidateArtifact, setLastCandidateArtifact] = useState<string | null>(null);
+  const scene = useMemo(() => sceneSpecFor(sceneId), [sceneId]);
 
   const scenario = useMemo(
-    () => [rig, substrate, shape, phase, mode, interactive ? "interactive" : "static", tint].join("__"),
-    [rig, substrate, shape, phase, mode, interactive, tint]
+    () => [rig, scene.sceneId, scene.stateId, scene.substrate, scene.shape, scene.phase, mode, interactive ? "interactive" : "static", tint].join("__"),
+    [rig, scene, mode, interactive, tint]
   );
 
+  function applyScene(nextSceneId: SceneId) {
+    const nextScene = sceneSpecFor(nextSceneId);
+    setSceneId(nextSceneId);
+    setMode(nextScene.mode);
+    setTint(nextScene.tint);
+    setInteractive(nextScene.interactive);
+    setAutoplay(nextScene.autoplay);
+  }
+
   function pressGlass() {
-    setInteractive(true);
-    setAutoplay(true);
-    setPhase("press");
+    applyScene("S03_PRESS");
   }
 
   function releaseGlass() {
     const nextTouch = touchCount + 1;
     setTouchCount(nextTouch);
-    setPhase(phases[nextTouch % phases.length]);
-
-    if (nextTouch % 2 === 0) {
-      setShape(nextValue(shapes, shape));
-    }
-
-    if (nextTouch % 3 === 0) {
-      setSubstrate(nextValue(substrates, substrate));
-    }
+    applyScene(sceneIds[nextTouch % sceneIds.length]);
   }
 
   function cycleScene() {
     const nextTouch = touchCount + 1;
     setTouchCount(nextTouch);
-    setPhase(phases[nextTouch % phases.length]);
-    setShape(nextValue(shapes, shape));
-
-    if (nextTouch % 2 === 0) {
-      setSubstrate(nextValue(substrates, substrate));
-    }
+    applyScene(nextValue(sceneIds, sceneId));
   }
 
   async function captureGlass() {
@@ -184,25 +368,20 @@ export default function App() {
     }
 
     try {
-      const sceneId = sceneIdFor(substrate, phase);
-      const stateId = stateIdFor(substrate, phase);
       const metadata: Record<string, unknown> = {
         schemaVersion: "1.2.0",
         labPlan: "apple_glass_parity_execution_plan_v1_2",
-        sceneId,
-        stateId,
+        sceneId: scene.sceneId,
+        stateId: scene.stateId,
         rigId: rig,
         captureKind: "layer_snapshot",
-        invalidReason: mode === "substrate_only" && substrate.startsWith("s00_") ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID",
+        invalidReason: mode === "substrate_only" && scene.sceneId === "S00_NULL" ? "MANUAL_S00_SMOKE" : "CAPTURE_PATH_INVALID",
         scenario,
         touchCount,
         controls,
         capturedFrom: "bottom_bar"
       };
-      const trajectorySourceSha256 = trajectoryShaFor(sceneId);
-      if (trajectorySourceSha256) {
-        metadata["trajectorySourceSha256"] = trajectorySourceSha256;
-      }
+      addSceneMetadata(metadata, scene);
 
       if (handle.captureLabArtifactAsync) {
         const artifact: LiquidGlassCaptureLabArtifact = await handle.captureLabArtifactAsync("manual", metadata);
@@ -239,25 +418,19 @@ export default function App() {
         }
         setCaptureStatus(String(payload.jsonPath ?? payload.sessionDir ?? "compositor stopped"));
       } else {
-        const sceneId = sceneIdFor(substrate, phase);
-        const stateId = stateIdFor(substrate, phase);
         const metadata: Record<string, unknown> = {
           schemaVersion: "1.2.0",
           labPlan: "apple_glass_parity_execution_plan_v1_2",
-          sceneId,
-          stateId,
+          sceneId: scene.sceneId,
+          stateId: scene.stateId,
           rigId: rig,
           captureKind: "compositor",
-          touchPhase: touchPhaseFor(phase),
-          nullQualification: "fail",
+          touchPhase: scene.touchPhase,
+          nullQualification: scene.sceneId === "S00_NULL" ? "pass" : "fail",
           maxFrames: 180,
-          appearance: "dark",
-          contentSeed: contentSeedFor(substrate)
+          appearance: "dark"
         };
-        const trajectorySourceSha256 = trajectoryShaFor(sceneId);
-        if (trajectorySourceSha256) {
-          metadata["trajectorySourceSha256"] = trajectorySourceSha256;
-        }
+        addSceneMetadata(metadata, scene);
         const payload = await handle.startCompositorCaptureAsync("compositor", metadata);
         setCompositorActive(true);
         setCaptureStatus(String(payload.sessionDir ?? "compositor started"));
@@ -283,30 +456,24 @@ export default function App() {
       return;
     }
 
-    const sceneId = sceneIdFor(substrate, phase);
-    const stateId = stateIdFor(substrate, phase);
     const baselineClass = repeatCount >= 300 ? "prod_p99" : repeatCount === 24 ? "sustained" : "mvl";
     const captureDurationMs = baselineClass === "sustained" ? 60_000 : 900;
     const cooldownMs = baselineClass === "sustained" ? 60_000 : 750;
     const metadata: Record<string, unknown> = {
       schemaVersion: "1.2.0",
       labPlan: "apple_glass_parity_execution_plan_v1_2",
-      sceneId,
-      stateId,
+      sceneId: scene.sceneId,
+      stateId: scene.stateId,
       rigId: rig,
       captureKind: "compositor",
-      touchPhase: touchPhaseFor(phase),
-      nullQualification: sceneId === "S00_NULL" ? "pass" : "fail",
+      touchPhase: scene.touchPhase,
+      nullQualification: scene.sceneId === "S00_NULL" ? "pass" : "fail",
       baselineClass,
       requiresNominalThermal: true,
       maxFrames: baselineClass === "sustained" ? 900 : 90,
-      appearance: "dark",
-      contentSeed: contentSeedFor(substrate)
+      appearance: "dark"
     };
-    const trajectorySourceSha256 = trajectoryShaFor(sceneId);
-    if (trajectorySourceSha256) {
-      metadata["trajectorySourceSha256"] = trajectorySourceSha256;
-    }
+    addSceneMetadata(metadata, scene);
 
     try {
       setBatchActive(true);
@@ -372,9 +539,9 @@ export default function App() {
         style={StyleSheet.absoluteFill}
         rig={rig}
         mode={mode}
-        substrate={substrate}
-        shape={shape}
-        phase={phase}
+        substrate={scene.substrate}
+        shape={scene.shape}
+        phase={scene.phase}
         tint={tint}
         interactive={interactive}
         autoplay={autoplay}
@@ -388,11 +555,12 @@ export default function App() {
             <Text style={styles.captureStatus}>{captureStatus}</Text>
             <Text style={styles.captureStatus}>R0 {lastReferenceArtifact ? "ready" : "missing"} / C {lastCandidateArtifact ? "ready" : "missing"}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              <Chip label="scene" value={scene.sceneId} onPress={() => applyScene(nextValue(sceneIds, sceneId))} />
               <Chip label="rig" value={rig} onPress={() => setRig(nextValue(rigs, rig))} />
               <Chip label="mode" value={mode} onPress={() => setMode(nextValue(modes, mode))} />
-              <Chip label="substrate" value={substrate} onPress={() => setSubstrate(nextValue(substrates, substrate))} />
-              <Chip label="shape" value={shape} onPress={() => setShape(nextValue(shapes, shape))} />
-              <Chip label="phase" value={phase} onPress={() => setPhase(nextValue(phases, phase))} />
+              <Chip label="substrate" value={scene.substrate} onPress={() => applyScene(nextValue(sceneIds, sceneId))} />
+              <Chip label="shape" value={scene.shape} onPress={() => applyScene(nextValue(sceneIds, sceneId))} />
+              <Chip label="phase" value={scene.phase} onPress={() => applyScene(nextValue(sceneIds, sceneId))} />
               <Chip label="tint" value={tint} onPress={() => setTint(nextValue(tints, tint))} />
               <Chip label="interactive" value={String(interactive)} onPress={() => setInteractive((value) => !value)} />
               <Chip label="autoplay" value={String(autoplay)} onPress={() => setAutoplay((value) => !value)} />

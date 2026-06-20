@@ -257,7 +257,7 @@ function makeSolverReport() {
           runtime_cost_ms: 12.1,
           energy_cost: 1.9
         },
-        background_sweep: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_HF"].map((sceneId, index) => ({
+        background_sweep: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_FRAME"].map((sceneId, index) => ({
           scene_id: sceneId,
           background_id: `${sceneId.toLowerCase()}_g8_self_test`,
           metrics: {

@@ -29,6 +29,15 @@ export type LiquidGlassCaptureSubstrate =
   | "text_weights"
   | "caret_selection"
   | "native_text_selection"
+  | "loupe_text"
+  | "floating_bar_content"
+  | "tiny_control_content"
+  | "busy_photo"
+  | "p3_saturated_gradient"
+  | "near_white"
+  | "near_black"
+  | "video_frame"
+  | "system_material_adjacency"
   | "noise";
 
 export type LiquidGlassCaptureShape =

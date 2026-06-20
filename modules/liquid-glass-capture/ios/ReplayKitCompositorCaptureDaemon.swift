@@ -281,6 +281,18 @@ private final class ReplayKitCaptureSession {
       framePack["trajectory_source_sha256"] = trajectorySourceSHA256
     }
 
+    var environment: [String: Any] = [
+      "appearance": metadata["appearance"] as? String ?? "dark",
+      "reduce_transparency": UIAccessibility.isReduceTransparencyEnabled,
+      "reduce_motion": UIAccessibility.isReduceMotionEnabled,
+      "content_seed": metadata["contentSeed"] as? String ?? Self.contentSeed(for: stateId),
+      "viewport_px": viewportPx,
+      "capture_timestamp_ns": "\(UInt64(startedAt.timeIntervalSince1970 * 1_000_000_000))"
+    ]
+    if let backgroundAssetHash = metadata["backgroundAssetHash"] as? String {
+      environment["background_asset_hash"] = backgroundAssetHash
+    }
+
     var artifact: [String: Any] = [
       "schema_version": "1.2.0",
       "id": id,
@@ -306,14 +318,7 @@ private final class ReplayKitCaptureSession {
         "thermal_state_end": finalThermalState,
         "low_power_mode": ProcessInfo.processInfo.isLowPowerModeEnabled
       ],
-      "environment": [
-        "appearance": metadata["appearance"] as? String ?? "dark",
-        "reduce_transparency": UIAccessibility.isReduceTransparencyEnabled,
-        "reduce_motion": UIAccessibility.isReduceMotionEnabled,
-        "content_seed": metadata["contentSeed"] as? String ?? Self.contentSeed(for: stateId),
-        "viewport_px": viewportPx,
-        "capture_timestamp_ns": "\(UInt64(startedAt.timeIntervalSince1970 * 1_000_000_000))"
-      ],
+      "environment": environment,
       "color": [
         "embedded_icc_profile": "Display P3",
         "icc_sha256": Self.displayP3ICCSHA256() ?? "missing-display-p3-icc",
@@ -391,6 +396,30 @@ private final class ReplayKitCaptureSession {
       return "s00-p3-ramp-v1"
     case "s00_smooth_gradient":
       return "s00-smooth-gradient-v1"
+    case "rest":
+      return "s01-search-selection-v1"
+    case "drag":
+      return "s02-loupe-text-drag-v1"
+    case "press":
+      return "s03-press-control-v1"
+    case "morph":
+      return "s04-twin-capsule-morph-v1"
+    case "floating_rest":
+      return "s05-floating-bar-v1"
+    case "tiny_rest":
+      return "s06-tiny-control-v1"
+    case "busy_photo_rest":
+      return "s07-busy-photo-procedural-v1"
+    case "p3_gradient_rest":
+      return "s08-p3-saturated-gradient-v1"
+    case "near_white_rest":
+      return "s09-near-white-v1"
+    case "near_black_rest":
+      return "s10-near-black-v1"
+    case "video_frame_rest":
+      return "s11-video-high-frequency-procedural-v1"
+    case "system_material_rest":
+      return "s12-system-material-adjacency-procedural-v1"
     default:
       return "manual-\(stateId)"
     }
