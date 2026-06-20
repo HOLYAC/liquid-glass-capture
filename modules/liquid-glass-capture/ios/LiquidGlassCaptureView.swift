@@ -374,7 +374,26 @@ public final class LiquidGlassCaptureView: ExpoView {
     var failures: [String] = []
     var runIteration: ((Int) -> Void)!
 
+    CaptureDiagnostics.log("repeat.start", details: [
+      "seriesId": seriesId,
+      "repeatCount": boundedRepeatCount,
+      "captureDurationMs": boundedCaptureDurationMs,
+      "cooldownMs": boundedCooldownMs,
+      "requiresNominalThermal": requiresNominalThermal,
+      "maxFidelity": metadata["maxFidelity"] as? Bool ?? false,
+      "captureRawFrames": metadata["captureRawFrames"] as? Bool ?? false,
+      "captureRawPixels": metadata["captureRawPixels"] as? Bool ?? false,
+      "maxFrames": metadata["maxFrames"] as? Int ?? -1,
+      "metadataKeys": metadata.keys.sorted().joined(separator: ",")
+    ])
+
     func finish(status: String) {
+      CaptureDiagnostics.log("repeat.finish.begin", details: [
+        "seriesId": seriesId,
+        "status": status,
+        "artifacts": artifacts.count,
+        "failures": failures.count
+      ])
       do {
         let payload = try Self.writeRepeatManifest(
           label: label,
@@ -389,8 +408,18 @@ public final class LiquidGlassCaptureView: ExpoView {
           artifacts: artifacts,
           failures: failures
         )
+        CaptureDiagnostics.log("repeat.finish.resolved", details: [
+          "seriesId": seriesId,
+          "status": status,
+          "jsonPath": payload["jsonPath"] as? String ?? ""
+        ])
         promise.resolve(payload)
       } catch {
+        CaptureDiagnostics.log("repeat.finish.error", details: [
+          "seriesId": seriesId,
+          "status": status,
+          "error": error.localizedDescription
+        ])
         promise.reject(error)
       }
     }
@@ -398,6 +427,7 @@ public final class LiquidGlassCaptureView: ExpoView {
     runIteration = { [weak self] index in
       guard let self else {
         failures.append("VIEW_DEALLOCATED")
+        CaptureDiagnostics.log("repeat.view.deallocated", details: ["seriesId": seriesId])
         finish(status: "aborted")
         return
       }
@@ -410,6 +440,11 @@ public final class LiquidGlassCaptureView: ExpoView {
       let thermalState = ProcessInfo.processInfo.thermalState
       if requiresNominalThermal && thermalState != .nominal {
         failures.append("THERMAL_STATE_NOT_NOMINAL_BEFORE_REPEAT_\(index)")
+        CaptureDiagnostics.log("repeat.thermal.abort", details: [
+          "seriesId": seriesId,
+          "index": index,
+          "thermal": Self.thermalStateString(thermalState)
+        ])
         finish(status: "aborted")
         return
       }
@@ -426,6 +461,11 @@ public final class LiquidGlassCaptureView: ExpoView {
       }
 
       let iterationLabel = "\(seriesId)-\(String(format: "%03d", index))"
+      CaptureDiagnostics.log("repeat.iteration.start", details: [
+        "seriesId": seriesId,
+        "index": index,
+        "iterationLabel": iterationLabel
+      ])
       self.compositorCapture.start(
         label: iterationLabel,
         metadata: iterationMetadata,
@@ -440,11 +480,23 @@ public final class LiquidGlassCaptureView: ExpoView {
                 switch stopResult {
                 case .success(let artifact):
                   artifacts.append(artifact)
+                  CaptureDiagnostics.log("repeat.iteration.stop.success", details: [
+                    "seriesId": seriesId,
+                    "index": index,
+                    "artifactId": artifact["id"] as? String ?? "",
+                    "frameCount": artifact["frameCount"] as? Int ?? -1,
+                    "sessionDir": artifact["sessionDir"] as? String ?? ""
+                  ])
                   DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(boundedCooldownMs)) {
                     runIteration(index + 1)
                   }
                 case .failure(let error):
                   failures.append("STOP_FAILED_\(index): \(error.localizedDescription)")
+                  CaptureDiagnostics.log("repeat.iteration.stop.error", details: [
+                    "seriesId": seriesId,
+                    "index": index,
+                    "error": error.localizedDescription
+                  ])
                   finish(status: "aborted")
                 }
               }
@@ -452,6 +504,11 @@ public final class LiquidGlassCaptureView: ExpoView {
           }
         case .failure(let error):
           failures.append("START_FAILED_\(index): \(error.localizedDescription)")
+          CaptureDiagnostics.log("repeat.iteration.start.error", details: [
+            "seriesId": seriesId,
+            "index": index,
+            "error": error.localizedDescription
+          ])
           finish(status: "aborted")
         }
       }
@@ -575,12 +632,23 @@ public final class LiquidGlassCaptureView: ExpoView {
     artifacts: [[String: Any]],
     failures: [String]
   ) throws -> [String: Any] {
+    CaptureDiagnostics.log("repeat.manifest.enter", details: [
+      "seriesId": seriesId,
+      "status": status,
+      "artifacts": artifacts.count,
+      "failures": failures.count
+    ])
+
     let fileManager = FileManager.default
     let seriesDir = try fileManager
       .url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
       .appendingPathComponent("LiquidGlassCaptures", isDirectory: true)
       .appendingPathComponent("Series", isDirectory: true)
     try fileManager.createDirectory(at: seriesDir, withIntermediateDirectories: true)
+    CaptureDiagnostics.log("repeat.manifest.series-dir-ready", details: [
+      "seriesId": seriesId,
+      "seriesDir": seriesDir.path
+    ])
 
     let jsonURL = seriesDir.appendingPathComponent("\(seriesId).repeat-manifest.json")
     let artifactJsonPathsDevice = artifacts.compactMap { $0["jsonPath"] as? String }
@@ -608,6 +676,11 @@ public final class LiquidGlassCaptureView: ExpoView {
         "frameCount": artifact["frameCount"] as? Int ?? 0
       ] as [String: Any]
     }
+    CaptureDiagnostics.log("repeat.manifest.summaries-built", details: [
+      "seriesId": seriesId,
+      "artifactJsonPaths": artifactJsonPaths.count,
+      "artifactSummaries": artifactSummaries.count
+    ])
 
     let maxFidelity = (metadata["maxFidelity"] as? Bool) == true
     let captureRawPixels = maxFidelity || (metadata["captureRawPixels"] as? Bool) == true
@@ -654,10 +727,29 @@ public final class LiquidGlassCaptureView: ExpoView {
       "failures": failures
     ]
 
+    CaptureDiagnostics.log("repeat.manifest.encode.first.begin", details: [
+      "seriesId": seriesId,
+      "artifactSummaries": artifactSummaries.count,
+      "failures": failures.count
+    ])
     var jsonData = try JSONValueSanitizer.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    CaptureDiagnostics.log("repeat.manifest.encode.first.done", details: [
+      "seriesId": seriesId,
+      "bytes": jsonData.count
+    ])
     manifest["manifest_sha256"] = Self.sha256Hex(jsonData)
+    CaptureDiagnostics.log("repeat.manifest.encode.final.begin", details: ["seriesId": seriesId])
     jsonData = try JSONValueSanitizer.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+    CaptureDiagnostics.log("repeat.manifest.encode.final.done", details: [
+      "seriesId": seriesId,
+      "bytes": jsonData.count
+    ])
     try jsonData.write(to: jsonURL, options: .atomic)
+    CaptureDiagnostics.log("repeat.manifest.write.done", details: [
+      "seriesId": seriesId,
+      "jsonPath": jsonURL.path,
+      "bytes": jsonData.count
+    ])
     manifest["jsonPath"] = jsonURL.path
     return manifest
   }

@@ -211,6 +211,15 @@ private final class ReplayKitCaptureSession {
     if captureRawFrames {
       try fileManager.createDirectory(at: rawFrameDir, withIntermediateDirectories: true)
     }
+
+    CaptureDiagnostics.log("replaykit.session.init", details: [
+      "id": id,
+      "sessionDir": sessionDir.path,
+      "maxFrames": maxFrames,
+      "captureRawFrames": captureRawFrames,
+      "captureRawPixels": captureRawPixels,
+      "metadataKeys": metadata.keys.sorted().joined(separator: ",")
+    ])
   }
 
   func reserveFrameSlot() -> ReplayKitFrameSlot? {
@@ -218,6 +227,11 @@ private final class ReplayKitCaptureSession {
     defer { lock.unlock() }
 
     guard nextFrameIndex < maxFrames else {
+      CaptureDiagnostics.log("replaykit.frame.limit", details: [
+        "id": id,
+        "maxFrames": maxFrames,
+        "nextFrameIndex": nextFrameIndex
+      ])
       return nil
     }
 
@@ -480,6 +494,10 @@ private final class ReplayKitCaptureSession {
     lock.lock()
     errors.append(message)
     lock.unlock()
+    CaptureDiagnostics.log("replaykit.error", details: [
+      "id": id,
+      "message": message
+    ])
   }
 
   func startPayload() -> [String: Any] {
@@ -501,9 +519,22 @@ private final class ReplayKitCaptureSession {
     let capturedErrors = errors
     lock.unlock()
 
+    CaptureDiagnostics.log("replaykit.finish.enter", details: [
+      "id": id,
+      "frames": frames.count,
+      "errors": capturedErrors.count,
+      "maxFrames": maxFrames,
+      "captureRawFrames": captureRawFrames,
+      "captureRawPixels": captureRawPixels
+    ])
+
     guard let firstFrame = frames.first,
           let basePath = firstFrame["png"] as? String,
           let baseSha = firstFrame["sha256"] as? String else {
+      CaptureDiagnostics.log("replaykit.finish.no-frames", details: [
+        "id": id,
+        "errors": capturedErrors.joined(separator: " | ")
+      ])
       throw NSError(
         domain: "ReplayKitCompositorCaptureDaemon",
         code: 2,
@@ -525,8 +556,13 @@ private final class ReplayKitCaptureSession {
       touchPhase: touchPhase
     )
     let maskURL = sessionDir.appendingPathComponent("glass_core_mask_pack_v1.json")
+    CaptureDiagnostics.log("replaykit.finish.mask.encode.begin", details: ["id": id])
     let maskData = try JSONValueSanitizer.data(withJSONObject: maskPack, options: [.prettyPrinted, .sortedKeys])
     try maskData.write(to: maskURL, options: .atomic)
+    CaptureDiagnostics.log("replaykit.finish.mask.write.done", details: [
+      "id": id,
+      "bytes": maskData.count
+    ])
 
     let jsonURL = sessionDir.appendingPathComponent("\(id).capture.json")
     let frameManifestURL = sessionDir.appendingPathComponent("frame_manifest.json")
@@ -557,9 +593,18 @@ private final class ReplayKitCaptureSession {
       framePack["capture_timeline_sha256"] = captureTimelineSHA256
     }
     if captureRawFrames {
+      CaptureDiagnostics.log("replaykit.finish.frame-manifest.begin", details: [
+        "id": id,
+        "frames": frames.count
+      ])
       let manifest = try writeFrameManifest(to: frameManifestURL, frames: frames)
       framePack["frame_manifest_path"] = manifest.path
       framePack["frame_manifest_sha256"] = manifest.sha256
+      CaptureDiagnostics.log("replaykit.finish.frame-manifest.done", details: [
+        "id": id,
+        "path": manifest.path,
+        "sha256": manifest.sha256
+      ])
     }
 
     var environment: [String: Any] = [
@@ -643,8 +688,17 @@ private final class ReplayKitCaptureSession {
     ]
 
     try CaptureArtifactIntegrity.finalizeArtifact(&artifact)
+    CaptureDiagnostics.log("replaykit.finish.artifact.encode.begin", details: [
+      "id": id,
+      "frames": frames.count
+    ])
     let jsonData = try JSONValueSanitizer.data(withJSONObject: artifact, options: [.prettyPrinted, .sortedKeys])
     try jsonData.write(to: jsonURL, options: .atomic)
+    CaptureDiagnostics.log("replaykit.finish.artifact.write.done", details: [
+      "id": id,
+      "jsonPath": jsonURL.path,
+      "bytes": jsonData.count
+    ])
 
     artifact["status"] = "stopped"
     artifact["jsonPath"] = jsonURL.path
@@ -737,6 +791,12 @@ private final class ReplayKitCaptureSession {
     ]
     let manifestData = try JSONValueSanitizer.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     try manifestData.write(to: manifestURL, options: .atomic)
+    CaptureDiagnostics.log("replaykit.frame-manifest.write.done", details: [
+      "id": id,
+      "frames": frames.count,
+      "bytes": manifestData.count,
+      "path": manifestURL.path
+    ])
     return FrameManifestWriteResult(
       path: relativePath(for: manifestURL),
       sha256: Self.sha256Hex(manifestData)
