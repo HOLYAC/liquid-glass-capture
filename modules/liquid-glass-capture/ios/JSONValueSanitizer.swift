@@ -21,14 +21,17 @@ enum JSONValueSanitizer {
     if let value = value as? String {
       return value
     }
-    if let value = value as? Bool {
-      return value
+    if let number = primitiveNumber(value) {
+      return number
     }
     if let value = value as? NSNumber {
       if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
         return value.boolValue
       }
       return value.doubleValue.isFinite ? value : NSNull()
+    }
+    if let value = value as? Bool {
+      return value
     }
     if let value = value as? Date {
       return ISO8601DateFormatter().string(from: value)
@@ -47,6 +50,37 @@ enum JSONValueSanitizer {
       return array.map { sanitize($0) }
     }
     return String(describing: value)
+  }
+
+  private static func primitiveNumber(_ value: Any) -> Any? {
+    switch value {
+    case let value as Int:
+      return value
+    case let value as Int8:
+      return value
+    case let value as Int16:
+      return value
+    case let value as Int32:
+      return value
+    case let value as Int64:
+      return value
+    case let value as UInt:
+      return value
+    case let value as UInt8:
+      return value
+    case let value as UInt16:
+      return value
+    case let value as UInt32:
+      return value
+    case let value as UInt64:
+      return value
+    case let value as Double:
+      return value.isFinite ? value : NSNull()
+    case let value as Float:
+      return value.isFinite ? value : NSNull()
+    default:
+      return nil
+    }
   }
 
   private static func dictionaryEntries(_ value: Any) -> [(key: String, value: Any)]? {
@@ -98,14 +132,17 @@ enum JSONValueSanitizer {
       if let value = value as? String {
         return quote(value)
       }
-      if let value = value as? Bool {
-        return value ? "true" : "false"
+      if let number = numberString(value) {
+        return number
       }
       if let value = value as? NSNumber {
         if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
           return value.boolValue ? "true" : "false"
         }
         return value.doubleValue.isFinite ? String(describing: value) : "null"
+      }
+      if let value = value as? Bool {
+        return value ? "true" : "false"
       }
       if let dictionary = JSONValueSanitizer.dictionaryEntries(value) {
         return renderObject(dictionary, depth: depth)
@@ -114,6 +151,42 @@ enum JSONValueSanitizer {
         return renderArray(array, depth: depth)
       }
       return quote(String(describing: value))
+    }
+
+    private func numberString(_ value: Any) -> String? {
+      switch value {
+      case let value as Int:
+        return String(value)
+      case let value as Int8:
+        return String(value)
+      case let value as Int16:
+        return String(value)
+      case let value as Int32:
+        return String(value)
+      case let value as Int64:
+        return String(value)
+      case let value as UInt:
+        return String(value)
+      case let value as UInt8:
+        return String(value)
+      case let value as UInt16:
+        return String(value)
+      case let value as UInt32:
+        return String(value)
+      case let value as UInt64:
+        return String(value)
+      case let value as Double:
+        return value.isFinite ? String(value) : "null"
+      case let value as Float:
+        return value.isFinite ? String(value) : "null"
+      case let value as NSNumber:
+        if CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() {
+          return nil
+        }
+        return value.doubleValue.isFinite ? String(describing: value) : "null"
+      default:
+        return nil
+      }
     }
 
     private func renderObject(_ entries: [(key: String, value: Any)], depth: Int) -> String {

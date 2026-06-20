@@ -393,13 +393,15 @@ function appMatchesBundleRequest(requestedBundleId, bundleId, info) {
 }
 
 function pullDocuments(toolPath, request) {
+  const remoteFile = request.remotePath.startsWith("Documents/")
+    ? request.remotePath
+    : `Documents/${request.remotePath}`;
   const args = [
     "apps",
     "pull",
-    "--documents",
     ...deviceArgs(request),
     request.bundleId,
-    request.remotePath,
+    remoteFile,
     request.outRoot
   ];
   const result = runCommand(toolPath, args);
@@ -407,7 +409,7 @@ function pullDocuments(toolPath, request) {
     return commandFailure("pull_liquid_glass_captures", "pymobiledevice3 apps pull failed", result, {
       command: [toolPath, ...args],
       bundle_id: request.bundleId,
-      remote_path: request.remotePath,
+      remote_path: remoteFile,
       out_root: request.outRoot
     });
   }
@@ -421,7 +423,7 @@ function pullDocuments(toolPath, request) {
         retryable: true,
         command: [toolPath, ...args],
         bundle_id: request.bundleId,
-        remote_path: request.remotePath,
+        remote_path: remoteFile,
         out_root: request.outRoot,
         expected_capture_root: captureRoot,
         stdout_tail: tailLines(result.stdout ?? ""),
@@ -703,20 +705,18 @@ function runSelfTest() {
   const args = [
     "apps",
     "pull",
-    "--documents",
     "--udid",
     "UDID",
     "com.example.app",
-    "LiquidGlassCaptures",
+    "Documents/LiquidGlassCaptures",
     join(dir, "iphone")
   ];
   const expected = [
     "apps",
     "pull",
-    "--documents",
     ...deviceArgs({ udid: "UDID" }),
     "com.example.app",
-    "LiquidGlassCaptures",
+    "Documents/LiquidGlassCaptures",
     join(dir, "iphone")
   ];
   if (JSON.stringify(args) !== JSON.stringify(expected)) {

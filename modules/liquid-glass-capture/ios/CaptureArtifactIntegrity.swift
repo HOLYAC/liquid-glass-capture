@@ -28,8 +28,8 @@ enum CaptureArtifactIntegrity {
     if value is NSNull {
       return "null"
     }
-    if let value = value as? Bool {
-      return value ? "true" : "false"
+    if let number = try primitiveNumberString(value) {
+      return number
     }
     if let value = value as? String {
       return try jsonScalarString(value)
@@ -46,6 +46,9 @@ enum CaptureArtifactIntegrity {
       }
       return try jsonScalarString(value)
     }
+    if let value = value as? Bool {
+      return value ? "true" : "false"
+    }
     if let dictionary = dictionaryEntries(value) {
       let parts = try dictionary
         .sorted { left, right in left.key < right.key }
@@ -58,6 +61,37 @@ enum CaptureArtifactIntegrity {
       return "[\(try array.map { try stableStringify($0) }.joined(separator: ","))]"
     }
     return try jsonScalarString(String(describing: value))
+  }
+
+  private static func primitiveNumberString(_ value: Any) throws -> String? {
+    switch value {
+    case let value as Int:
+      return try jsonScalarString(value)
+    case let value as Int8:
+      return try jsonScalarString(value)
+    case let value as Int16:
+      return try jsonScalarString(value)
+    case let value as Int32:
+      return try jsonScalarString(value)
+    case let value as Int64:
+      return try jsonScalarString(value)
+    case let value as UInt:
+      return try jsonScalarString(value)
+    case let value as UInt8:
+      return try jsonScalarString(value)
+    case let value as UInt16:
+      return try jsonScalarString(value)
+    case let value as UInt32:
+      return try jsonScalarString(value)
+    case let value as UInt64:
+      return try jsonScalarString(value)
+    case let value as Double:
+      return value.isFinite ? try jsonScalarString(value) : "null"
+    case let value as Float:
+      return value.isFinite ? try jsonScalarString(value) : "null"
+    default:
+      return nil
+    }
   }
 
   private static func dictionaryEntries(_ value: Any) -> [(key: String, value: Any)]? {
