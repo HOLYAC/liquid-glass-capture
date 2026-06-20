@@ -477,7 +477,7 @@ function normalizedApprovalText(value) {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function freezeBaselineReport(report) {
+export function freezeBaselineReport(report) {
   const contentSha256 = baselineContentSha256(report);
   return {
     ...report,

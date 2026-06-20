@@ -17,7 +17,7 @@ import { sceneStateKey } from "../packages/scene-contract/src/index.mjs";
 import { readArtifactStoreIndex, writeArtifactStore } from "../packages/artifact-store/src/index.mjs";
 import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
-import { buildBaselineReport } from "./lab-metrics-baseline.mjs";
+import { freezeBaselineReport } from "./lab-metrics-baseline.mjs";
 import { makePassingPacket } from "./lab-review-packet.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -104,7 +104,7 @@ function writeSelfTestFixture(outPath) {
   });
   const deviceLane = join(dir, "physical-device-lane.report.json");
   writeFileSync(deviceLane, `${JSON.stringify(makePhysicalDeviceLaneReport(candidate), null, 2)}\n`);
-  const baseline = writeBaselineFixture(dir, maskPath);
+  const baseline = writeBaselineFixture(dir);
 
   return {
     candidate,
@@ -118,34 +118,102 @@ function writeSelfTestFixture(outPath) {
   };
 }
 
-function writeBaselineFixture(dir, maskPath) {
-  const refs = [];
-  const probes = [];
-  for (let index = 0; index < 3; index += 1) {
-    const refPng = join(dir, `baseline-r0-${index}.png`);
-    const probePng = join(dir, `baseline-r1-${index}.png`);
-    writePng(refPng, 10, 10, makeBaselinePixels(10, 10, 0));
-    writePng(probePng, 10, 10, makeBaselinePixels(10, 10, index === 2 ? 1 : 0));
-
-    const refArtifact = join(dir, `baseline-r0-${index}.capture.json`);
-    const probeArtifact = join(dir, `baseline-r1-${index}.capture.json`);
-    writeFileSync(refArtifact, `${JSON.stringify(makeBaselineArtifact("R0", refPng, maskPath, index), null, 2)}\n`);
-    writeFileSync(probeArtifact, `${JSON.stringify(makeBaselineArtifact("R1", probePng, maskPath, index), null, 2)}\n`);
-    refs.push(refArtifact);
-    probes.push(probeArtifact);
-  }
-
+function writeBaselineFixture(dir) {
   const baseline = join(dir, "baseline.metric.report.json");
-  buildBaselineReport({
-    refs,
-    probes,
-    out: baseline,
-    baselineClass: "mvl",
-    repeatOverride: 3,
-    owner: "g8-self-test-owner",
-    approvalId: "g8-self-test-approval"
+  const report = makeLockedBaselineFixture({
+    baselineClass: "prod_p99",
+    repeatObserved: 300,
+    finalP99Allowed: true
   });
+  writeFileSync(baseline, `${JSON.stringify(report, null, 2)}\n`);
   return baseline;
+}
+
+function makeLockedBaselineFixture({ baselineClass, repeatObserved, finalP99Allowed }) {
+  return freezeBaselineReport({
+    schema_version: "1.2.0",
+    kind: "baseline_metric_report",
+    baseline_namespace: `self_test__S03_PRESS__press__C1__${baselineClass}`,
+    baseline_identity: {
+      scene_id: "S03_PRESS",
+      state_id: "press",
+      rig_id: "C1",
+      device_model_name: "Self Test Device",
+      device_model_identifier: "iPhone-self-test",
+      ios_version: "26.0",
+      ios_build: "self-test",
+      sdk_build: "self-test",
+      capture_daemon_version: "lab-verdict-report.self-test",
+      renderer_lockfile_sha256: "self-test-package-lock",
+      webkit_build: "not_observable",
+      null_qualification: "pass",
+      pipeline_qualification: "baked_verdict",
+      baseline_class: baselineClass
+    },
+    baseline_class: baselineClass,
+    baseline_status: "complete",
+    repeat_n_requested: repeatObserved,
+    repeat_n_observed: repeatObserved,
+    repeat_policy: {
+      repeat_n_mvl: 50,
+      repeat_n_prod_p99: 300,
+      repeat_n_sustained: 24,
+      final_p99_allowed: finalP99Allowed
+    },
+    baseline_approval: {
+      policy_id: "baseline_owner_approval_v1",
+      owner: "g8-self-test-owner",
+      approval_id: "g8-self-test-approval",
+      approval_required: true,
+      approval_status: "approved",
+      threshold_drift_requires_owner_approval: true,
+      baseline_class: baselineClass,
+      failures: []
+    },
+    gates: {
+      G0_G1: "assumed_from_self_test_artifact_contract",
+      G2: "self_test_static_thresholds",
+      G3_G8: "not_run_for_baseline_fixture",
+      baseline_infrastructure_health: "pass"
+    },
+    reference_artifacts: [],
+    probe_artifacts: [],
+    instrument_noise: {
+      count: repeatObserved,
+      metrics: {}
+    },
+    candidate_gap: {
+      count: repeatObserved,
+      metrics: {}
+    },
+    statistics: {
+      threshold_policy: {
+        policy_id: "baseline_threshold_policy_v1"
+      }
+    },
+    threshold_derivation: {
+      metric_thresholds: {
+        oklab_delta_e_mean: {
+          metric_id: "oklab_delta_e_mean",
+          threshold_kind: "loss_p99_ci95_upper_plus_slack",
+          final_p99_allowed: finalP99Allowed,
+          instrument_noise_loss_ci95_upper: 0.001,
+          shader_slack: 0.002,
+          final_p99_threshold: 0.003,
+          owner: "g8-self-test-owner"
+        }
+      }
+    },
+    failures: [],
+    raw_report_counts: {
+      reference_pair_count: repeatObserved,
+      candidate_pair_count: repeatObserved
+    },
+    immutability: {
+      owner: "g8-self-test-owner",
+      threshold_policy: "baseline_threshold_policy_v1"
+    }
+  });
 }
 
 function makePixels(width, height) {
@@ -160,73 +228,6 @@ function makePixels(width, height) {
     }
   }
   return pixels;
-}
-
-function makeBaselinePixels(width, height, delta) {
-  const pixels = Buffer.alloc(width * height * 4);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * 4;
-      pixels[offset] = 52 + x + delta;
-      pixels[offset + 1] = 92 + y;
-      pixels[offset + 2] = 132;
-      pixels[offset + 3] = 255;
-    }
-  }
-  return pixels;
-}
-
-function makeBaselineArtifact(rigId, pngPath, maskPath, index) {
-  return {
-    schema_version: "1.2.0",
-    id: `self-test-${rigId.toLowerCase()}-g8-baseline-${index}`,
-    rig_id: rigId,
-    scene_id: "S01_SEARCH",
-    state_id: "rest",
-    git_commit: "self-test",
-    capture_kind: "compositor",
-    null_qualification: "pass",
-    device_info: {
-      model_name: "Self Test Device",
-      model_identifier: "iPhone-self-test",
-      os_name: "iOS",
-      os_version: "26.0",
-      os_build: "self-test",
-      sdk_build: "self-test",
-      screen_scale: 3,
-      refresh_hz: 60,
-      thermal_state_start: "nominal",
-      thermal_state_end: "nominal",
-      low_power_mode: false
-    },
-    environment: {
-      appearance: "dark",
-      reduce_transparency: false,
-      reduce_motion: false,
-      content_seed: `g8-baseline-self-test-${index}`,
-      viewport_px: { width: 10, height: 10 },
-      capture_timestamp_ns: String(index)
-    },
-    color: {
-      embedded_icc_profile: "Display P3",
-      icc_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      working_space: "display-p3-linear",
-      stored_transfer: "srgb-transfer",
-      white_point: "D65"
-    },
-    frame_pack: {
-      base_png_sha256: sha256File(pngPath),
-      base_png_path: pngPath,
-      mask_pack_sha256: sha256File(maskPath),
-      mask_pack_path: maskPath,
-      touch_phase: "rest",
-      animation_t: 0
-    },
-    integrity: {
-      artifact_sha256: "self-test-pending",
-      producer_version: "lab-verdict-report.baseline.self-test"
-    }
-  };
 }
 
 function makeCandidateArtifact(pngPath, maskPath) {
@@ -424,7 +425,8 @@ function assertVerdictGuardRails(fixture, passReport) {
   }
   if (passReport.baseline?.status !== "complete" ||
       passReport.baseline?.approval_status !== "approved" ||
-      passReport.baseline?.freeze_verified !== true) {
+      passReport.baseline?.freeze_verified !== true ||
+      passReport.baseline?.final_p99_allowed !== true) {
     throw new Error("G8 guardrail failed: locked baseline evidence missing from verdict");
   }
 
@@ -459,6 +461,21 @@ function assertVerdictGuardRails(fixture, passReport) {
   });
   if (tamperedBaselineReport.status !== "fail" || !tamperedBaselineReport.blockers.includes("G8_BASELINE_FREEZE_HASH_MISMATCH")) {
     throw new Error("G8 guardrail failed: tampered baseline hash did not block verdict");
+  }
+
+  const mvlBaselineReport = buildVerdictReport({
+    candidateRecord: baseRecord,
+    gateReports,
+    reviewReport,
+    baselineReport: makeLockedBaselineFixture({
+      baselineClass: "mvl",
+      repeatObserved: 50,
+      finalP99Allowed: false
+    }),
+    preflightFailures: []
+  });
+  if (mvlBaselineReport.status !== "fail" || !mvlBaselineReport.blockers.includes("G8_BASELINE_FINAL_P99_NOT_ALLOWED")) {
+    throw new Error("G8 guardrail failed: MVL baseline produced a production verdict");
   }
 
   const calibrationRecord = {

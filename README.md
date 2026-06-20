@@ -263,6 +263,9 @@ Complete baselines require `--owner` plus `--approval`; otherwise they are
 marked `invalid` with `BASELINE_OWNER_APPROVAL_REQUIRED`. Partial baselines can
 remain unapproved evidence. Every baseline report is frozen by a canonical
 `baseline_freeze.content_sha256` and carries baseline retention metadata.
+G8 verdicts require that locked baseline to be production-P99 eligible:
+`repeat_policy.final_p99_allowed` must be true, so MVL/day-one baselines can
+inform threshold work but cannot mint `PROD_PASS`.
 
 ## Production / TestFlight
 

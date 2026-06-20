@@ -133,6 +133,7 @@ function validateBaselineReport(report) {
   }
   if (!report.baseline_identity) blockers.push("G8_BASELINE_IDENTITY_MISSING");
   if (!report.threshold_derivation?.metric_thresholds) blockers.push("G8_BASELINE_THRESHOLDS_MISSING");
+  if (report.repeat_policy?.final_p99_allowed !== true) blockers.push("G8_BASELINE_FINAL_P99_NOT_ALLOWED");
   if (report.immutability?.frozen_by_hash !== true) blockers.push("G8_BASELINE_NOT_FROZEN");
   if (typeof report.baseline_freeze?.content_sha256 !== "string") {
     blockers.push("G8_BASELINE_FREEZE_HASH_MISSING");
