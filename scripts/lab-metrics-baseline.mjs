@@ -132,7 +132,16 @@ function main() {
   console.log(`${report.baseline_status.toUpperCase()} ${args.out ?? ""}`.trim());
 }
 
-export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", repeatOverride, owner, approvalId }) {
+export function buildBaselineReport({
+  refs,
+  probes,
+  out,
+  baselineClass = "mvl",
+  repeatOverride,
+  owner,
+  approvalId,
+  manifestDiagnostics = []
+}) {
   const referenceRecords = refs.map((path) => readCaptureArtifact(path));
   const probeRecords = probes.map((path) => readCaptureArtifact(path));
   const referenceReports = [];
@@ -181,9 +190,11 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
     owner,
     approvalId
   });
+  const manifestGate = assessManifestDiagnostics(manifestDiagnostics);
   const failures = [
     ...infrastructureHealth.failures,
-    ...baselineApproval.failures
+    ...baselineApproval.failures,
+    ...manifestGate.failures
   ];
   const baselineStatus = failures.length > 0 ? "invalid" : initialBaselineStatus;
   const report = {
@@ -218,7 +229,8 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
       threshold_policy: thresholdPolicy,
       approval_policy: baselineApprovalPolicy,
       freeze_policy: baselineFreezePolicy,
-      infrastructure_health: infrastructureHealth
+      infrastructure_health: infrastructureHealth,
+      capture_manifest_gate: manifestGate
     },
     threshold_derivation: thresholdDerivation,
     baseline_approval: baselineApproval,
@@ -491,6 +503,20 @@ function makeBaselineApproval({ baselineStatus, baselineClass, owner, approvalId
       : approved ? "approved_partial" : "partial_unapproved",
     threshold_drift_requires_owner_approval: baselineApprovalPolicy.threshold_drift_requires_owner_approval,
     baseline_class: baselineClass,
+    failures
+  };
+}
+
+function assessManifestDiagnostics(manifestDiagnostics) {
+  const manifests = Array.isArray(manifestDiagnostics) ? manifestDiagnostics : [];
+  const failures = manifests.flatMap((manifest) => manifest.failures ?? []);
+  return {
+    status: failures.length === 0 ? "pass" : "fail",
+    policy_id: "baseline_capture_manifest_gate_v1",
+    clean_capture_path_required: true,
+    manifest_count: manifests.length,
+    retry_event_count: manifests.reduce((sum, manifest) => sum + (manifest.retry_event_count ?? 0), 0),
+    manifests,
     failures
   };
 }
@@ -772,6 +798,36 @@ function assertBaselineApprovalSelfTest(fixture) {
       approvedComplete.baseline_approval?.approval_status !== "approved") {
     throw new Error("baseline approval self-test failed approved complete baseline");
   }
+
+  const taintedManifest = JSON.parse(readFileSync(fixture.refManifest, "utf8"));
+  taintedManifest.retry_events = [{
+    index: 1,
+    attempt: 0,
+    next_attempt: 1,
+    error: "ReplayKit compositor capture produced no video frames",
+    retry_delay_ms: 2500
+  }];
+  taintedManifest.policy = {
+    retry_replaykit_no_frame: true,
+    max_no_frame_retries: 3
+  };
+  const taintedManifestPath = join(dirname(fixture.refManifest), "reference.retry-tainted.repeat-manifest.json");
+  writeFileSync(taintedManifestPath, `${JSON.stringify(taintedManifest, null, 2)}\n`);
+  const taintedInput = readRepeatManifestInput(taintedManifestPath, "ref");
+  const taintedComplete = buildBaselineReport({
+    refs: taintedInput.paths,
+    probes: readRepeatManifestPaths(fixture.probeManifest),
+    baselineClass: "mvl",
+    repeatOverride: 3,
+    owner: "lab-owner",
+    approvalId: "approval-self-test",
+    manifestDiagnostics: [taintedInput.diagnostic]
+  });
+  if (taintedComplete.baseline_status !== "invalid" ||
+      !taintedComplete.failures.some((failure) => failure.includes("RETRY_EVENTS_PRESENT")) ||
+      taintedComplete.statistics?.capture_manifest_gate?.retry_event_count !== 1) {
+    throw new Error("baseline approval self-test failed to block retry-tainted manifest");
+  }
 }
 
 function assertBaselineFreezeSelfTest(report) {
@@ -1045,15 +1101,24 @@ function parseArgs(args) {
   const parsed = {
     refs: [],
     probes: [],
-    baselineClass: "mvl"
+    baselineClass: "mvl",
+    manifestDiagnostics: []
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--self-test") parsed.selfTest = true;
     else if (arg === "--ref") parsed.refs.push(args[++index]);
     else if (arg === "--probe") parsed.probes.push(args[++index]);
-    else if (arg === "--ref-manifest") parsed.refs.push(...readRepeatManifestPaths(args[++index]));
-    else if (arg === "--probe-manifest") parsed.probes.push(...readRepeatManifestPaths(args[++index]));
+    else if (arg === "--ref-manifest") {
+      const input = readRepeatManifestInput(args[++index], "ref");
+      parsed.refs.push(...input.paths);
+      parsed.manifestDiagnostics.push(input.diagnostic);
+    }
+    else if (arg === "--probe-manifest") {
+      const input = readRepeatManifestInput(args[++index], "probe");
+      parsed.probes.push(...input.paths);
+      parsed.manifestDiagnostics.push(input.diagnostic);
+    }
     else if (arg === "--class") parsed.baselineClass = args[++index];
     else if (arg === "--owner") parsed.owner = args[++index];
     else if (arg === "--approval") parsed.approvalId = args[++index];
@@ -1070,17 +1135,44 @@ function parseArgs(args) {
 }
 
 function readRepeatManifestPaths(path) {
-  const manifest = JSON.parse(readFileSync(resolve(path), "utf8"));
+  return readRepeatManifestInput(path, "legacy").paths;
+}
+
+function readRepeatManifestInput(path, role) {
+  const resolvedPath = resolve(path);
+  const manifest = JSON.parse(readFileSync(resolvedPath, "utf8"));
   if (manifest.kind !== "repeat_capture_manifest") {
     throw new Error(`${path}: expected repeat_capture_manifest`);
   }
   if (!Array.isArray(manifest.artifact_json_paths)) {
     throw new Error(`${path}: missing artifact_json_paths`);
   }
-  return manifest.artifact_json_paths.map((artifactPath) => {
+  const paths = manifest.artifact_json_paths.map((artifactPath) => {
     if (typeof artifactPath !== "string" || artifactPath.length === 0) {
       throw new Error(`${path}: artifact_json_paths must contain non-empty strings`);
     }
     return artifactPath;
   });
+  const retryEvents = Array.isArray(manifest.retry_events) ? manifest.retry_events : [];
+  const failures = retryEvents.length > 0
+    ? [`${role}:${resolvedPath}:RETRY_EVENTS_PRESENT`]
+    : [];
+  return {
+    paths,
+    diagnostic: {
+      role,
+      manifest_path: resolvedPath,
+      manifest_id: manifest.id ?? null,
+      status: failures.length === 0 ? "pass" : "fail",
+      retry_event_count: retryEvents.length,
+      retry_events: retryEvents,
+      retry_policy: manifest.policy
+        ? {
+          retry_replaykit_no_frame: manifest.policy.retry_replaykit_no_frame ?? false,
+          max_no_frame_retries: manifest.policy.max_no_frame_retries ?? null
+        }
+        : null,
+      failures
+    }
+  };
 }

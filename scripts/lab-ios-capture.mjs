@@ -155,6 +155,7 @@ function verifyManifest(request) {
     .map((value) => resolveMaybe(manifestDir, value));
   const latestArtifactJsonPath = resolvedArtifactJsonPaths.at(-1) ?? null;
   const minStartedAtNs = request.minStartedAtNs ?? null;
+  const retryEvents = Array.isArray(manifest.retry_events) ? manifest.retry_events : [];
   const failures = [];
   if (manifest.kind !== "repeat_capture_manifest") failures.push("MANIFEST_KIND_NOT_REPEAT_CAPTURE");
   if (manifest.rig_id !== request.rig) failures.push("RIG_MISMATCH");
@@ -193,11 +194,16 @@ function verifyManifest(request) {
       });
     }
   }
+  const status = failures.length > 0
+    ? "fail"
+    : retryEvents.length > 0
+      ? "pass_with_retries"
+      : "pass";
 
   const report = {
     schema_version: "1.2.0",
     kind: "ios_capture_verification",
-    status: failures.length === 0 ? "pass" : "fail",
+    status,
     manifest_path: manifestPath,
     capture_root: request.captureRoot ?? null,
     capture_count: resolvedArtifactJsonPaths.length,
@@ -214,7 +220,16 @@ function verifyManifest(request) {
       repeat_count_observed: manifest.repeat_count_observed ?? 0,
       artifact_json_paths: manifest.artifact_json_paths ?? [],
       artifact_json_paths_resolved: resolvedArtifactJsonPaths,
-      latest_artifact_json_path: latestArtifactJsonPath
+      latest_artifact_json_path: latestArtifactJsonPath,
+      retry_event_count: retryEvents.length,
+      retry_events: retryEvents,
+      retry_policy: manifest.policy
+        ? {
+          retry_replaykit_no_frame: manifest.policy.retry_replaykit_no_frame ?? false,
+          max_no_frame_retries: manifest.policy.max_no_frame_retries ?? null
+        }
+        : null,
+      clean_capture_path: retryEvents.length === 0
     },
     next: latestArtifactJsonPath
       ? {
@@ -571,7 +586,7 @@ function assertRawManifestVerification() {
     }
   });
   const repeatManifestPath = join(dir, "repeat-manifest.json");
-  writeJson(repeatManifestPath, {
+  const repeatManifest = {
     schema_version: "1.2.0",
     kind: "repeat_capture_manifest",
     status: "complete",
@@ -589,7 +604,8 @@ function assertRawManifestVerification() {
     capture_raw_frames: true,
     capture_raw_pixels: true,
     max_frames: 1
-  });
+  };
+  writeJson(repeatManifestPath, repeatManifest);
 
   const baseRequest = {
     rig: "R0",
@@ -618,6 +634,30 @@ function assertRawManifestVerification() {
   });
   if (freshReport.status !== "pass") {
     throw new Error(`ios-capture raw manifest freshness self-test should pass: ${freshReport.failures.join(", ")}`);
+  }
+  const taintedManifestPath = join(dir, "retry-tainted.repeat-manifest.json");
+  writeJson(taintedManifestPath, {
+    ...repeatManifest,
+    retry_events: [{
+      index: 0,
+      attempt: 0,
+      next_attempt: 1,
+      error: "ReplayKit compositor capture produced no video frames",
+      retry_delay_ms: 2500
+    }],
+    policy: {
+      retry_replaykit_no_frame: true,
+      max_no_frame_retries: 3
+    }
+  });
+  const retryReport = verifyManifest({
+    ...baseRequest,
+    manifest: taintedManifestPath
+  });
+  if (retryReport.status !== "pass_with_retries" ||
+      retryReport.observed.retry_event_count !== 1 ||
+      retryReport.observed.clean_capture_path !== false) {
+    throw new Error("ios-capture retry provenance self-test failed to taint report status");
   }
   const staleReport = verifyManifest({
     ...baseRequest,

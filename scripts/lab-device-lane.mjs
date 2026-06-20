@@ -78,6 +78,28 @@ function writeSelfTestFixture(outPath) {
     manifests: [{ path: manifestPath, manifest: JSON.parse(readFileSync(manifestPath, "utf8")) }]
   });
 
+  const retryTaintedManifestPath = writeRepeatManifest({
+    dir,
+    name: "retry-tainted.repeat-manifest.json",
+    artifactPaths: [0, 1, 2].map((index) =>
+      writeCaptureArtifact(dir, `retry-tainted-${index}`, "iPhone16,2", "compositor", "pass")
+    ),
+    retryEvents: [{
+      index: 1,
+      attempt: 0,
+      next_attempt: 1,
+      error: "ReplayKit compositor capture produced no video frames",
+      retry_delay_ms: 2500
+    }]
+  });
+  const retryTaintedReport = verifyPhysicalDeviceLane({
+    plan,
+    manifests: [{
+      path: retryTaintedManifestPath,
+      manifest: JSON.parse(readFileSync(retryTaintedManifestPath, "utf8"))
+    }]
+  });
+
   const badManifestPath = writeRepeatManifest({
     dir,
     name: "bad-simulator.repeat-manifest.json",
@@ -236,6 +258,7 @@ function writeSelfTestFixture(outPath) {
       sustainedReport.status === "pass" &&
       prodReport.status === "pass" &&
       rawManifestReport.status === "pass" &&
+      retryTaintedReport.status === "pass_with_retries" &&
       badReport.status !== "pass" &&
       layerSnapshotReport.status !== "pass" &&
       badSceneContractReport.status !== "pass" &&
@@ -244,6 +267,7 @@ function writeSelfTestFixture(outPath) {
       rawManifestMissingReport.status !== "pass" ? "pass" : "fail",
     plan_path: planPath,
     positive_report: report,
+    retry_tainted_report: retryTaintedReport,
     sustained_positive_report: sustainedReport,
     prod_matrix_positive_report: prodReport,
     simulator_negative_report: badReport,
@@ -259,6 +283,7 @@ function writeSelfTestFixture(outPath) {
   return {
     out,
     report,
+    retryTaintedReport,
     sustainedReport,
     prodReport,
     badReport,
@@ -274,6 +299,7 @@ function writeSelfTestFixture(outPath) {
 
 function assertDeviceLaneGuardRails({
   report,
+  retryTaintedReport,
   sustainedReport,
   prodReport,
   badReport,
@@ -290,6 +316,11 @@ function assertDeviceLaneGuardRails({
   }
   if (report.status !== "pass" || report.task_reports[0]?.artifacts?.length !== 3) {
     throw new Error("device-lane positive self-test did not verify repeat artifacts");
+  }
+  if (retryTaintedReport.status !== "pass_with_retries" ||
+      retryTaintedReport.retry_event_count !== 1 ||
+      retryTaintedReport.evidence?.clean_capture_path_verified !== false) {
+    throw new Error("device-lane self-test failed to taint retry capture path");
   }
   if (sustainedReport.status !== "pass" || sustainedReport.lane_class !== "sustained") {
     throw new Error("device-lane self-test failed to verify sustained lane");
@@ -524,10 +555,11 @@ function writeRepeatManifest({
   maxFidelity = false,
   captureRawFrames = false,
   captureRawPixels = false,
-  thermal = { initial_state: "nominal", final_state: "nominal" }
+  thermal = { initial_state: "nominal", final_state: "nominal" },
+  retryEvents = []
 }) {
   const manifestPath = join(dir, name);
-  writeJson(manifestPath, {
+  const manifest = {
     schema_version: "1.2.0",
     kind: "repeat_capture_manifest",
     status: "complete",
@@ -546,7 +578,15 @@ function writeRepeatManifest({
     cooldown_ms: cooldownMs,
     thermal,
     artifact_json_paths: artifactPaths
-  });
+  };
+  if (retryEvents.length > 0) {
+    manifest.retry_events = retryEvents;
+    manifest.policy = {
+      retry_replaykit_no_frame: true,
+      max_no_frame_retries: 3
+    };
+  }
+  writeJson(manifestPath, manifest);
   return manifestPath;
 }
 

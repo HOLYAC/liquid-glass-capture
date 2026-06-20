@@ -832,8 +832,10 @@ public final class LiquidGlassCaptureView: ExpoView {
   }
 
   private static func isReplayKitNoFrameError(_ error: Error) -> Bool {
-    let description = error.localizedDescription
-    return description.range(of: "no video frames", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    let nsError = error as NSError
+    return nsError.domain == "ReplayKitCompositorCaptureDaemon"
+      && nsError.code == 2
+      && nsError.localizedDescription == "ReplayKit compositor capture produced no video frames"
   }
 
   private static func retryDelayMs(cooldownMs: Int, attempt: Int) -> Int {

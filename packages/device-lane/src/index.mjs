@@ -114,12 +114,15 @@ export function verifyPhysicalDeviceLane({
 
   const gateBlock = verifyGateReports(gateReports, policy, plan);
   failures.push(...gateBlock.failures);
+  const retryEvents = taskReports.flatMap((task) => task.retry_events ?? []);
 
-  const status = failures.length === 0
-    ? "pass"
-    : taskReports.some((task) => task.status === "pending")
+  const status = taskReports.some((task) => task.status === "pending")
       ? "pending"
-      : "fail";
+      : failures.length > 0
+        ? "fail"
+        : retryEvents.length > 0
+          ? "pass_with_retries"
+          : "pass";
 
   return {
     schema_version: "1.2.0",
@@ -132,6 +135,8 @@ export function verifyPhysicalDeviceLane({
     task_count: plan.tasks?.length ?? 0,
     task_reports: taskReports,
     gates: gateBlock,
+    retry_event_count: retryEvents.length,
+    retry_events: retryEvents,
     failures: unique(failures),
     evidence: {
       compositor_or_framebuffer_only: true,
@@ -141,7 +146,9 @@ export function verifyPhysicalDeviceLane({
       low_power_mode_forbidden: true,
       scene_contract_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.scene_contract_verified)),
       hashes_verified: taskReports.every((task) => task.artifacts.every((artifact) => artifact.hashes_verified)),
-      sustained_contract_verified: plan.lane_class !== "sustained" || failures.length === 0,
+      clean_capture_path_verified: retryEvents.length === 0,
+      sustained_contract_verified: plan.lane_class !== "sustained" ||
+        (failures.length === 0 && retryEvents.length === 0),
       production_device_matrix_verified: plan.lane_class !== "prod_p99" ||
         taskReports.every((task) => task.device_matrix?.verified === true)
     }
@@ -212,15 +219,23 @@ function verifyTaskManifests(task, manifestRecords, policy) {
     ...manifestReports.flatMap((report) => report.failures),
     ...matrix.failures
   ];
+  const retryEvents = manifestReports.flatMap((report) => report.retry_events ?? []);
+  const status = failures.length > 0
+    ? "fail"
+    : retryEvents.length > 0
+      ? "pass_with_retries"
+      : "pass";
   return {
     lane_task_id: task.lane_task_id,
-    status: failures.length === 0 ? "pass" : "fail",
+    status,
     manifest_path: manifestReports.length === 1 ? manifestReports[0].manifest_path : null,
     manifest_reports: manifestReports,
     repeat_count_requested: task.repeat_count_requested,
     repeat_count_observed: manifestReports.reduce((sum, report) => sum + report.repeat_count_observed, 0),
     artifacts: manifestReports.flatMap((report) => report.artifacts),
     device_matrix: matrix.summary,
+    retry_event_count: retryEvents.length,
+    retry_events: retryEvents,
     failures
   };
 }
@@ -228,6 +243,13 @@ function verifyTaskManifests(task, manifestRecords, policy) {
 function verifyTaskManifest(task, manifestRecord, policy) {
   const manifest = manifestRecord.manifest ?? manifestRecord;
   const failures = [];
+  const retryEvents = Array.isArray(manifest.retry_events)
+    ? manifest.retry_events.map((event) => ({
+      ...event,
+      manifest_path: manifestRecord.path ?? null,
+      lane_task_id: task.lane_task_id
+    }))
+    : [];
   const requiresRawManifest = manifest.max_fidelity === true ||
     manifest.capture_raw_frames === true ||
     manifest.capture_raw_pixels === true;
@@ -250,14 +272,27 @@ function verifyTaskManifest(task, manifestRecord, policy) {
 
   const deviceKeys = unique(artifactReports.map((artifact) => artifact.device_key).filter(Boolean));
   if (deviceKeys.length > 1) failures.push(`${task.lane_task_id}:DEVICE_BUILD_DRIFT_WITHIN_TASK`);
+  const status = failures.length > 0
+    ? "fail"
+    : retryEvents.length > 0
+      ? "pass_with_retries"
+      : "pass";
 
   return {
     lane_task_id: task.lane_task_id,
-    status: failures.length === 0 ? "pass" : "fail",
+    status,
     manifest_path: manifestRecord.path ?? null,
     device_matrix_role: manifest.device_matrix_role ?? null,
     repeat_count_requested: task.repeat_count_requested,
     repeat_count_observed: manifest.repeat_count_observed ?? 0,
+    retry_policy: manifest.policy
+      ? {
+        retry_replaykit_no_frame: manifest.policy.retry_replaykit_no_frame ?? false,
+        max_no_frame_retries: manifest.policy.max_no_frame_retries ?? null
+      }
+      : null,
+    retry_event_count: retryEvents.length,
+    retry_events: retryEvents,
     artifacts: artifactReports,
     failures
   };
