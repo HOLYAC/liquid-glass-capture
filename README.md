@@ -149,17 +149,18 @@ Press `B`. The status line prints the generated repeat-manifest path. If you
 changed the app state earlier, press `2` to show controls and restore those
 values before pressing `B`.
 
-4. Preferred USB pull: connect the iPhone, unlock it, tap **Trust This
-   Computer**, then pull the app Documents folder and verify it:
+4. Preferred USB pull: start the waiting command, then connect the iPhone,
+   unlock it, tap **Trust This Computer**, and let the command pull the app
+   Documents folder and verify it:
 
 ```bash
-npm run phone:pull -- --bootstrap
+npm run phone:wait
 ```
 
-This installs `pymobiledevice3` into `./artifacts/tooling/` if missing, pulls
-`Documents/LiquidGlassCaptures` from bundle id
-`com.zaeba.liquidglasscapture` into `./artifacts/iphone/`, then runs
-`proof:doctor`.
+This installs `pymobiledevice3` into `./artifacts/tooling/` if missing, waits
+up to 15 minutes for a trusted USB iPhone, pulls `Documents/LiquidGlassCaptures`
+from bundle id `com.zaeba.liquidglasscapture` into `./artifacts/iphone/`, then
+runs `proof:doctor`.
 
 5. Manual fallback: start the watcher, then copy the app Documents folder into
    this repo under `./artifacts/iphone/`:

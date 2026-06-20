@@ -9,6 +9,8 @@ const defaultOutRoot = join(repoRoot, "artifacts", "iphone");
 const defaultReportPath = join(repoRoot, "artifacts", "phone-pull", "phone-pull.report.json");
 const defaultVenvDir = join(repoRoot, "artifacts", "tooling", "pmd3-venv");
 const pinnedPymobiledevice3 = "pymobiledevice3==9.27.0";
+const defaultWaitMs = 15 * 60 * 1000;
+const defaultPollMs = 2500;
 
 main();
 
@@ -20,7 +22,7 @@ function main() {
   }
 
   const request = normalizeRequest(args);
-  const report = runPhonePull(request);
+  const report = request.waitMs > 0 ? runPhonePullAfterWait(request) : runPhonePull(request);
   writeJson(request.out, report);
   printSummary(report);
   if (report.status !== "pass") process.exit(1);
@@ -32,6 +34,14 @@ function normalizeRequest(args) {
   const outRoot = resolve(repoRoot, args.outRoot ?? defaultOutRoot);
   const out = resolve(repoRoot, args.out ?? defaultReportPath);
   const venvDir = resolve(repoRoot, args.venvDir ?? defaultVenvDir);
+  const waitMs = args.waitMs ?? 0;
+  const pollMs = args.pollMs ?? defaultPollMs;
+  if (!Number.isFinite(waitMs) || waitMs < 0) {
+    throw new Error("--wait-ms must be a non-negative number");
+  }
+  if (!Number.isFinite(pollMs) || pollMs < 1) {
+    throw new Error("--poll-ms must be a positive number");
+  }
   return {
     out,
     outRoot,
@@ -41,9 +51,58 @@ function normalizeRequest(args) {
     bootstrap: Boolean(args.bootstrap),
     skipDeviceCheck: Boolean(args.skipDeviceCheck),
     skipVerify: Boolean(args.skipVerify),
+    waitMs,
+    pollMs,
     udid: args.udid ?? null,
     tool: args.tool ? resolve(repoRoot, args.tool) : null
   };
+}
+
+function runPhonePullAfterWait(request) {
+  const startedAt = Date.now();
+  const deadline = startedAt + request.waitMs;
+  let lastReport = null;
+  while (Date.now() <= deadline) {
+    const attempt = runPhonePull(request);
+    lastReport = attempt;
+    if (attempt.status === "pass") {
+      return {
+        ...attempt,
+        waited_ms: Date.now() - startedAt
+      };
+    }
+    if (!isRetryableReport(attempt)) {
+      return {
+        ...attempt,
+        waited_ms: Date.now() - startedAt
+      };
+    }
+    sleepMs(request.pollMs);
+  }
+
+  const timeoutCheck = {
+    name: "wait_for_phone_pull",
+    status: "fail",
+    summary: `timed out after ${request.waitMs}ms waiting for trusted iPhone + LiquidGlassCaptures`,
+    evidence: {
+      waited_ms: Date.now() - startedAt,
+      poll_ms: request.pollMs,
+      last_report_status: lastReport?.status ?? "missing",
+      last_failed_checks: (lastReport?.checks ?? [])
+        .filter((check) => check.status === "fail")
+        .map((check) => ({ name: check.name, summary: check.summary }))
+    }
+  };
+  return report("fail", request, [...(lastReport?.checks ?? []), timeoutCheck]);
+}
+
+function isRetryableReport(value) {
+  const failed = (value.checks ?? []).filter((check) => check.status === "fail");
+  if (failed.length === 0) return false;
+  return failed.every((check) =>
+    check.name === "connected_ios_device" ||
+    check.name === "pull_liquid_glass_captures"
+  );
 }
 
 function runPhonePull(request) {
@@ -303,7 +362,12 @@ function nextSteps(status, checks) {
   }
   if (findCheck(checks, "connected_ios_device")?.status === "fail") {
     return {
-      connect_phone: "Connect iPhone by USB, unlock, Trust This Computer, open app, press B, rerun npm run phone:pull -- --bootstrap"
+      connect_phone: "Connect iPhone by USB, unlock, Trust This Computer, open app, press B, rerun npm run phone:wait"
+    };
+  }
+  if (findCheck(checks, "wait_for_phone_pull")?.status === "fail") {
+    return {
+      wait_again: "Keep the iPhone connected, open the app, press B, rerun npm run phone:wait"
     };
   }
   return {
@@ -322,6 +386,8 @@ function printSummary(report) {
     console.log(`NEXT ${report.next.bootstrap}`);
   } else if (report.next.connect_phone) {
     console.log(`NEXT ${report.next.connect_phone}`);
+  } else if (report.next.wait_again) {
+    console.log(`NEXT ${report.next.wait_again}`);
   } else if (report.next.manual_fallback) {
     console.log(`NEXT ${report.next.manual_fallback}`);
   }
@@ -375,6 +441,10 @@ function tailLines(text) {
   return String(text).split(/\r?\n/).filter(Boolean).slice(-8);
 }
 
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function localPymobiledevice3Path(venvDir) {
   return process.platform === "win32"
     ? join(venvDir, "Scripts", "pymobiledevice3.exe")
@@ -407,6 +477,9 @@ function parseArgs(argv) {
     else if (token === "--bootstrap") args.bootstrap = true;
     else if (token === "--skip-device-check") args.skipDeviceCheck = true;
     else if (token === "--skip-verify") args.skipVerify = true;
+    else if (token === "--wait") args.waitMs = defaultWaitMs;
+    else if (token === "--wait-ms") args.waitMs = Number(readNext(argv, ++index, token));
+    else if (token === "--poll-ms") args.pollMs = Number(readNext(argv, ++index, token));
     else if (token === "--tool") args.tool = readNext(argv, ++index, token);
     else if (token === "--bundle-id") args.bundleId = readNext(argv, ++index, token);
     else if (token === "--remote") args.remotePath = readNext(argv, ++index, token);
@@ -476,6 +549,20 @@ function runSelfTest() {
   ];
   if (JSON.stringify(args) !== JSON.stringify(expected)) {
     throw new Error("phone-pull self-test failed command argument construction");
+  }
+
+  const timeout = runPhonePullAfterWait({
+    ...request,
+    tool: fakeTool,
+    waitMs: 1,
+    pollMs: 1
+  });
+  if (
+    timeout.status !== "fail" ||
+    findCheck(timeout.checks, "wait_for_phone_pull")?.status !== "fail" ||
+    timeout.next?.connect_phone !== "Connect iPhone by USB, unlock, Trust This Computer, open app, press B, rerun npm run phone:wait"
+  ) {
+    throw new Error("phone-pull self-test failed wait timeout path");
   }
 
   rmSync(dir, { recursive: true, force: true });

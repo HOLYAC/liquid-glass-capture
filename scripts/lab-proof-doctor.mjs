@@ -596,13 +596,13 @@ function renderPhoneHandoff(report) {
     `max-fidelity=${String(planCheck?.evidence?.on_device_app_action?.set_max_fidelity ?? true)}`,
     "```",
     "",
-    "3. Preferred USB pull: connect the iPhone, unlock it, tap **Trust This Computer**, then run:",
+    "3. Preferred USB pull: start the waiting command, then connect the iPhone, unlock it, tap **Trust This Computer**, and let it pull + verify:",
     "",
     "```powershell",
-    "npm run phone:pull -- --bootstrap",
+    "npm run phone:wait",
     "```",
     "",
-    "`phone:pull` installs `pymobiledevice3` into `artifacts/tooling` if missing, pulls `Documents/LiquidGlassCaptures` from `com.zaeba.liquidglasscapture`, and then runs `proof:doctor`.",
+    "`phone:wait` installs `pymobiledevice3` into `artifacts/tooling` if missing, waits up to 15 minutes for a trusted USB iPhone, pulls `Documents/LiquidGlassCaptures` from `com.zaeba.liquidglasscapture`, and then runs `proof:doctor`.",
     "",
     "4. Manual fallback: start the watcher before or after the phone capture:",
     "",
@@ -776,7 +776,7 @@ function runSelfTest() {
   if (
     !handoff.includes("PASS_READY_FOR_PHONE") ||
     !handoff.includes("PASS_VERIFIED_CAPTURE") ||
-    !handoff.includes("npm run phone:pull -- --bootstrap") ||
+    !handoff.includes("npm run phone:wait") ||
     !handoff.includes("npm run proof:watch")
   ) {
     throw new Error("proof-doctor self-test failed to render phone handoff runbook");
