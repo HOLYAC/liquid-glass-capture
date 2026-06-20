@@ -253,6 +253,10 @@ metrics such as SSIM are converted to loss, `SHADER_SLACK` and `WEBKIT_SLACK`
 are named with owner and derivation, and the shader threshold explicitly uses
 only instrument noise plus shader slack. WebKit gap remains a report-only
 `no_worse_than_webkit` floor.
+Baseline namespace is derived from an explicit `baseline_identity` block:
+scene/state/rig, device model and identifier, iOS version/build, SDK build,
+capture daemon version, renderer lockfile SHA, observable WebKit build or
+`not_observable`, and null/pipeline qualification status.
 
 ## Production / TestFlight
 

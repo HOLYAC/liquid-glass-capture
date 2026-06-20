@@ -86,10 +86,13 @@ export function artifactIdentity(record) {
     png_path: record.png_path,
     png_sha256: record.png?.sha256,
     device: artifact.device_info
-      ? {
+        ? {
+          model_name: artifact.device_info.model_name,
           model_identifier: artifact.device_info.model_identifier,
+          os_version: artifact.device_info.os_version,
           os_build: artifact.device_info.os_build,
           sdk_build: artifact.device_info.sdk_build,
+          webkit_build: artifact.device_info.webkit_build ?? artifact.environment?.webkit_build,
           screen_scale: artifact.device_info.screen_scale,
           refresh_hz: artifact.device_info.refresh_hz,
           thermal_state_start: artifact.device_info.thermal_state_start,

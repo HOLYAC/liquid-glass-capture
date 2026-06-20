@@ -380,6 +380,7 @@ function renderBaselineViewer(path, report) {
       statusPill("G2", report.gates?.G2 ?? "not_run")
     ]),
     section("Namespace", table(rows)),
+    section("Baseline Identity", table(objectRows(report.baseline_identity ?? {}))),
     section("Instrument Noise", metricSummaryTable(report.instrument_noise?.metrics ?? {})),
     section("Candidate Gap", metricSummaryTable(report.candidate_gap?.metrics ?? {})),
     section("Thresholds", thresholdSummaryTable(report.threshold_derivation?.metric_thresholds ?? {})),
@@ -595,11 +596,20 @@ function baselineNamespaceFromArtifact(artifact) {
     artifact.scene_id,
     artifact.state_id,
     artifact.rig_id,
+    device.model_name,
     safePart(device.model_identifier),
+    device.os_version,
     safePart(device.os_build),
     safePart(device.sdk_build),
-    safePart(integrity.producer_version)
-  ].join("__");
+    safePart(integrity.producer_version),
+    `lock-${rendererLockfileSha256()}`,
+    `webkit-${device.webkit_build ?? artifact.environment?.webkit_build ?? "not_observable"}`,
+    `pipeline-${artifact.null_qualification ?? "not_recorded"}`
+  ].map(safePart).join("__");
+}
+
+function rendererLockfileSha256() {
+  return sha256File(join(repoRoot, "package-lock.json"));
 }
 
 function safePart(value) {

@@ -94,6 +94,7 @@ function main() {
     });
     assertOutlierPolicySelfTest();
     assertThresholdPolicySelfTest(report);
+    assertBaselineIdentitySelfTest(report);
     console.log(`${report.baseline_status.toUpperCase()} ${fixture.out}`);
     return;
   }
@@ -141,7 +142,8 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
   }
 
   const requested = repeatOverride ?? requestedRepeat[baselineClass] ?? requestedRepeat.mvl;
-  const namespace = makeBaselineNamespace(referenceRecords[0], baselineClass);
+  const baselineIdentity = makeBaselineIdentity(referenceRecords[0], baselineClass);
+  const namespace = makeBaselineNamespace(baselineIdentity);
   const instrumentNoise = summarizeReports(referenceReports);
   const candidateGap = summarizeReports(candidateReports);
   const infrastructureHealth = assessInfrastructureHealth(instrumentNoise);
@@ -153,6 +155,7 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
     schema_version: "1.2.0",
     kind: "baseline_metric_report",
     baseline_namespace: namespace,
+    baseline_identity: baselineIdentity,
     baseline_class: baselineClass,
     baseline_status: infrastructureHealth.status === "fail"
       ? "invalid"
@@ -560,6 +563,47 @@ function assertThresholdPolicySelfTest(report) {
   }
 }
 
+function assertBaselineIdentitySelfTest(report) {
+  const identity = report.baseline_identity ?? {};
+  const required = [
+    "device_model_name",
+    "device_model_identifier",
+    "os_version",
+    "os_build",
+    "sdk_build",
+    "capture_daemon_version",
+    "renderer_dependency_lockfile_sha256",
+    "webkit_build",
+    "pipeline_qualification_status"
+  ];
+  for (const key of required) {
+    if (typeof identity[key] !== "string" || identity[key].length === 0) {
+      throw new Error(`baseline identity self-test missing ${key}`);
+    }
+  }
+  if (identity.renderer_dependency_lockfile_sha256 !== sha256File(join(repoRoot, "package-lock.json"))) {
+    throw new Error("baseline identity self-test lockfile hash mismatch");
+  }
+  if (identity.pipeline_qualification_status !== "pass") {
+    throw new Error("baseline identity self-test failed to carry null qualification");
+  }
+  for (const value of [
+    identity.device_model_name,
+    identity.device_model_identifier,
+    identity.os_version,
+    identity.os_build,
+    identity.sdk_build,
+    identity.capture_daemon_version,
+    identity.renderer_dependency_lockfile_sha256,
+    identity.webkit_build,
+    identity.pipeline_qualification_status
+  ]) {
+    if (!report.baseline_namespace.includes(safePart(value))) {
+      throw new Error(`baseline namespace self-test missing ${value}`);
+    }
+  }
+}
+
 function makeSyntheticSamples({ knownReason }) {
   return [0, 0, 0, 0, 0, 0, 0, 100].map((value, index) => ({
     sample_id: `outlier-self-test-${index}`,
@@ -649,21 +693,54 @@ function makeSeededRng(seed) {
   };
 }
 
-function makeBaselineNamespace(record, baselineClass) {
+function makeBaselineIdentity(record, baselineClass) {
   const artifact = record.artifact;
   const device = artifact.device_info ?? {};
   const integrity = artifact.integrity ?? {};
+  const rendererLockfile = rendererLockfileIdentity();
+  return Object.freeze({
+    baseline_class: baselineClass,
+    scene_id: artifact.scene_id,
+    state_id: artifact.state_id,
+    rig_id: artifact.rig_id,
+    device_model_name: device.model_name ?? "unknown",
+    device_model_identifier: device.model_identifier ?? "unknown",
+    os_version: device.os_version ?? "unknown",
+    os_build: device.os_build ?? "unknown",
+    sdk_build: device.sdk_build ?? "unknown",
+    capture_daemon_version: integrity.producer_version ?? "unknown",
+    renderer_dependency_lockfile_path: rendererLockfile.path,
+    renderer_dependency_lockfile_sha256: rendererLockfile.sha256,
+    webkit_build: device.webkit_build ?? artifact.environment?.webkit_build ?? "not_observable",
+    pipeline_qualification_status: artifact.null_qualification ?? "not_recorded"
+  });
+}
+
+function makeBaselineNamespace(identity) {
   return [
     "baseline",
-    baselineClass,
-    artifact.scene_id,
-    artifact.state_id,
-    artifact.rig_id,
-    safePart(device.model_identifier),
-    safePart(device.os_build),
-    safePart(device.sdk_build),
-    safePart(integrity.producer_version)
-  ].join("__");
+    identity.baseline_class,
+    identity.scene_id,
+    identity.state_id,
+    identity.rig_id,
+    identity.device_model_name,
+    identity.device_model_identifier,
+    identity.os_version,
+    identity.os_build,
+    identity.sdk_build,
+    identity.capture_daemon_version,
+    `lock-${identity.renderer_dependency_lockfile_sha256}`,
+    `webkit-${identity.webkit_build}`,
+    `pipeline-${identity.pipeline_qualification_status}`
+  ].map(safePart).join("__");
+}
+
+function rendererLockfileIdentity() {
+  const path = join(repoRoot, "package-lock.json");
+  return {
+    path: "package-lock.json",
+    sha256: sha256File(path)
+  };
 }
 
 function safePart(value) {
@@ -723,6 +800,7 @@ function makeArtifact(rigId, pngPath, maskPath, index) {
     state_id: "rest",
     git_commit: "self-test",
     capture_kind: "compositor",
+    null_qualification: "pass",
     device_info: {
       model_name: "Self Test Device",
       model_identifier: "iPhone-self-test",
