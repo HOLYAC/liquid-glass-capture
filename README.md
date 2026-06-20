@@ -89,9 +89,11 @@ npm run proof:prepare
 ```
 
 This downloads the latest successful unsigned IPA, verifies that it was built
-from the current `HEAD`, verifies that the `.ipa` has a `Payload/*.app` bundle
-and an embedded `main.jsbundle`, writes the one-repeat proof plan, and writes
-`./artifacts/proof-doctor/proof-doctor.report.json`.
+from the current `HEAD`, refuses a dirty git worktree, verifies that the `.ipa`
+has a `Payload/*.app` bundle and an embedded `main.jsbundle`, writes the
+one-repeat proof plan, and writes
+`./artifacts/proof-doctor/proof-doctor.report.json` plus the phone handoff
+runbook at `./artifacts/proof-doctor/PHONE_HANDOFF.md`.
 
 5. On Windows, install
    `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa` to iPhone using
@@ -126,7 +128,9 @@ npm run proof:prepare
 
 `PASS_READY_FOR_PHONE` means the local repo, IPA, embedded JS bundle, app
 defaults, and one-repeat proof plan agree. The report lives at
-`./artifacts/proof-doctor/proof-doctor.report.json`.
+`./artifacts/proof-doctor/proof-doctor.report.json`; the exact phone steps and
+paths for that specific build are written to
+`./artifacts/proof-doctor/PHONE_HANDOFF.md`.
 
 2. Sideload `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa`, then
    open **Liquid Glass Capture** on the iPhone.
