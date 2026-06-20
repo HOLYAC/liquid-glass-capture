@@ -9,6 +9,7 @@ import { measureOptics } from "../../packages/metric-stack/src/optics.mjs";
 import { measureTemporal } from "../../packages/metric-stack/src/temporal.mjs";
 import { measureRuntime } from "../../packages/metric-stack/src/runtime.mjs";
 import { measureEnergy } from "../../packages/energy-stack/src/index.mjs";
+import { makeReviewPacketSeed } from "../../packages/review-stack/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
@@ -45,6 +46,9 @@ export function renderInspectViewer(inputPath) {
   const json = JSON.parse(readFileSync(absolute, "utf8"));
   if (json.kind === "baseline_metric_report") {
     return renderBaselineViewer(absolute, json);
+  }
+  if (json.kind === "g8_verdict_report") {
+    return renderVerdictViewer(absolute, json);
   }
 
   const record = readCaptureArtifact(absolute, {
@@ -108,6 +112,11 @@ export function renderDiffViewer(referencePath, candidatePath) {
   const energyReport = measureEnergySafely(candidateRecord);
   const reference = referenceRecord.artifact;
   const candidate = candidateRecord.artifact;
+  const reviewPacketSeed = makeReviewPacketSeed({
+    reference,
+    candidate,
+    gateReports: [report, opticsReport, temporalReport, runtimeReport, energyReport]
+  });
   const referenceUri = dataUri(referenceRecord.png_path, "image/png");
   const candidateUri = dataUri(candidateRecord.png_path, "image/png");
 
@@ -133,6 +142,7 @@ export function renderDiffViewer(referencePath, candidatePath) {
     section("Temporal Summary", temporalSummary(temporalReport)),
     section("Runtime Summary", runtimeSummary(runtimeReport)),
     section("Energy Summary", energySummary(energyReport)),
+    section("G7 Review Packet Seed", `<pre>${escapeHtml(JSON.stringify(reviewPacketSeed, null, 2))}</pre>`),
     section("Reference", table([
       ["id", reference.id],
       ["rig", reference.rig_id],
@@ -199,6 +209,36 @@ export function writeViewerSelfTestArtifacts() {
     referenceArtifact,
     candidateArtifact
   };
+}
+
+function renderVerdictViewer(path, report) {
+  return page("Verdict Inspect", [
+    hero("Verdict Inspect", report.artifacts?.candidate?.id ?? relative(repoRoot, path), [
+      statusPill("verdict", report.verdict_class ?? "unknown"),
+      statusPill("technical", report.technical_class ?? "unknown"),
+      statusPill("design", report.design_class ?? "unknown")
+    ]),
+    section("Final Verdict", table([
+      ["verdict_class", report.verdict_class],
+      ["technical_class", report.technical_class],
+      ["design_class", report.design_class],
+      ["flake_class", report.flake_class],
+      ["status", report.status],
+      ["null_qualification", report.null_qualification],
+      ["source", relative(repoRoot, path)]
+    ])),
+    section("Scene", table([
+      ["scene_id", report.scene?.scene_id ?? ""],
+      ["state_id", report.scene?.state_id ?? ""],
+      ["capture_kind", report.capture_kind ?? ""]
+    ])),
+    section("Gates", table(objectRows(report.gates ?? {}))),
+    section("Device", table(objectRows(report.device ?? {}))),
+    section("Identifiability", table(objectRows(report.identifiability ?? { status: "not_recorded" }))),
+    section("Baseline", table(objectRows(report.baseline ?? { status: "not_recorded" }))),
+    section("Blockers", table((report.blockers ?? []).map((blocker, index) => [index, blocker]))),
+    section("Raw Verdict", `<pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>`)
+  ]);
 }
 
 function renderBaselineViewer(path, report) {

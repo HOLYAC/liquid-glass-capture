@@ -1,0 +1,148 @@
+const requiredTechnicalGates = ["G2", "G3", "G4", "G5", "G6"];
+
+export function buildVerdictReport({ candidateRecord, gateReports = [], reviewReport, baselineReport, preflightFailures = [] }) {
+  const artifact = candidateRecord.artifact ?? candidateRecord;
+  const failures = [...preflightFailures];
+  const blockers = [];
+
+  if (looksLikeSimulator(artifact.device_info?.model_identifier)) failures.push("G8_PHYSICAL_DEVICE_REQUIRED");
+  if (artifact.capture_kind !== "compositor" && artifact.capture_kind !== "framebuffer") {
+    failures.push("G8_CAPTURE_PATH_INVALID");
+  }
+  if (artifact.rig_id === "C1" && artifact.shader?.pipeline !== "baked_verdict") {
+    failures.push("G8_C1_REQUIRES_BAKED_VERDICT_SHADER");
+  }
+  if (artifact.rig_id === "C0" || artifact.rig_id === "DX_REPLAY") {
+    failures.push("G8_CALIBRATION_OR_REPLAY_RIG_INVALID_FOR_VERDICT");
+  }
+
+  const gateMap = new Map(gateReports.map((report) => [report.gate, report]));
+  for (const gate of requiredTechnicalGates) {
+    if (!gateMap.has(gate)) failures.push(`G8_${gate}_REPORT_MISSING`);
+  }
+  for (const report of gateReports) {
+    if (report.status !== "pass") {
+      blockers.push(...(report.failures ?? [`${report.gate}_FAILED`]));
+    }
+  }
+
+  const invalid = failures.length > 0;
+  const hardFailed = blockers.length > 0;
+  const technicalClass = invalid ? "INVALID" : hardFailed ? "FAIL" : deriveTechnicalClass(artifact);
+  const designClass = designClassFromReview(reviewReport, invalid || hardFailed);
+  const verdictClass = verdictClassFromState({ invalid, hardFailed, reviewReport, designClass });
+  const energyGate = gateMap.get("G6");
+
+  return {
+    schema_version: "1.2.0",
+    kind: "g8_verdict_report",
+    verdict_class: verdictClass,
+    technical_class: technicalClass,
+    design_class: designClass,
+    flake_class: "NONE",
+    status: verdictClass === "FAIL" || verdictClass === "INVALID" ? "fail" : "pass",
+    null_qualification: artifact.null_qualification ?? "not_recorded",
+    device: deviceSummary(artifact),
+    capture_kind: artifact.capture_kind,
+    scene: {
+      scene_id: artifact.scene_id,
+      state_id: artifact.state_id
+    },
+    gates: {
+      color: "assumed_from_G0_G1_artifact_contract",
+      static: gateStatus(gateMap, "G2"),
+      optics: gateStatus(gateMap, "G3"),
+      temporal: gateStatus(gateMap, "G4"),
+      runtime: gateStatus(gateMap, "G5"),
+      energy: energyStatus(energyGate),
+      design: designStatus(designClass)
+    },
+    identifiability: artifact.shader?.identifiability ?? {},
+    baseline: baselineReport
+      ? {
+          namespace: baselineReport.baseline_namespace,
+          status: baselineReport.baseline_status,
+          repeat_n_observed: baselineReport.repeat_n_observed
+        }
+      : { status: "not_recorded" },
+    artifacts: {
+      candidate: {
+        id: artifact.id,
+        rig_id: artifact.rig_id,
+        png_sha256: candidateRecord.png?.sha256 ?? artifact.frame_pack?.base_png_sha256 ?? null,
+        artifact_path: candidateRecord.artifact_path ?? null
+      }
+    },
+    traces: {
+      energy_trace: energyGate?.metrics?.energy?.trace_status ?? artifact.energy?.trace_status ?? "not_recorded"
+    },
+    blockers: [...failures, ...blockers, ...(reviewReport?.failures ?? [])],
+    retention: {
+      class: "lab_generated",
+      raw_artifacts_retained: true
+    },
+    reports: Object.fromEntries(gateReports.map((report) => [report.gate, report.kind ?? "gate_report"]))
+  };
+}
+
+function deriveTechnicalClass(artifact) {
+  if (artifact.rig_id === "R0") return "SWIFTUI_PASS";
+  if (artifact.rig_id === "R1" || artifact.rig_id === "DOM_C") return "WEBKIT_PASS";
+  if (artifact.rig_id === "C1") return "SHADER_PASS";
+  return "INVALID";
+}
+
+function verdictClassFromState({ invalid, hardFailed, reviewReport, designClass }) {
+  if (invalid) return "INVALID";
+  if (hardFailed) return "FAIL";
+  if (!reviewReport) return "TECH_PASS_PENDING_SIGNOFF";
+  if (reviewReport.status !== "pass") return "FAIL";
+  return {
+    PASS: "PROD_PASS",
+    PASS_WITH_REVIEW: "PASS_WITH_REVIEW",
+    BLOCKED_FOR_DESIGN: "BLOCKED_FOR_DESIGN",
+    LEGIBILITY_BLOCK: "LEGIBILITY_BLOCK"
+  }[designClass] ?? "FAIL";
+}
+
+function designClassFromReview(reviewReport, technicalStopped) {
+  if (technicalStopped) return "NOT_RUN";
+  if (!reviewReport) return "NOT_RUN";
+  if (reviewReport.status !== "pass") return "NOT_RUN";
+  return reviewReport.design_class ?? "NOT_RUN";
+}
+
+function gateStatus(gateMap, gate) {
+  return gateMap.get(gate)?.status ?? "missing";
+}
+
+function energyStatus(report) {
+  if (!report) return "missing";
+  if (report.status !== "pass") return "fail";
+  if ((report.warnings ?? []).includes("G6_ENERGY_TRACE_UNAVAILABLE")) return "trace_unavailable";
+  return "pass";
+}
+
+function designStatus(designClass) {
+  return {
+    NOT_RUN: "not_run",
+    PASS: "pass",
+    PASS_WITH_REVIEW: "review",
+    BLOCKED_FOR_DESIGN: "block",
+    LEGIBILITY_BLOCK: "block"
+  }[designClass] ?? "not_run";
+}
+
+function deviceSummary(artifact) {
+  const device = artifact.device_info ?? {};
+  return {
+    model_name: device.model_name ?? null,
+    model_identifier: device.model_identifier ?? null,
+    os_build: device.os_build ?? null,
+    sdk_build: device.sdk_build ?? null
+  };
+}
+
+function looksLikeSimulator(modelIdentifier) {
+  return typeof modelIdentifier === "string" && /simulator|x86|arm64-sim/i.test(modelIdentifier);
+}

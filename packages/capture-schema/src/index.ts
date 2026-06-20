@@ -155,8 +155,18 @@ export interface CaptureArtifact {
       | "pass_with_review"
       | "blocked_for_design"
       | "legibility_block";
+    design_class?:
+      | "NOT_RUN"
+      | "PASS"
+      | "PASS_WITH_REVIEW"
+      | "BLOCKED_FOR_DESIGN"
+      | "LEGIBILITY_BLOCK";
     design_reviewer?: string;
     product_reviewer?: string;
+    owner_decision?: "prod_pass" | "pass_with_review" | "blocked_for_design" | "legibility_block";
+    review_packet_sha256?: string;
+    g7_report_sha256?: string;
+    g8_report_sha256?: string;
     comments_sha256?: string;
   };
   integrity: {

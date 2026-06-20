@@ -93,6 +93,7 @@ function validateArtifact(artifact, artifactDir) {
   validateFramePack(errors, artifact.frame_pack, artifactDir);
   validatePerf(errors, artifact.perf);
   validateEnergy(errors, artifact.energy);
+  validateReview(errors, artifact.review);
   validateIntegrity(errors, artifact.integrity);
   return errors;
 }
@@ -228,6 +229,53 @@ function validateEnergy(errors, energy) {
   for (const key of ["energy_mj_per_10s", "average_power_mw", "thermal_onset_ms"]) {
     if (energy[key] !== undefined) {
       requireNumber(errors, `energy.${key}`, energy[key]);
+    }
+  }
+}
+
+function validateReview(errors, review) {
+  if (review === undefined) return;
+  if (!review || typeof review !== "object") {
+    errors.push("review must be an object when present");
+    return;
+  }
+
+  if (review.g7_status !== undefined) {
+    requireEnum(errors, "review.g7_status", review.g7_status, [
+      "not_run",
+      "passed",
+      "pass_with_review",
+      "blocked_for_design",
+      "legibility_block"
+    ]);
+  }
+  if (review.design_class !== undefined) {
+    requireEnum(errors, "review.design_class", review.design_class, [
+      "NOT_RUN",
+      "PASS",
+      "PASS_WITH_REVIEW",
+      "BLOCKED_FOR_DESIGN",
+      "LEGIBILITY_BLOCK"
+    ]);
+  }
+  if (review.owner_decision !== undefined) {
+    requireEnum(errors, "review.owner_decision", review.owner_decision, [
+      "prod_pass",
+      "pass_with_review",
+      "blocked_for_design",
+      "legibility_block"
+    ]);
+  }
+  for (const key of [
+    "design_reviewer",
+    "product_reviewer",
+    "review_packet_sha256",
+    "g7_report_sha256",
+    "g8_report_sha256",
+    "comments_sha256"
+  ]) {
+    if (review[key] !== undefined) {
+      requireString(errors, `review.${key}`, review[key]);
     }
   }
 }

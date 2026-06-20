@@ -116,6 +116,8 @@ npm run metrics:optics -- --reference ./artifacts/r0.capture.json --candidate ./
 npm run metrics:temporal -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/g4-temporal.report.json
 npm run metrics:runtime -- --artifact ./artifacts/c1.capture.json --out ./artifacts/g5-runtime.report.json
 npm run energy:stress -- --artifact ./artifacts/c1-sustained.capture.json --sustained --out ./artifacts/g6-energy.report.json
+npm run review:packet -- --packet ./artifacts/g7-review.packet.json --out ./artifacts/g7-review.report.json
+npm run report:verdict -- --candidate ./artifacts/c1.capture.json --gate ./artifacts/g2.report.json --gate ./artifacts/g3-optics.report.json --gate ./artifacts/g4-temporal.report.json --gate ./artifacts/g5-runtime.report.json --gate ./artifacts/g6-energy.report.json --review ./artifacts/g7-review.report.json --out ./artifacts/g8-verdict.report.json
 npm run metrics:baseline -- --ref-manifest ./artifacts/r0.repeat-manifest.json --probe-manifest ./artifacts/r1.repeat-manifest.json --class mvl --repeat 50 --out ./baselines/current.json
 npm run glass:inspect -- ./artifacts/r0.capture.json --out ./artifacts/viewer/r0.inspect.html
 npm run glass:diff -- --reference ./artifacts/r0.capture.json --candidate ./artifacts/r1.capture.json --out ./artifacts/viewer/r0-r1.diff.html
@@ -131,8 +133,10 @@ G3: inferred edge lensing, blur falloff, chromatic fringe, highlight/shadow, alp
 G4: motion-energy phase, press overshoot/damping/settle time, frame pacing, trajectory-source lock
 G5: full-frame p95/dropped-frame runtime gate from artifact perf fields
 G6: short/sustained stress, thermal gate, sustained degradation, energy trace availability policy
+G7: structured design/product sign-off packet; artifact-bound blockers only
+G8: final verdict report with separate technical/disposition/design classes
 Baseline: repeat policy + instrument-noise/candidate-gap summaries
-Viewer: artifact/baseline inspect, R-vs-C diff, debug heatmap, G2-G6 summaries, null/energy/identifiability panels
+Viewer: artifact/baseline/verdict inspect, R-vs-C diff, debug heatmap, G2-G6 summaries, G7 packet seed, null/energy/identifiability panels
 ```
 
 Current G3 mask scope is `edge_band_inferred_from_residual_v0` until exported
@@ -153,6 +157,15 @@ frame-interval degradation, and whether a power trace exists. `trace_unavailable
 is reported in-band and becomes a hard failure only when the command is run with
 `--require-energy-trace`; Instruments Power Profiler and MetricKit adapters are
 the next layer, not silently faked here.
+
+Current G7 scope validates a review packet rather than free-form taste: every
+block needs scene, state, mask, artifact pointer, reviewer category, written
+reason, owner, and ticket. Naked objections like "looks off" or "не нравится"
+fail the gate.
+
+Current G8 scope emits the two-axis verdict report. It refuses simulator/replay
+verdicts, refuses C1 without `baked_verdict`, and keeps DOM_C in `WEBKIT_PASS`
+instead of allowing a fake SwiftUI claim.
 
 The app bottom bar exposes `B` for batch capture. It runs ReplayKit compositor
 capture repeatedly, writes a `repeat_capture_manifest`, and enforces nominal

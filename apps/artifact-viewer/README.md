@@ -25,6 +25,8 @@ G3 optics summary
 G4 temporal summary
 G5 runtime summary
 G6 energy/thermal summary
+G7 review packet seed
+G8 verdict report inspect
 debug heatmap
 energy summary when present
 identifiability tags when present
