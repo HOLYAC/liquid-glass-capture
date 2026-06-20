@@ -61,6 +61,9 @@ GitHub Actions macos-26 builds an unsigned iPhoneOS IPA
 Windows signs/installs that IPA with a free Apple ID via Sideloadly or AltStore
 ```
 
+The scripted download step expects GitHub CLI auth (`gh auth login`) from this
+repo root.
+
 Limits:
 
 - not official distribution;
@@ -73,20 +76,21 @@ Steps:
 
 1. Put this `liquid_glass_capture_expo` folder in a GitHub repo root.
 2. Push it.
-3. Open GitHub repo -> `Actions`.
-4. Run workflow:
+3. If this branch has no successful unsigned build yet, run the workflow:
 
-```text
-Build unsigned iOS IPA
+```bash
+gh workflow run build-unsigned-ios-ipa.yml --ref <branch>
 ```
 
-5. Download artifact:
+4. Download the latest successful unsigned IPA artifact for the current branch:
 
-```text
-LiquidGlassCapture-unsigned-ipa
+```bash
+npm run ipa:download -- --out-dir ./artifacts/unsigned-ipa
 ```
 
-6. On Windows, install the `.ipa` to iPhone using Sideloadly or AltStore with a free Apple ID.
+5. On Windows, install
+   `./artifacts/unsigned-ipa/LiquidGlassCapture-unsigned.ipa` to iPhone using
+   Sideloadly or AltStore with a free Apple ID.
 
 This path uses GitHub's `macos-26` runner because the native module needs iOS 26 SDK for `glassEffect`.
 
@@ -105,8 +109,12 @@ Scan the QR code with the installed development client.
 Use this first. It is the shortest end-to-end proof that the installed iPhone
 app can produce the raw pixel evidence this lab was built for.
 
-1. Build or download the latest `LiquidGlassCapture-unsigned-ipa` artifact from
-   the GitHub `Build unsigned iOS IPA` workflow, then sideload it.
+1. Download the latest successful unsigned IPA artifact, then sideload it:
+
+```bash
+npm run ipa:download -- --out-dir ./artifacts/unsigned-ipa
+```
+
 2. Start the dev client:
 
 ```bash
