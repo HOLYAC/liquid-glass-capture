@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   glassSceneDefaults,
@@ -31,6 +32,7 @@ function main() {
       out: args.out
     });
     assertRawFlagSemantics();
+    assertRawManifestVerification();
     console.log(`${report.status.toUpperCase()} ${report.jsonPath ?? ""}`.trim());
     if (report.status !== "pass") process.exit(1);
     return;
@@ -138,6 +140,14 @@ function verifyManifest(request) {
   if (requestedRawFrames || requestedRawPixels) {
     if (typeof manifest.max_frames !== "number" || manifest.max_frames <= 0) failures.push("MANIFEST_MAX_FRAMES_MISSING");
   }
+  if (requestedRawFrames && Array.isArray(manifest.artifact_json_paths)) {
+    const manifestDir = dirname(manifestPath);
+    for (const [index, artifactJsonPath] of manifest.artifact_json_paths.entries()) {
+      verifyArtifactRawManifest(failures, manifestDir, artifactJsonPath, index, {
+        requiresRawDisplay: requestedRawPixels
+      });
+    }
+  }
 
   const report = {
     schema_version: "1.2.0",
@@ -165,6 +175,108 @@ function verifyManifest(request) {
     report.jsonPath = resolve(request.out);
   }
   return report;
+}
+
+function verifyArtifactRawManifest(failures, manifestDir, artifactJsonPath, index, options) {
+  const artifactLabel = `ARTIFACT_${index}`;
+  if (typeof artifactJsonPath !== "string" || artifactJsonPath.length === 0) {
+    failures.push(`${artifactLabel}_PATH_INVALID`);
+    return;
+  }
+
+  const artifactPath = resolveMaybe(manifestDir, artifactJsonPath);
+  let artifact;
+  try {
+    artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  } catch (error) {
+    failures.push(`${artifactLabel}_JSON_INVALID:${error.message}`);
+    return;
+  }
+
+  const framePack = artifact.frame_pack ?? {};
+  const frameManifestPath = framePack.frame_manifest_path;
+  const frameManifestSHA256 = framePack.frame_manifest_sha256;
+  if (typeof frameManifestPath !== "string" || frameManifestPath.length === 0) {
+    failures.push(`${artifactLabel}_RAW_MANIFEST_PATH_MISSING`);
+    return;
+  }
+  if (typeof frameManifestSHA256 !== "string" || frameManifestSHA256.length === 0) {
+    failures.push(`${artifactLabel}_RAW_MANIFEST_SHA_MISSING`);
+    return;
+  }
+
+  const artifactDir = dirname(artifactPath);
+  const absoluteFrameManifestPath = resolveMaybe(artifactDir, frameManifestPath);
+  verifyFileHash(failures, artifactLabel, absoluteFrameManifestPath, frameManifestSHA256);
+
+  let frameManifest;
+  try {
+    frameManifest = JSON.parse(readFileSync(absoluteFrameManifestPath, "utf8"));
+  } catch (error) {
+    failures.push(`${artifactLabel}_RAW_MANIFEST_JSON_INVALID:${error.message}`);
+    return;
+  }
+  if (!Array.isArray(frameManifest.frames)) {
+    failures.push(`${artifactLabel}_RAW_MANIFEST_FRAMES_NOT_ARRAY`);
+    return;
+  }
+  if (frameManifest.frames.length === 0) {
+    failures.push(`${artifactLabel}_RAW_MANIFEST_EMPTY`);
+  }
+  if (typeof frameManifest.frame_count === "number" && frameManifest.frame_count !== frameManifest.frames.length) {
+    failures.push(`${artifactLabel}_RAW_MANIFEST_COUNT_MISMATCH`);
+  }
+
+  for (const [frameIndex, frame] of frameManifest.frames.entries()) {
+    const frameLabel = `${artifactLabel}_FRAME_${frameIndex}`;
+    if (!frame || typeof frame !== "object") {
+      failures.push(`${frameLabel}_NOT_OBJECT`);
+      continue;
+    }
+    if (!frame.raw || typeof frame.raw !== "object") {
+      failures.push(`${frameLabel}_RAW_MISSING`);
+      continue;
+    }
+    verifyRawFileRef(failures, artifactDir, `${frameLabel}_RAW`, frame.raw);
+    if (options.requiresRawDisplay) {
+      if (!frame.raw.display || typeof frame.raw.display !== "object") {
+        failures.push(`${frameLabel}_RAW_DISPLAY_MISSING`);
+      } else {
+        verifyRawFileRef(failures, artifactDir, `${frameLabel}_RAW_DISPLAY`, frame.raw.display);
+      }
+    }
+  }
+}
+
+function verifyRawFileRef(failures, artifactDir, label, raw) {
+  if (typeof raw.path !== "string" || raw.path.length === 0) {
+    failures.push(`${label}_PATH_MISSING`);
+    return;
+  }
+  if (typeof raw.sha256 !== "string" || raw.sha256.length === 0) {
+    failures.push(`${label}_SHA_MISSING`);
+    return;
+  }
+  verifyFileHash(failures, label, resolveMaybe(artifactDir, raw.path), raw.sha256);
+}
+
+function verifyFileHash(failures, label, path, expectedSHA256) {
+  try {
+    const actualSHA256 = sha256File(path);
+    if (actualSHA256.toLowerCase() !== String(expectedSHA256).toLowerCase()) {
+      failures.push(`${label}_SHA_MISMATCH`);
+    }
+  } catch (error) {
+    failures.push(`${label}_FILE_UNREADABLE:${error.message}`);
+  }
+}
+
+function resolveMaybe(baseDir, path) {
+  return isAbsolute(path) ? path : resolve(baseDir, path);
+}
+
+function sha256File(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 function normalizeRequest(args) {
@@ -285,6 +397,114 @@ function assertRawFlagSemantics() {
     includes: ["--max-fidelity", "--capture-raw-frames", "--capture-raw-pixels"],
     excludes: []
   });
+}
+
+function assertRawManifestVerification() {
+  const dir = join(repoRoot, "artifacts", "lab-self-test", "ios-capture-raw");
+  mkdirSync(dir, { recursive: true });
+
+  const rawPath = join(dir, "000000.source.raw");
+  const displayPath = join(dir, "000000.display.rgba");
+  writeFileSync(rawPath, Buffer.from([1, 2, 3, 4]));
+  writeFileSync(displayPath, Buffer.from([5, 6, 7, 8]));
+
+  const frame = {
+    index: 0,
+    png: "000000.png",
+    sha256: "0".repeat(64),
+    raw: {
+      path: "000000.source.raw",
+      format: "32BGRA",
+      width: 1,
+      height: 1,
+      bytesPerRow: 4,
+      byteCount: 4,
+      sha256: sha256File(rawPath),
+      display: {
+        path: "000000.display.rgba",
+        format: "32RGBA",
+        width: 1,
+        height: 1,
+        bytesPerRow: 4,
+        byteCount: 4,
+        sha256: sha256File(displayPath)
+      }
+    }
+  };
+  const frameManifestPath = join(dir, "frame_manifest.json");
+  writeJson(frameManifestPath, {
+    schema_version: "1.0.0",
+    frame_count: 1,
+    frames: [frame]
+  });
+  const artifactPath = join(dir, "a.capture.json");
+  writeJson(artifactPath, {
+    schema_version: "1.2.0",
+    frame_pack: {
+      frame_manifest_path: "frame_manifest.json",
+      frame_manifest_sha256: sha256File(frameManifestPath)
+    }
+  });
+  const repeatManifestPath = join(dir, "repeat-manifest.json");
+  writeJson(repeatManifestPath, {
+    schema_version: "1.2.0",
+    kind: "repeat_capture_manifest",
+    status: "complete",
+    rig_id: "R0",
+    scene_id: "S01_SEARCH",
+    state_id: "rest",
+    capture_kind: "compositor",
+    device_matrix_role: "mvl_primary",
+    repeat_count_requested: 1,
+    repeat_count_observed: 1,
+    artifact_json_paths: ["a.capture.json"],
+    max_fidelity: false,
+    capture_raw_frames: true,
+    capture_raw_pixels: true,
+    max_frames: 1
+  });
+
+  const baseRequest = {
+    rig: "R0",
+    scene: "S01_SEARCH",
+    state: "rest",
+    capture: "compositor",
+    deviceRole: "mvl_primary",
+    repeat: 1,
+    maxFidelity: false,
+    captureRawFrames: false,
+    captureRawPixels: true,
+    maxFrames: 1,
+    manifest: repeatManifestPath
+  };
+  const passReport = verifyManifest(baseRequest);
+  if (passReport.status !== "pass") {
+    throw new Error(`ios-capture raw manifest self-test should pass: ${passReport.failures.join(", ")}`);
+  }
+
+  const badFrameManifestPath = join(dir, "frame_manifest_missing_display.json");
+  const badFrame = JSON.parse(JSON.stringify(frame));
+  delete badFrame.raw.display;
+  writeJson(badFrameManifestPath, {
+    schema_version: "1.0.0",
+    frame_count: 1,
+    frames: [badFrame]
+  });
+  writeJson(artifactPath, {
+    schema_version: "1.2.0",
+    frame_pack: {
+      frame_manifest_path: "frame_manifest_missing_display.json",
+      frame_manifest_sha256: sha256File(badFrameManifestPath)
+    }
+  });
+  const failReport = verifyManifest(baseRequest);
+  if (failReport.status !== "fail" || !failReport.failures.includes("ARTIFACT_0_FRAME_0_RAW_DISPLAY_MISSING")) {
+    throw new Error("ios-capture raw manifest self-test failed to catch missing display raw");
+  }
+}
+
+function writeJson(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function assertPlan(plan, expected) {
