@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { sha256Buffer, sha256File, writePng } from "./lib/lab-png.mjs";
 import {
   compareMetricImages,
@@ -951,7 +952,7 @@ function makePixels(width, height, delta) {
 }
 
 function makeArtifact(rigId, pngPath, maskPath, index) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `self-test-${rigId}-baseline-${index}`,
     rig_id: rigId,
@@ -996,10 +997,10 @@ function makeArtifact(rigId, pngPath, maskPath, index) {
       animation_t: 0
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-metrics-baseline.self-test"
     }
-  };
+  });
 }
 
 function writeRepeatManifest(dir, name, artifactPaths) {

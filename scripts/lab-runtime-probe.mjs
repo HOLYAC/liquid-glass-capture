@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { measureRuntime } from "../packages/metric-stack/src/runtime.mjs";
 
@@ -84,7 +85,7 @@ function makePixels(width, height) {
 }
 
 function makeArtifact(pngPath, maskPath) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: "self-test-c1-g5-runtime",
     rig_id: "C1",
@@ -148,10 +149,10 @@ function makeArtifact(pngPath, maskPath) {
       trace_available: false
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-runtime-probe.self-test"
     }
-  };
+  });
 }
 
 function parseArgs(args) {

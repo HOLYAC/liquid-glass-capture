@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readCaptureArtifact } from "./lib/lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
@@ -235,7 +236,7 @@ function makeCandidateArtifact(pngPath, maskPath) {
   const background = glassBackgroundBySceneState[contractKey];
   const geometry = glassGeometryBySceneState[contractKey];
   const timeline = glassCaptureTimelineBySceneState[contractKey];
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: "self-test-c1-g8-verdict",
     rig_id: "C1",
@@ -312,10 +313,10 @@ function makeCandidateArtifact(pngPath, maskPath) {
       trace_status: "trace_unavailable"
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-verdict-report.self-test"
     }
-  };
+  });
 }
 
 function makePhysicalDeviceLaneReport(candidatePath) {

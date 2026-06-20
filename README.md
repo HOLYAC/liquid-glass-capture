@@ -206,6 +206,13 @@ blobs; expired artifacts become delete candidates with tombstones and
 `hash_manifest_preserved=true`. Baselines and release-candidate artifacts are
 indefinite retention classes.
 
+Current artifact-integrity scope rejects missing or placeholder
+`integrity.artifact_sha256` values. JS-produced lab fixtures use
+`canonical_json_zeroed_integrity_v1`, which hashes the canonical artifact with
+`integrity.artifact_sha256` zeroed and is checked exactly by G0-aware readers.
+Native captures may omit the method, but still must carry a 64-character
+SHA-256 producer hash; `pending` is not verdict evidence.
+
 Current physical-device lane scope creates a machine-readable capture plan and
 verifies collected repeat manifests artifact-by-artifact. It rejects simulator
 artifacts, rejects `layer_snapshot`, requires compositor/framebuffer capture,

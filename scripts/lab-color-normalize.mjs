@@ -7,6 +7,7 @@ import {
   rgbaByteToLinearDisplayP3
 } from "../packages/color-pipeline/src/index.mjs";
 import { readCaptureArtifact } from "./lib/lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -120,7 +121,7 @@ function writeSelfTestArtifact(outPath) {
 }
 
 function makeArtifact(pngPath, maskPath) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: "self-test-color-normalize",
     rig_id: "R0",
@@ -164,10 +165,10 @@ function makeArtifact(pngPath, maskPath) {
       animation_t: 0
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-color-normalize.self-test"
     }
-  };
+  });
 }
 
 function parseArgs(args) {

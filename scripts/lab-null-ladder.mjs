@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { comparePng, sha256File, writePng } from "./lib/lab-png.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -133,7 +134,7 @@ function writeSelfTestPair(outPath) {
 }
 
 function makeArtifact(rigId, pngPath, maskPath) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `self-test-${rigId}-s00-flat`,
     rig_id: rigId,
@@ -182,10 +183,10 @@ function makeArtifact(rigId, pngPath, maskPath) {
     },
     shader: rigId === "C0" ? { pipeline: "passthrough" } : undefined,
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-null-ladder.self-test"
     }
-  };
+  });
 }
 
 function parseArgs(args) {

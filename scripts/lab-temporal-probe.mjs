@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { readArtifactFrameSequence } from "./lib/lab-sequence.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { measureTemporal } from "../packages/metric-stack/src/temporal.mjs";
@@ -116,7 +117,7 @@ function writeMotionSequence(dir, prefix, width, height, staticBias) {
 }
 
 function makeArtifact(rigId, sequence, maskPath) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `self-test-${rigId}-g4-temporal`,
     rig_id: rigId,
@@ -166,10 +167,10 @@ function makeArtifact(rigId, sequence, maskPath) {
       animation_t: 1
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-temporal-probe.self-test"
     }
-  };
+  });
 }
 
 function parseArgs(args) {

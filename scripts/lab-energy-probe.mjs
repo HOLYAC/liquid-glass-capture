@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { measureEnergy } from "../packages/energy-stack/src/index.mjs";
 
@@ -85,7 +86,7 @@ function makePixels(width, height) {
 }
 
 function makeArtifact(pngPath, maskPath) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: "self-test-c1-g6-energy",
     rig_id: "C1",
@@ -148,10 +149,10 @@ function makeArtifact(pngPath, maskPath) {
       trace_available: false
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-energy-probe.self-test"
     }
-  };
+  });
 }
 
 function parseArgs(args) {

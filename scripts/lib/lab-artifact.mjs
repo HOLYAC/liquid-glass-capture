@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import { readPng, sha256File } from "./lab-png.mjs";
+import { validateCaptureArtifactIntegrity } from "../../packages/capture-schema/src/integrity.mjs";
 import { validateArtifactColorContract } from "../../packages/color-pipeline/src/index.mjs";
 import { validateMaskPack } from "../../packages/mask-core/src/index.mjs";
 
@@ -14,6 +15,7 @@ export function readCaptureArtifact(path, options = {}) {
   const failures = [];
   if (artifact.schema_version !== "1.2.0") failures.push("SCHEMA_VERSION_NOT_1_2_0");
   failures.push(...validateArtifactColorContract(artifact));
+  failures.push(...validateCaptureArtifactIntegrity(artifact));
 
   if (artifact.capture_kind === "layer_snapshot" && !options.allowLayerSnapshot) {
     failures.push("LAYER_SNAPSHOT_FORBIDDEN_FOR_G2");

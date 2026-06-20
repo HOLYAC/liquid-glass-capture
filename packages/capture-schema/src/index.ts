@@ -187,6 +187,7 @@ export interface CaptureArtifact {
   };
   integrity: {
     artifact_sha256: string;
+    artifact_hash_method?: "canonical_json_zeroed_integrity_v1";
     producer_version: string;
   };
 }

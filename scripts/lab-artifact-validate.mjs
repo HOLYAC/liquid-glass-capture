@@ -3,6 +3,10 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
+import {
+  finalizeCaptureArtifactIntegrity,
+  validateCaptureArtifactIntegrity
+} from "../packages/capture-schema/src/integrity.mjs";
 import { validateMaskPack } from "../packages/mask-core/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -36,6 +40,8 @@ function main() {
     const artifact = writeSelfTestArtifact();
     validateFile(artifact);
     assertGenericModelIdentifierRejected(artifact);
+    assertPendingIntegrityRejected(artifact);
+    assertCanonicalIntegrityTamperRejected(artifact);
     console.log(`PASS ${artifact}`);
     return;
   }
@@ -97,7 +103,7 @@ function validateArtifact(artifact, artifactDir) {
   validatePerf(errors, artifact.perf);
   validateEnergy(errors, artifact.energy);
   validateReview(errors, artifact.review);
-  validateIntegrity(errors, artifact.integrity);
+  validateIntegrity(errors, artifact);
   return errors;
 }
 
@@ -219,12 +225,15 @@ function validateFrameMaskPack(errors, artifactDir, framePack, artifact) {
   }
 }
 
-function validateIntegrity(errors, integrity) {
+function validateIntegrity(errors, artifact) {
+  const integrity = artifact?.integrity;
   if (!integrity || typeof integrity !== "object") {
     errors.push("integrity is required");
     return;
   }
-  requireString(errors, "integrity.artifact_sha256", integrity.artifact_sha256);
+  for (const failure of validateCaptureArtifactIntegrity(artifact)) {
+    errors.push(`integrity.${failure}`);
+  }
   requireString(errors, "integrity.producer_version", integrity.producer_version);
 }
 
@@ -361,6 +370,7 @@ function writeSelfTestArtifact() {
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const artifactPath = join(dir, "native.capture.json");
   const artifact = makeSelfTestArtifact(pngPath, maskPath);
+  finalizeCaptureArtifactIntegrity(artifact);
   writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
   return artifactPath;
 }
@@ -423,7 +433,7 @@ function makeSelfTestArtifact(pngPath, maskPath) {
       capture_timeline_sha256: "61c15338f00fce2349bcbcc05103643664fd248e28d7411772131e1796babd13"
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-artifact-validate.self-test"
     }
   };
@@ -435,6 +445,25 @@ function assertGenericModelIdentifierRejected(artifactPath) {
   const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
   if (!errors.some((error) => error.includes("model_identifier must be hardware identifier"))) {
     throw new Error("artifact validator self-test failed to reject generic UIDevice.current.model identifier");
+  }
+}
+
+function assertPendingIntegrityRejected(artifactPath) {
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  artifact.integrity.artifact_sha256 = "self-test-pending";
+  delete artifact.integrity.artifact_hash_method;
+  const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
+  if (!errors.some((error) => error.includes("INTEGRITY_ARTIFACT_SHA256_NOT_HEX"))) {
+    throw new Error("artifact validator self-test failed to reject pending artifact integrity hash");
+  }
+}
+
+function assertCanonicalIntegrityTamperRejected(artifactPath) {
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  artifact.environment.content_seed = "tampered-after-integrity";
+  const errors = validateArtifact(artifact, dirname(resolve(artifactPath)));
+  if (!errors.some((error) => error.includes("INTEGRITY_ARTIFACT_SHA256_MISMATCH"))) {
+    throw new Error("artifact validator self-test failed to reject canonical integrity hash mismatch");
   }
 }
 

@@ -212,7 +212,8 @@
       "additionalProperties": false,
       "required": ["artifact_sha256", "producer_version"],
       "properties": {
-        "artifact_sha256": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "artifact_hash_method": { "enum": ["canonical_json_zeroed_integrity_v1"] },
         "producer_version": { "type": "string", "minLength": 1 }
       }
     }

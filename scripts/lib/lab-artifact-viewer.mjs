@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../../packages/capture-schema/src/integrity.mjs";
 import { readArtifactFrameSequence } from "./lab-sequence.mjs";
 import { sha256File, writePng } from "./lab-png.mjs";
 import { compareMetricImages } from "../../packages/metric-stack/src/index.mjs";
@@ -718,7 +719,7 @@ pre { margin:0; overflow:auto; max-height:56vh; padding:12px; background:#050607
 }
 
 function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `viewer-self-test-${rigId}`,
     rig_id: rigId,
@@ -789,10 +790,10 @@ function makeSelfTestArtifact(rigId, pngPath, maskPath, sequence) {
       sustained_degradation_pct: 0.4
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-artifact-viewer.self-test"
     }
-  };
+  });
 }
 
 function formatValue(value) {

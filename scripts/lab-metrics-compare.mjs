@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { artifactIdentity, readCaptureArtifact } from "./lib/lab-artifact.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { compareMetricImages } from "../packages/metric-stack/src/index.mjs";
 import { maskIndexesFor, maskScopeBlock } from "../packages/mask-core/src/index.mjs";
@@ -120,7 +121,7 @@ function writeSelfTestPair(outPath) {
 }
 
 function makeArtifact(rigId, pngPath, maskPath) {
-  return {
+  return finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `self-test-${rigId}-g2-static`,
     rig_id: rigId,
@@ -164,10 +165,10 @@ function makeArtifact(rigId, pngPath, maskPath) {
       animation_t: 0
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-metrics-compare.self-test"
     }
-  };
+  });
 }
 
 function parseArgs(args) {

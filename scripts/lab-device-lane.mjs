@@ -9,6 +9,7 @@ import {
   glassGeometryBySceneState
 } from "../packages/material-glass/src/index.mjs";
 import { sceneStateKey } from "../packages/scene-contract/src/index.mjs";
+import { finalizeCaptureArtifactIntegrity } from "../packages/capture-schema/src/integrity.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -308,7 +309,7 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
   writePng(pngPath, 6, 6, makePixels(6, 6, Number.isFinite(Number(index)) ? Number(index) : 0));
   const maskPath = join(repoRoot, "fixtures", "masks", "glass_core_mask_pack_v1.json");
   const artifactPath = join(dir, `r0-s01-rest-${index}.capture.json`);
-  writeJson(artifactPath, {
+  writeJson(artifactPath, finalizeCaptureArtifactIntegrity({
     schema_version: "1.2.0",
     id: `device-lane-self-test-${index}`,
     rig_id: "R0",
@@ -383,10 +384,10 @@ function writeCaptureArtifact(dir, index, modelIdentifier, captureKind, nullQual
       thermal_onset_ms: options.thermalOnsetMs ?? null
     },
     integrity: {
-      artifact_sha256: "self-test-pending",
+      artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
       producer_version: "lab-device-lane.self-test"
     }
-  });
+  }));
   return artifactPath;
 }
 

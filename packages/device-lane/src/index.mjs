@@ -11,6 +11,7 @@ import {
 } from "../../material-glass/src/index.mjs";
 import { sceneStateKey } from "../../scene-contract/src/index.mjs";
 import { validateMaskPack } from "../../mask-core/src/index.mjs";
+import { validateCaptureArtifactIntegrity } from "../../capture-schema/src/integrity.mjs";
 
 const productionDeviceMatrixRoles = Object.freeze(["weakest_supported", "target", "latest_pro"]);
 
@@ -302,6 +303,9 @@ function verifyArtifactForTask(task, artifactPath, index, policy) {
   }
   failures.push(...verifySustainedArtifactFields(task, artifact, index));
   failures.push(...verifySceneContractFields(task, artifact, index));
+  for (const integrityFailure of validateCaptureArtifactIntegrity(artifact)) {
+    failures.push(`${task.lane_task_id}:ARTIFACT_${index}_${integrityFailure}`);
+  }
 
   const hashFailures = verifyFrameHashes(artifact, artifactPath, index, task.lane_task_id);
   failures.push(...hashFailures);
