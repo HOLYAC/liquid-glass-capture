@@ -149,8 +149,20 @@ Press `B`. The status line prints the generated repeat-manifest path. If you
 changed the app state earlier, press `2` to show controls and restore those
 values before pressing `B`.
 
-4. Start the watcher, then copy the app Documents folder into this repo under
-   `./artifacts/iphone/`:
+4. Preferred USB pull: connect the iPhone, unlock it, tap **Trust This
+   Computer**, then pull the app Documents folder and verify it:
+
+```bash
+npm run phone:pull -- --bootstrap
+```
+
+This installs `pymobiledevice3` into `./artifacts/tooling/` if missing, pulls
+`Documents/LiquidGlassCaptures` from bundle id
+`com.zaeba.liquidglasscapture` into `./artifacts/iphone/`, then runs
+`proof:doctor`.
+
+5. Manual fallback: start the watcher, then copy the app Documents folder into
+   this repo under `./artifacts/iphone/`:
 
 ```bash
 npm run proof:watch
@@ -164,7 +176,7 @@ npm run proof:watch
    `LiquidGlassCaptures`. `proof:watch` waits up to 15 minutes and continues
    verification as soon as the folder appears.
 
-5. Verify the newest copied manifest. The command finds the latest
+6. Verify the newest copied manifest. The command finds the latest
    `LiquidGlassCaptures/Series/*.repeat-manifest.json` by the manifest's
    `finished_at_ns` / `started_at_ns`, then follows its sibling
    `../Sessions/...` artifact paths:
@@ -179,7 +191,7 @@ and checked their SHA-256 hashes. A missing raw file or hash mismatch is a
 failure. On pass, the command also prints an `INSPECT ...` line for the newest
 capture.
 
-6. Open the capture with the printed command, or read `next.inspect` from
+7. Open the capture with the printed command, or read `next.inspect` from
    `./artifacts/proof-doctor/proof-doctor.report.json`. It has this shape:
 
 ```bash

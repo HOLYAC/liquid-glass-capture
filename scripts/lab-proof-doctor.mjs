@@ -596,13 +596,21 @@ function renderPhoneHandoff(report) {
     `max-fidelity=${String(planCheck?.evidence?.on_device_app_action?.set_max_fidelity ?? true)}`,
     "```",
     "",
-    "3. In this repo, start the watcher before or after the phone capture:",
+    "3. Preferred USB pull: connect the iPhone, unlock it, tap **Trust This Computer**, then run:",
+    "",
+    "```powershell",
+    "npm run phone:pull -- --bootstrap",
+    "```",
+    "",
+    "`phone:pull` installs `pymobiledevice3` into `artifacts/tooling` if missing, pulls `Documents/LiquidGlassCaptures` from `com.zaeba.liquidglasscapture`, and then runs `proof:doctor`.",
+    "",
+    "4. Manual fallback: start the watcher before or after the phone capture:",
     "",
     "```powershell",
     "npm run proof:watch",
     "```",
     "",
-    "4. Copy `LiquidGlassCaptures` or the whole app `Documents` folder under:",
+    "5. Copy `LiquidGlassCaptures` or the whole app `Documents` folder under:",
     "",
     "```text",
     "./artifacts/iphone/",
@@ -610,7 +618,7 @@ function renderPhoneHandoff(report) {
     "",
     "The watcher auto-discovers nested `LiquidGlassCaptures` and verifies the newest repeat manifest.",
     "",
-    "5. Success output:",
+    "6. Success output:",
     "",
     "```text",
     "PASS_VERIFIED_CAPTURE <proof-doctor-report>",
@@ -765,7 +773,12 @@ function runSelfTest() {
       proof_plan_path: join(dir, "proof.plan.json")
     }
   });
-  if (!handoff.includes("PASS_READY_FOR_PHONE") || !handoff.includes("PASS_VERIFIED_CAPTURE") || !handoff.includes("npm run proof:watch")) {
+  if (
+    !handoff.includes("PASS_READY_FOR_PHONE") ||
+    !handoff.includes("PASS_VERIFIED_CAPTURE") ||
+    !handoff.includes("npm run phone:pull -- --bootstrap") ||
+    !handoff.includes("npm run proof:watch")
+  ) {
     throw new Error("proof-doctor self-test failed to render phone handoff runbook");
   }
 
