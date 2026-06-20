@@ -93,6 +93,7 @@ export function artifactIdentity(record) {
           screen_scale: artifact.device_info.screen_scale,
           refresh_hz: artifact.device_info.refresh_hz,
           thermal_state_start: artifact.device_info.thermal_state_start,
+          thermal_state_end: artifact.device_info.thermal_state_end,
           low_power_mode: artifact.device_info.low_power_mode
         }
       : undefined

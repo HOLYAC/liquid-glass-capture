@@ -17,13 +17,18 @@ const requestedRepeat = Object.freeze({
   sustained: 24
 });
 const outlierPolicy = Object.freeze({
-  policy_id: "baseline_mad_outlier_policy_v1",
-  method: "median_absolute_deviation_fence",
+  policy_id: "baseline_iqr_mad_outlier_policy_v2",
+  method: "iqr_and_modified_z_score",
   minimum_sample_count: 8,
+  iqr_multiplier: 1.5,
   normal_consistency_scale: 1.4826,
   max_modified_z: 6,
-  zero_mad_behavior: "accept_all",
+  zero_spread_behavior: "flag_distinct_values_as_unknown_outliers",
+  max_outlier_candidate_rate: 0.05,
+  infrastructure_owner: "lab-infra",
+  outlier_rate_derivation: "A baseline with more than one statistical outlier candidate per 20 pair-comparisons is measuring rig instability before it is measuring glass.",
   raw_samples_retained: true,
+  outlier_candidates_retained: true,
   rejected_samples_retained: true
 });
 const bootstrapPolicy = Object.freeze({
@@ -50,6 +55,7 @@ function main() {
       baselineClass: "mvl",
       repeatOverride: 50
     });
+    assertOutlierPolicySelfTest();
     console.log(`${report.baseline_status.toUpperCase()} ${fixture.out}`);
     return;
   }
@@ -76,6 +82,8 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
         sampleKind: "instrument_noise",
         referenceIndex: left,
         candidateIndex: right,
+        referenceRecord: referenceRecords[left],
+        candidateRecord: referenceRecords[right],
         metrics: compareRecords(referenceRecords[left], referenceRecords[right])
       }));
     }
@@ -87,6 +95,8 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
         sampleKind: "candidate_gap",
         referenceIndex,
         candidateIndex: probeIndex,
+        referenceRecord: referenceRecords[referenceIndex],
+        candidateRecord: probeRecords[probeIndex],
         metrics: compareRecords(referenceRecords[referenceIndex], probeRecords[probeIndex])
       }));
     }
@@ -94,12 +104,18 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
 
   const requested = repeatOverride ?? requestedRepeat[baselineClass] ?? requestedRepeat.mvl;
   const namespace = makeBaselineNamespace(referenceRecords[0], baselineClass);
+  const instrumentNoise = summarizeReports(referenceReports);
+  const candidateGap = summarizeReports(candidateReports);
+  const infrastructureHealth = assessInfrastructureHealth(instrumentNoise);
   const report = {
     schema_version: "1.2.0",
     kind: "baseline_metric_report",
     baseline_namespace: namespace,
     baseline_class: baselineClass,
-    baseline_status: referenceRecords.length >= requested ? "complete" : "partial",
+    baseline_status: infrastructureHealth.status === "fail"
+      ? "invalid"
+      : referenceRecords.length >= requested ? "complete" : "partial",
+    failures: infrastructureHealth.failures,
     repeat_n_requested: requested,
     repeat_n_observed: referenceRecords.length,
     repeat_policy: {
@@ -111,15 +127,17 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
     gates: {
       G0_G1: "assumed_from_valid_capture_artifacts",
       G2: "computed_static_perception_metrics",
+      baseline_infrastructure_health: infrastructureHealth.status,
       G3_G8: "not_run"
     },
     reference_artifacts: referenceRecords.map(artifactIdentity),
     probe_artifacts: probeRecords.map(artifactIdentity),
-    instrument_noise: summarizeReports(referenceReports),
-    candidate_gap: summarizeReports(candidateReports),
+    instrument_noise: instrumentNoise,
+    candidate_gap: candidateGap,
     statistics: {
       outlier_policy: outlierPolicy,
-      bootstrap_policy: bootstrapPolicy
+      bootstrap_policy: bootstrapPolicy,
+      infrastructure_health: infrastructureHealth
     },
     raw_report_counts: {
       reference_pair_count: referenceReports.length,
@@ -128,6 +146,7 @@ export function buildBaselineReport({ refs, probes, out, baselineClass = "mvl", 
     immutability: {
       raw_artifacts_retained: true,
       raw_metric_samples_retained: true,
+      outlier_candidates_retained: true,
       rejected_samples_retained: true,
       outlier_rejection: outlierPolicy.policy_id,
       bootstrap_ci: bootstrapPolicy.policy_id,
@@ -147,12 +166,14 @@ function compareRecords(reference, candidate) {
   return flattenMetricReport(report);
 }
 
-function makeMetricSample({ sampleKind, referenceIndex, candidateIndex, metrics }) {
+function makeMetricSample({ sampleKind, referenceIndex, candidateIndex, referenceRecord, candidateRecord, metrics }) {
   return {
     sample_id: `${sampleKind}-${referenceIndex}-${candidateIndex}`,
     sample_kind: sampleKind,
     reference_index: referenceIndex,
     candidate_index: candidateIndex,
+    reference_artifact: artifactIdentity(referenceRecord),
+    candidate_artifact: artifactIdentity(candidateRecord),
     metrics
   };
 }
@@ -162,6 +183,7 @@ function summarizeReports(samples) {
     return {
       count: 0,
       raw_samples: [],
+      outlier_candidates: [],
       rejected_samples: [],
       metrics: {}
     };
@@ -169,10 +191,12 @@ function summarizeReports(samples) {
 
   const keys = Object.keys(samples[0].metrics);
   const metrics = {};
+  const outlierCandidates = [];
   const rejectedSamples = [];
   for (const key of keys) {
     const metricSummary = summarizeMetricSamples(samples, key);
     metrics[key] = metricSummary;
+    outlierCandidates.push(...metricSummary.outlier_candidates);
     rejectedSamples.push(...metricSummary.rejected_samples);
   }
 
@@ -183,8 +207,11 @@ function summarizeReports(samples) {
       sample_kind: sample.sample_kind,
       reference_index: sample.reference_index,
       candidate_index: sample.candidate_index,
+      reference_artifact: sample.reference_artifact,
+      candidate_artifact: sample.candidate_artifact,
       metrics: sample.metrics
     })),
+    outlier_candidates: outlierCandidates,
     rejected_samples: rejectedSamples,
     metrics
   };
@@ -197,6 +224,8 @@ function summarizeMetricSamples(samples, metricId) {
       sample_kind: sample.sample_kind,
       reference_index: sample.reference_index,
       candidate_index: sample.candidate_index,
+      reference_artifact: sample.reference_artifact,
+      candidate_artifact: sample.candidate_artifact,
       value: sample.metrics[metricId]
     }))
     .filter((sample) => Number.isFinite(sample.value));
@@ -207,10 +236,16 @@ function summarizeMetricSamples(samples, metricId) {
     ...summary,
     raw_sample_count: metricSamples.length,
     accepted_sample_count: classified.accepted.length,
+    outlier_candidate_count: classified.flagged.length + classified.rejected.length,
     rejected_sample_count: classified.rejected.length,
+    outlier_candidate_rate: metricSamples.length === 0
+      ? 0
+      : (classified.flagged.length + classified.rejected.length) / metricSamples.length,
+    rejected_sample_rate: metricSamples.length === 0 ? 0 : classified.rejected.length / metricSamples.length,
     p99_ci95_upper: bootstrapP99CiUpper(acceptedValues, metricId),
     outlier_policy_id: outlierPolicy.policy_id,
     bootstrap_policy_id: bootstrapPolicy.policy_id,
+    outlier_candidates: classified.flagged,
     rejected_samples: classified.rejected
   };
 }
@@ -219,37 +254,58 @@ function classifyOutliers(samples, metricId) {
   if (samples.length < outlierPolicy.minimum_sample_count) {
     return {
       accepted: samples,
+      flagged: [],
       rejected: []
     };
   }
 
   const values = samples.map((sample) => sample.value);
   const median = quantile(values, 0.5);
+  const q1 = quantile(values, 0.25);
+  const q3 = quantile(values, 0.75);
+  const iqr = q3 - q1;
+  const iqrLow = q1 - outlierPolicy.iqr_multiplier * iqr;
+  const iqrHigh = q3 + outlierPolicy.iqr_multiplier * iqr;
   const deviations = values.map((value) => Math.abs(value - median));
   const mad = quantile(deviations, 0.5);
-  if (!(mad > 0)) {
-    return {
-      accepted: samples,
-      rejected: []
-    };
-  }
-
-  const scale = mad * outlierPolicy.normal_consistency_scale;
   const accepted = [];
+  const flagged = [];
   const rejected = [];
+  const scale = mad * outlierPolicy.normal_consistency_scale;
   for (const sample of samples) {
-    const modifiedZ = Math.abs(sample.value - median) / scale;
-    if (modifiedZ > outlierPolicy.max_modified_z) {
-      rejected.push({
+    const iqrOutlier = iqr > 0 && (sample.value < iqrLow || sample.value > iqrHigh);
+    const modifiedZ = scale > 0 ? Math.abs(sample.value - median) / scale : 0;
+    const modifiedZOutlier = scale > 0 && modifiedZ > outlierPolicy.max_modified_z;
+    const zeroSpreadOutlier = !(iqr > 0) && !(mad > 0) && sample.value !== median;
+    if (iqrOutlier || modifiedZOutlier || zeroSpreadOutlier) {
+      const reason = inferArtifactReason(sample);
+      const outlierRecord = {
         ...sample,
         metric_id: metricId,
         policy_id: outlierPolicy.policy_id,
-        reason: "modified_z_above_policy_fence",
+        reason,
+        threshold_excluded: reason !== "UNKNOWN_OUTLIER",
+        artifact_evidence: {
+          reference_artifact: sample.reference_artifact,
+          candidate_artifact: sample.candidate_artifact
+        },
+        statistical_evidence: {
+          iqr_outlier: iqrOutlier,
+          modified_z_outlier: modifiedZOutlier,
+          zero_spread_outlier: zeroSpreadOutlier
+        },
         median,
+        q1,
+        q3,
+        iqr,
+        iqr_low: iqrLow,
+        iqr_high: iqrHigh,
         mad,
         modified_z: modifiedZ,
         max_modified_z: outlierPolicy.max_modified_z
-      });
+      };
+      if (outlierRecord.threshold_excluded) rejected.push(outlierRecord);
+      else flagged.push(outlierRecord);
     }
     else {
       accepted.push(sample);
@@ -257,8 +313,135 @@ function classifyOutliers(samples, metricId) {
   }
 
   return {
-    accepted: accepted.length > 0 ? accepted : samples,
-    rejected: accepted.length > 0 ? rejected : []
+    accepted: [...accepted, ...flagged],
+    flagged,
+    rejected
+  };
+}
+
+function inferArtifactReason(sample) {
+  if (invalidCapturePath(sample.reference_artifact) || invalidCapturePath(sample.candidate_artifact)) {
+    return "CAPTURE_PATH_INVALID";
+  }
+  if (thermalSpike(sample.reference_artifact) || thermalSpike(sample.candidate_artifact)) {
+    return "THERMAL_SPIKE";
+  }
+  if (deviceStateDrift(sample.reference_artifact) || deviceStateDrift(sample.candidate_artifact)) {
+    return "DEVICE_STATE_DRIFT";
+  }
+  return "UNKNOWN_OUTLIER";
+}
+
+function invalidCapturePath(identity) {
+  return identity?.capture_kind && identity.capture_kind !== "compositor" && identity.capture_kind !== "framebuffer";
+}
+
+function thermalSpike(identity) {
+  const thermalEnd = identity?.device?.thermal_state_end;
+  return thermalEnd === "serious" || thermalEnd === "critical";
+}
+
+function deviceStateDrift(identity) {
+  const device = identity?.device ?? {};
+  return device.thermal_state_start !== undefined && device.thermal_state_start !== "nominal" ||
+    device.low_power_mode === true;
+}
+
+function assessInfrastructureHealth(summary) {
+  const failures = [];
+  const metricEntries = Object.entries(summary.metrics ?? {});
+  let maxOutlierCandidateRate = 0;
+  let maxRejectedSampleRate = 0;
+  for (const [metricId, metric] of metricEntries) {
+    maxOutlierCandidateRate = Math.max(maxOutlierCandidateRate, metric.outlier_candidate_rate ?? 0);
+    maxRejectedSampleRate = Math.max(maxRejectedSampleRate, metric.rejected_sample_rate ?? 0);
+    if ((metric.outlier_candidate_rate ?? 0) > outlierPolicy.max_outlier_candidate_rate) {
+      failures.push(`BASELINE_OUTLIER_RATE_ABOVE_HEALTH_THRESHOLD:${metricId}`);
+    }
+  }
+
+  return {
+    status: failures.length === 0 ? "pass" : "fail",
+    failures,
+    evaluated_metric_count: metricEntries.length,
+    max_outlier_candidate_rate: maxOutlierCandidateRate,
+    max_rejected_sample_rate: maxRejectedSampleRate,
+    max_outlier_candidate_rate_allowed: outlierPolicy.max_outlier_candidate_rate,
+    policy_id: outlierPolicy.policy_id
+  };
+}
+
+function assertOutlierPolicySelfTest() {
+  const unknownSamples = makeSyntheticSamples({ knownReason: false });
+  const unknownSummary = summarizeMetricSamples(unknownSamples, "probe_metric");
+  if (unknownSummary.outlier_candidate_count !== 1) {
+    throw new Error("outlier policy self-test failed to flag statistical outlier candidate");
+  }
+  if (unknownSummary.rejected_sample_count !== 0) {
+    throw new Error("outlier policy self-test deleted UNKNOWN_OUTLIER from threshold");
+  }
+  if (!unknownSummary.outlier_candidates.some((sample) =>
+    sample.reason === "UNKNOWN_OUTLIER" &&
+    sample.threshold_excluded === false
+  )) {
+    throw new Error("outlier policy self-test failed to retain UNKNOWN_OUTLIER evidence");
+  }
+
+  const driftSummary = summarizeMetricSamples(makeSyntheticSamples({ knownReason: true }), "probe_metric");
+  if (driftSummary.rejected_sample_count !== 1) {
+    throw new Error("outlier policy self-test failed to reject machine-proven device drift");
+  }
+  if (!driftSummary.rejected_samples.some((sample) =>
+    sample.reason === "DEVICE_STATE_DRIFT" &&
+    sample.threshold_excluded === true
+  )) {
+    throw new Error("outlier policy self-test failed to carry device drift reason");
+  }
+
+  const health = assessInfrastructureHealth({ metrics: { probe_metric: unknownSummary } });
+  if (health.status !== "fail") {
+    throw new Error("outlier policy self-test failed to mark high outlier rate unhealthy");
+  }
+}
+
+function makeSyntheticSamples({ knownReason }) {
+  return [0, 0, 0, 0, 0, 0, 0, 100].map((value, index) => ({
+    sample_id: `outlier-self-test-${index}`,
+    sample_kind: "outlier_policy_self_test",
+    reference_index: index,
+    candidate_index: index,
+    reference_artifact: syntheticArtifactIdentity("R0", "nominal", false),
+    candidate_artifact: syntheticArtifactIdentity(
+      "R1",
+      knownReason && index === 7 ? "fair" : "nominal",
+      false
+    ),
+    metrics: {
+      probe_metric: value
+    }
+  }));
+}
+
+function syntheticArtifactIdentity(rigId, thermalStateStart, lowPowerMode) {
+  return {
+    id: `synthetic-${rigId}`,
+    rig_id: rigId,
+    scene_id: "SYNTHETIC_OUTLIER_POLICY",
+    state_id: "rest",
+    capture_kind: "compositor",
+    artifact_path: `synthetic-${rigId}.capture.json`,
+    png_path: `synthetic-${rigId}.png`,
+    png_sha256: "synthetic",
+    device: {
+      model_identifier: "iPhone-outlier-policy-self-test",
+      os_build: "self-test",
+      sdk_build: "self-test",
+      screen_scale: 3,
+      refresh_hz: 60,
+      thermal_state_start: thermalStateStart,
+      thermal_state_end: thermalStateStart,
+      low_power_mode: lowPowerMode
+    }
   };
 }
 
