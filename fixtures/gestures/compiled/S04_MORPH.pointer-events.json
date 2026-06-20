@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "compiled_trajectory_consumer",
+  "consumer": "pointer_events",
+  "authority": "compiled_from_single_source_trajectory",
+  "scene_id": "S04_MORPH",
+  "gesture_id": "S04_MORPH_merge_tall_v1",
+  "source_sha256": "2d56ff34315a85689661f74b5ea3d0a70144bf36c77546a1ffe9fb9e9cf3b5bd",
+  "source_file": "fixtures/gestures/S04_MORPH.trajectory.json",
+  "source_coordinate_space": "viewport_px",
+  "notes": "Generated from trajectory source; do not edit by hand.",
+  "events": [
+    {
+      "index": 0,
+      "type": "pointerdown",
+      "time_s": 0,
+      "x": 0.42,
+      "y": 0.56,
+      "pressure": 1,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    },
+    {
+      "index": 1,
+      "type": "pointermove",
+      "time_s": 0.16,
+      "x": 0.46,
+      "y": 0.56,
+      "pressure": 1,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    },
+    {
+      "index": 2,
+      "type": "pointermove",
+      "time_s": 0.34,
+      "x": 0.56,
+      "y": 0.56,
+      "pressure": 1,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    },
+    {
+      "index": 3,
+      "type": "pointerup",
+      "time_s": 0.52,
+      "x": 0.58,
+      "y": 0.56,
+      "pressure": 0,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    }
+  ]
+}

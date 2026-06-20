@@ -11,8 +11,7 @@
     { "x": 0.5, "y": 0.56, "t": 0.22, "phase": "up", "pressure": 0.0, "unit": "normalized" }
   ],
   "compiled_consumers": {
-    "xcuitest": null,
-    "pointer_events": null
+    "xcuitest": "fixtures/gestures/compiled/S03_PRESS.xcuitest.json",
+    "pointer_events": "fixtures/gestures/compiled/S03_PRESS.pointer-events.json"
   }
 }
-

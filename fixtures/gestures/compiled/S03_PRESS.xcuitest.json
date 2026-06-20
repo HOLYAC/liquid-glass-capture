@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "compiled_trajectory_consumer",
+  "consumer": "xcuitest",
+  "authority": "compiled_from_single_source_trajectory",
+  "scene_id": "S03_PRESS",
+  "gesture_id": "S03_PRESS_short_v1",
+  "source_sha256": "f3f1fb6f521cc525cdf5957a2c96682ec6e9098f34a1708c0621ce50a8fee376",
+  "source_file": "fixtures/gestures/S03_PRESS.trajectory.json",
+  "source_coordinate_space": "viewport_px",
+  "notes": "Generated from trajectory source; do not edit by hand.",
+  "events": [
+    {
+      "index": 0,
+      "command": "press_begin",
+      "at_seconds": 0,
+      "normalized_x": 0.5,
+      "normalized_y": 0.56,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 1,
+      "command": "press_move",
+      "at_seconds": 0.12,
+      "normalized_x": 0.5,
+      "normalized_y": 0.56,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 2,
+      "command": "press_end",
+      "at_seconds": 0.22,
+      "normalized_x": 0.5,
+      "normalized_y": 0.56,
+      "pressure": 0,
+      "unit": "normalized"
+    }
+  ]
+}

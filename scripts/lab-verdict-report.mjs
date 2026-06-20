@@ -6,14 +6,14 @@ import { readCaptureArtifact } from "./lib/lab-artifact.mjs";
 import { sha256File, writePng } from "./lib/lab-png.mjs";
 import { evaluateReviewPacket } from "../packages/review-stack/src/index.mjs";
 import { buildSolverReport } from "../packages/solver/src/index.mjs";
-import { glassDegeneracySceneIds } from "../packages/material-glass/src/index.mjs";
+import { glassDegeneracySceneIds, glassTrajectoryShaByScene } from "../packages/material-glass/src/index.mjs";
 import { readArtifactStoreIndex, writeArtifactStore } from "../packages/artifact-store/src/index.mjs";
 import { buildPhysicalDeviceLanePlan, verifyPhysicalDeviceLane } from "../packages/device-lane/src/index.mjs";
 import { buildVerdictReport } from "../packages/verdict-stack/src/index.mjs";
 import { makePassingPacket } from "./lab-review-packet.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
+const s03PressTrajectorySha256 = glassTrajectoryShaByScene.S03_PRESS;
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main();

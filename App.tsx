@@ -49,7 +49,9 @@ const shapes = ["circle", "capsule", "rounded_rect", "twin_capsules"] as const;
 const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge_overlap", "morph_tall"] as const;
 const tints = ["none", "cyan", "amber", "red"] as const;
 const repeatCounts = [3, 10, 24, 50, 300] as const;
-const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
+const s02LoupeTrajectorySha256 = "33a896a5ee2615762df4248ce2f3a327fe036d8a7df43deea316641118796f5c";
+const s03PressTrajectorySha256 = "f3f1fb6f521cc525cdf5957a2c96682ec6e9098f34a1708c0621ce50a8fee376";
+const s04MorphTrajectorySha256 = "2d56ff34315a85689661f74b5ea3d0a70144bf36c77546a1ffe9fb9e9cf3b5bd";
 const busyPhotoAssetHash = "77238364440e942b31adefec365389a6f2c25a9b0a5561945db9468f8337f148";
 const videoFrameAssetHash = "e976e690f06f8b955a86ab8e49d2fcef51f942c220e975a03c30d414702998a5";
 const systemMaterialAssetHash = "15cc42e8ad24fd0179d917962281292ea97ea735ceb12796f8eb681e92049fe6";
@@ -87,6 +89,12 @@ type SceneSpec = {
   touchPhase: TouchPhase;
   contentSeed: string;
   backgroundAssetHash?: string;
+};
+
+const trajectoryShaByScene: Partial<Record<SceneId, string>> = {
+  S02_LOUPE: s02LoupeTrajectorySha256,
+  S03_PRESS: s03PressTrajectorySha256,
+  S04_MORPH: s04MorphTrajectorySha256
 };
 
 const sceneSpecs = [
@@ -280,7 +288,7 @@ function sceneSpecFor(sceneId: SceneId): SceneSpec {
 }
 
 function trajectoryShaFor(sceneId: SceneId): string | undefined {
-  return sceneId === "S03_PRESS" ? s03PressTrajectorySha256 : undefined;
+  return trajectoryShaByScene[sceneId];
 }
 
 function addSceneMetadata(metadata: Record<string, unknown>, scene: SceneSpec) {

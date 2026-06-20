@@ -10,9 +10,10 @@ import { measureTemporal } from "../../packages/metric-stack/src/temporal.mjs";
 import { measureRuntime } from "../../packages/metric-stack/src/runtime.mjs";
 import { measureEnergy } from "../../packages/energy-stack/src/index.mjs";
 import { makeReviewPacketSeed } from "../../packages/review-stack/src/index.mjs";
+import { glassTrajectoryShaByScene } from "../../packages/material-glass/src/index.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
+const s03PressTrajectorySha256 = glassTrajectoryShaByScene.S03_PRESS;
 
 export function resolveArtifactInput(input, options = {}) {
   const direct = resolve(input);

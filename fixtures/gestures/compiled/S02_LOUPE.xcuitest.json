@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "compiled_trajectory_consumer",
+  "consumer": "xcuitest",
+  "authority": "compiled_from_single_source_trajectory",
+  "scene_id": "S02_LOUPE",
+  "gesture_id": "S02_LOUPE_drag_right_v1",
+  "source_sha256": "33a896a5ee2615762df4248ce2f3a327fe036d8a7df43deea316641118796f5c",
+  "source_file": "fixtures/gestures/S02_LOUPE.trajectory.json",
+  "source_coordinate_space": "viewport_px",
+  "notes": "Generated from trajectory source; do not edit by hand.",
+  "events": [
+    {
+      "index": 0,
+      "command": "press_begin",
+      "at_seconds": 0,
+      "normalized_x": 0.36,
+      "normalized_y": 0.52,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 1,
+      "command": "press_move",
+      "at_seconds": 0.12,
+      "normalized_x": 0.44,
+      "normalized_y": 0.54,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 2,
+      "command": "press_move",
+      "at_seconds": 0.24,
+      "normalized_x": 0.58,
+      "normalized_y": 0.55,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 3,
+      "command": "press_end",
+      "at_seconds": 0.34,
+      "normalized_x": 0.64,
+      "normalized_y": 0.55,
+      "pressure": 0,
+      "unit": "normalized"
+    }
+  ]
+}

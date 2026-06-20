@@ -113,6 +113,7 @@ The on-device scene surface now exposes the full v1.2 matrix: `S00_NULL`,
 matching fixed `scene/state/substrate/gesture` bundle before pressing `B`.
 
 ```bash
+npm run trajectory:build -- --self-test
 npm run material:probe -- --self-test
 npm run artifact:validate -- ./artifacts/sample.capture.json
 npm run color:normalize -- ./artifacts/sample.capture.json --out ./artifacts/color.report.json
@@ -163,9 +164,11 @@ pixel masks land in the capture artifact. Reports keep that method note in-band
 so prototype optics numbers cannot be mistaken for final G3 verdicts.
 
 Current G4 temporal scope is sequence-based and gateable only when both
-artifacts carry the same `frame_pack.trajectory_source_sha256`. Missing or
-divergent gesture source hashes make the temporal report fail by design,
-because otherwise it measures runner drift instead of glass motion.
+artifacts carry the same `frame_pack.trajectory_source_sha256`. Gesture scenes
+S02/S03/S04 have one source fixture each, with XCUITest and PointerEvent
+consumers compiled from that source and checked by `npm run trajectory:build`.
+Missing or divergent gesture source hashes make the temporal report fail by
+design, because otherwise it measures runner drift instead of glass motion.
 
 Current G5 runtime scope uses ReplayKit sample-buffer PTS as a full-frame
 interval proxy when a physical compositor capture writes `artifact.perf`.
@@ -196,9 +199,9 @@ Current physical-device lane scope creates a machine-readable capture plan and
 verifies collected repeat manifests artifact-by-artifact. It rejects simulator
 artifacts, rejects `layer_snapshot`, requires compositor/framebuffer capture,
 requires nominal thermal start, requires Low Power Mode off, verifies PNG and
-mask hashes, enforces the S03 trajectory source hash, and checks G2-G6 reports
-for MVL/prod/sustained lanes. Hosted GitHub CI still cannot mint this evidence;
-it names the required lane report as pending instead.
+mask hashes, enforces declared gesture-scene trajectory source hashes, and
+checks G2-G6 reports for MVL/prod/sustained lanes. Hosted GitHub CI still
+cannot mint this evidence; it names the required lane report as pending instead.
 
 Current G7 scope validates a review packet rather than free-form taste: every
 block needs scene, state, mask, artifact pointer, reviewer category, written

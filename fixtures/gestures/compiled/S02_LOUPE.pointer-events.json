@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "compiled_trajectory_consumer",
+  "consumer": "pointer_events",
+  "authority": "compiled_from_single_source_trajectory",
+  "scene_id": "S02_LOUPE",
+  "gesture_id": "S02_LOUPE_drag_right_v1",
+  "source_sha256": "33a896a5ee2615762df4248ce2f3a327fe036d8a7df43deea316641118796f5c",
+  "source_file": "fixtures/gestures/S02_LOUPE.trajectory.json",
+  "source_coordinate_space": "viewport_px",
+  "notes": "Generated from trajectory source; do not edit by hand.",
+  "events": [
+    {
+      "index": 0,
+      "type": "pointerdown",
+      "time_s": 0,
+      "x": 0.36,
+      "y": 0.52,
+      "pressure": 1,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    },
+    {
+      "index": 1,
+      "type": "pointermove",
+      "time_s": 0.12,
+      "x": 0.44,
+      "y": 0.54,
+      "pressure": 1,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    },
+    {
+      "index": 2,
+      "type": "pointermove",
+      "time_s": 0.24,
+      "x": 0.58,
+      "y": 0.55,
+      "pressure": 1,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    },
+    {
+      "index": 3,
+      "type": "pointerup",
+      "time_s": 0.34,
+      "x": 0.64,
+      "y": 0.55,
+      "pressure": 0,
+      "unit": "normalized",
+      "pointer_id": 1,
+      "pointer_type": "touch"
+    }
+  ]
+}

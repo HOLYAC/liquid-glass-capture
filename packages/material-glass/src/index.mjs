@@ -9,7 +9,10 @@ import {
 } from "../../material-core/src/index.mjs";
 
 export const glassMaskPackId = "glass_core_mask_pack_v1";
-export const s03PressTrajectorySha256 = "56148be556260e9f1647bf9ab09ddf12c7ae129b3194722b2ed54bb8ad2fbcdd";
+export const s02LoupeTrajectorySha256 = "33a896a5ee2615762df4248ce2f3a327fe036d8a7df43deea316641118796f5c";
+export const s03PressTrajectorySha256 = "f3f1fb6f521cc525cdf5957a2c96682ec6e9098f34a1708c0621ce50a8fee376";
+export const s04MorphTrajectorySha256 = "2d56ff34315a85689661f74b5ea3d0a70144bf36c77546a1ffe9fb9e9cf3b5bd";
+export const glassGestureSceneIds = deepFreeze(["S02_LOUPE", "S03_PRESS", "S04_MORPH"]);
 
 export const glassMaskPack = deepFreeze({
   schema_version: "1.2.0",
@@ -71,6 +74,7 @@ export const glassMaterialProbe = assertMaterialProbe(deepFreeze({
   mask_pack: glassMaskPack,
   required_mask_ids: glassMaskPack.masks.map((mask) => mask.id),
   null_ladder: glassNullLadderManifest,
+  gesture_scene_ids: glassGestureSceneIds,
   degeneracy_scene_ids: ["S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_FRAME"],
   core_scene_ids: ["S01_SEARCH", "S02_LOUPE", "S03_PRESS", "S04_MORPH", "S05_FLOATING_BAR"],
   stress_scene_ids: ["S06_TINY_GLASS", "S07_BUSY_PHOTO", "S08_P3_GRADIENT", "S09_NEAR_WHITE", "S10_NEAR_BLACK", "S11_VIDEO_FRAME", "S12_SYSTEM_MATERIAL_ADJACENCY"],
@@ -86,13 +90,13 @@ export const glassMaterialProbe = assertMaterialProbe(deepFreeze({
     ]),
     scene("S02_LOUPE", "core", [
       state("drag", "loupe_text", "circle", "drag_right", "drag", "s02-loupe-text-drag-v1", { interactive: true, autoplay: true })
-    ]),
+    ], { trajectory_source_sha256: s02LoupeTrajectorySha256 }),
     scene("S03_PRESS", "core", [
       state("press", "tiny_control_content", "capsule", "press", "press", "s03-press-control-v1", { interactive: true, autoplay: true })
     ], { trajectory_source_sha256: s03PressTrajectorySha256 }),
     scene("S04_MORPH", "core", [
       state("morph", "floating_bar_content", "twin_capsules", "morph_tall", "morph", "s04-twin-capsule-morph-v1", { interactive: true, autoplay: true })
-    ]),
+    ], { trajectory_source_sha256: s04MorphTrajectorySha256 }),
     scene("S05_FLOATING_BAR", "core", [
       state("floating_rest", "floating_bar_content", "capsule", "rest", "rest", "s05-floating-bar-v1", { interactive: true })
     ]),

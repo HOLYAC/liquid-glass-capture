@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.2.0",
+  "kind": "compiled_trajectory_consumer",
+  "consumer": "xcuitest",
+  "authority": "compiled_from_single_source_trajectory",
+  "scene_id": "S04_MORPH",
+  "gesture_id": "S04_MORPH_merge_tall_v1",
+  "source_sha256": "2d56ff34315a85689661f74b5ea3d0a70144bf36c77546a1ffe9fb9e9cf3b5bd",
+  "source_file": "fixtures/gestures/S04_MORPH.trajectory.json",
+  "source_coordinate_space": "viewport_px",
+  "notes": "Generated from trajectory source; do not edit by hand.",
+  "events": [
+    {
+      "index": 0,
+      "command": "press_begin",
+      "at_seconds": 0,
+      "normalized_x": 0.42,
+      "normalized_y": 0.56,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 1,
+      "command": "press_move",
+      "at_seconds": 0.16,
+      "normalized_x": 0.46,
+      "normalized_y": 0.56,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 2,
+      "command": "press_move",
+      "at_seconds": 0.34,
+      "normalized_x": 0.56,
+      "normalized_y": 0.56,
+      "pressure": 1,
+      "unit": "normalized"
+    },
+    {
+      "index": 3,
+      "command": "press_end",
+      "at_seconds": 0.52,
+      "normalized_x": 0.58,
+      "normalized_y": 0.56,
+      "pressure": 0,
+      "unit": "normalized"
+    }
+  ]
+}

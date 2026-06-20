@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.2.0",
+  "gesture_id": "S04_MORPH_merge_tall_v1",
+  "scene_id": "S04_MORPH",
+  "authority": "single_source_trajectory",
+  "coordinate_space": "viewport_px",
+  "notes": "XCUITest and PointerEvent runners are compiled consumers of this source, never separate gesture authors.",
+  "samples": [
+    { "x": 0.42, "y": 0.56, "t": 0.0, "phase": "down", "pressure": 1.0, "unit": "normalized" },
+    { "x": 0.46, "y": 0.56, "t": 0.16, "phase": "move", "pressure": 1.0, "unit": "normalized" },
+    { "x": 0.56, "y": 0.56, "t": 0.34, "phase": "move", "pressure": 1.0, "unit": "normalized" },
+    { "x": 0.58, "y": 0.56, "t": 0.52, "phase": "up", "pressure": 0.0, "unit": "normalized" }
+  ],
+  "compiled_consumers": {
+    "xcuitest": "fixtures/gestures/compiled/S04_MORPH.xcuitest.json",
+    "pointer_events": "fixtures/gestures/compiled/S04_MORPH.pointer-events.json"
+  }
+}

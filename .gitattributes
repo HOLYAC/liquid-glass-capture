@@ -1,0 +1,2 @@
+# SHA-pinned lab fixtures must survive Windows checkout without byte drift.
+fixtures/**/*.json text eol=lf
