@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -50,12 +50,16 @@ function normalizeRequest(args) {
   const out = resolve(repoRoot, args.out ?? proofDoctorReportPath);
   const ipaReport = resolve(repoRoot, args.ipaReport ?? join(defaultIpaDir, "unsigned-ipa-download.report.json"));
   const planOut = resolve(repoRoot, args.planOut ?? proofPlanPath);
-  const captureRoot = args.captureRoot ? resolve(repoRoot, args.captureRoot) : defaultCaptureRoot;
+  const captureRootInput = args.captureRoot ? resolve(repoRoot, args.captureRoot) : defaultCaptureRoot;
+  const captureRootResolution = resolveCaptureRoot(captureRootInput);
+  const captureRoot = captureRootResolution.resolved_path ?? captureRootInput;
   const verifyOut = resolve(repoRoot, args.verifyOut ?? proofVerifyPath);
   return {
     out,
     ipaReport,
     planOut,
+    captureRootInput,
+    captureRootResolution,
     captureRoot,
     verifyOut,
     refreshIpa: Boolean(args.refreshIpa),
@@ -85,12 +89,20 @@ function runDoctor(request) {
   const ipaCheck = checkIpaReport(request.ipaReport, headSha);
   checks.push(ipaCheck);
 
-  const copiedCaptureCheck = inspectCopiedCaptureRoot(request.captureRoot);
+  const copiedCaptureCheck = inspectCopiedCaptureRoot(request.captureRoot, request.captureRootResolution);
   checks.push(copiedCaptureCheck);
 
   let verifyReportPath = null;
   let inspectCommand = null;
-  if (request.verifyCapture || copiedCaptureCheck.status === "pass") {
+  const shouldVerifyCapture = request.verifyCapture || copiedCaptureCheck.status === "pass";
+  if (shouldVerifyCapture && copiedCaptureCheck.status !== "pass") {
+    checks.push({
+      name: "capture_root_ready_for_verify",
+      status: "fail",
+      summary: "no copied LiquidGlassCaptures repeat manifest found yet",
+      evidence: copiedCaptureCheck.evidence
+    });
+  } else if (shouldVerifyCapture) {
     rmSync(request.verifyOut, { force: true });
     const verifyResult = runNodeScript("lab-ios-capture.mjs", [
       ...proofArgs,
@@ -126,6 +138,7 @@ function runDoctor(request) {
       ipa_path: ipaCheck.evidence.ipa_path ?? null,
       ipa_report_path: request.ipaReport,
       proof_plan_path: request.planOut,
+      copied_capture_root_input: request.captureRootInput,
       copied_capture_root: request.captureRoot,
       verify_report_path: verifyReportPath,
       proof_doctor_report_path: request.out
@@ -133,6 +146,7 @@ function runDoctor(request) {
     next: nextSteps({
       readyForPhone,
       verifiedCapture,
+      failedChecks,
       ipaPath: ipaCheck.evidence.ipa_path,
       captureRoot: request.captureRoot,
       inspectCommand
@@ -208,8 +222,12 @@ function checkIpaReport(reportPath, headSha) {
   }
 }
 
-function inspectCopiedCaptureRoot(captureRoot) {
-  const evidence = { path: captureRoot };
+function inspectCopiedCaptureRoot(captureRoot, resolution = resolveCaptureRoot(captureRoot)) {
+  const evidence = {
+    input_path: resolution.input_path,
+    path: captureRoot,
+    resolution
+  };
   if (!existsSync(captureRoot)) {
     return {
       name: "copied_capture_root",
@@ -264,7 +282,7 @@ function checkVerifyReport(reportPath) {
   }
 }
 
-function nextSteps({ readyForPhone, verifiedCapture, ipaPath, captureRoot, inspectCommand }) {
+function nextSteps({ readyForPhone, verifiedCapture, failedChecks = [], ipaPath, captureRoot, inspectCommand }) {
   if (verifiedCapture) {
     return {
       state: "verified_capture_ready_to_inspect",
@@ -273,13 +291,20 @@ function nextSteps({ readyForPhone, verifiedCapture, ipaPath, captureRoot, inspe
         "npm run ios:capture -- --rig R0 --scene S01_SEARCH --state rest --device physical --capture compositor --repeat 50 --device-role mvl_primary --max-fidelity --out ./artifacts/ios-mvl.plan.json"
     };
   }
+  if (failedChecks.some((check) => check.name === "capture_root_ready_for_verify")) {
+    return {
+      state: "awaiting_copied_capture",
+      copy_back: `Copy LiquidGlassCaptures or the whole app Documents folder under ./artifacts/iphone.`,
+      verify: `npm run proof:doctor -- --capture-root ./artifacts/iphone`
+    };
+  }
   if (readyForPhone) {
     return {
       state: "ready_for_phone",
       install: `Install ${ipaPath} with Sideloadly or AltStore.`,
       on_phone: "Open Liquid Glass Capture and press B. Defaults are S01_SEARCH/R0/mvl_primary/repeat=1/max-fidelity=true.",
-      copy_back: `Copy the app Documents/LiquidGlassCaptures folder to ${captureRoot}.`,
-      verify: `npm run proof:doctor -- --capture-root ./artifacts/iphone/LiquidGlassCaptures`
+      copy_back: `Copy the app Documents/LiquidGlassCaptures folder to ${captureRoot}, or copy the whole Documents folder under ./artifacts/iphone and let proof:doctor find LiquidGlassCaptures inside it.`,
+      verify: `npm run proof:doctor -- --capture-root ./artifacts/iphone`
     };
   }
   return {
@@ -300,6 +325,95 @@ function commandCheck(name, result) {
       stderr_tail: result.stderr.split(/\r?\n/).filter(Boolean).slice(-4)
     }
   };
+}
+
+function resolveCaptureRoot(inputPath) {
+  const candidates = [];
+  if (existsSync(inputPath)) {
+    collectCaptureRootCandidates(inputPath, candidates, 0, 5);
+  }
+  const uniqueCandidates = Array.from(new Map(candidates.map((candidate) => [candidate.path, candidate])).values())
+    .sort((left, right) => {
+      if (left.order_key === right.order_key) return left.path.localeCompare(right.path);
+      return left.order_key > right.order_key ? -1 : 1;
+    });
+  const selected = uniqueCandidates[0] ?? null;
+  return {
+    input_path: inputPath,
+    resolved_path: selected?.path ?? null,
+    status: selected ? "resolved" : "unresolved",
+    candidate_count: uniqueCandidates.length,
+    candidates: uniqueCandidates.slice(0, 8).map((candidate) => ({
+      path: candidate.path,
+      repeat_manifest_count: candidate.repeat_manifest_count,
+      has_series_dir: candidate.has_series_dir,
+      has_sessions_dir: candidate.has_sessions_dir,
+      order_key: candidate.order_key.toString()
+    }))
+  };
+}
+
+function collectCaptureRootCandidates(path, candidates, depth, maxDepth) {
+  const candidate = describeCaptureRootCandidate(path);
+  if (candidate) {
+    candidates.push(candidate);
+  }
+  if (depth >= maxDepth) {
+    return;
+  }
+  let entries = [];
+  try {
+    entries = readdirSync(path, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const child = join(path, entry.name);
+    if (entry.name === "node_modules" || entry.name === ".git") continue;
+    if (entry.name === "LiquidGlassCaptures" || depth < 3) {
+      collectCaptureRootCandidates(child, candidates, depth + 1, maxDepth);
+    }
+  }
+}
+
+function describeCaptureRootCandidate(path) {
+  const seriesDir = join(path, "Series");
+  const sessionsDir = join(path, "Sessions");
+  const hasSeriesDir = existsSync(seriesDir);
+  const hasSessionsDir = existsSync(sessionsDir);
+  const namedCaptureRoot = basename(path) === "LiquidGlassCaptures";
+  if (!namedCaptureRoot && !hasSeriesDir && !hasSessionsDir) {
+    return null;
+  }
+
+  const manifests = hasSeriesDir
+    ? readdirSync(seriesDir)
+      .filter((entry) => entry.endsWith(".repeat-manifest.json"))
+      .map((entry) => join(seriesDir, entry))
+    : [];
+  const orderKey = manifests
+    .map((manifest) => repeatManifestOrderKey(manifest))
+    .sort((left, right) => (left === right ? 0 : left > right ? -1 : 1))[0] ?? BigInt(Math.round(statSync(path).mtimeMs * 1_000_000));
+  return {
+    path,
+    repeat_manifest_count: manifests.length,
+    has_series_dir: hasSeriesDir,
+    has_sessions_dir: hasSessionsDir,
+    order_key: orderKey
+  };
+}
+
+function repeatManifestOrderKey(path) {
+  try {
+    const manifest = readJson(path);
+    const raw = manifest.finished_at_ns ?? manifest.started_at_ns;
+    if (typeof raw === "string" && /^\d+$/.test(raw)) return BigInt(raw);
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return BigInt(Math.round(raw));
+  } catch {
+    // Fall back to filesystem mtime below.
+  }
+  return BigInt(Math.round(statSync(path).mtimeMs * 1_000_000));
 }
 
 function runNodeScript(script, args) {
@@ -354,7 +468,9 @@ function printSummary(report) {
     for (const failure of failures) {
       console.log(`FAIL ${failure.name}: ${failure.summary}`);
     }
-    console.log(`NEXT ${report.next.prepare}`);
+    if (report.next.copy_back) console.log(`NEXT ${report.next.copy_back}`);
+    if (report.next.verify) console.log(`VERIFY ${report.next.verify}`);
+    if (report.next.prepare) console.log(`NEXT ${report.next.prepare}`);
   }
 }
 
@@ -425,6 +541,27 @@ function runSelfTest() {
     throw new Error("proof-doctor self-test failed to recognize copied capture root");
   }
 
+  const copiedParent = join(dir, "CopiedDocuments");
+  const nestedCaptureRoot = join(copiedParent, "Documents", "LiquidGlassCaptures");
+  mkdirSync(join(nestedCaptureRoot, "Series"), { recursive: true });
+  writeJson(join(nestedCaptureRoot, "Series", "nested.repeat-manifest.json"), {
+    finished_at_ns: "200"
+  });
+  const nestedResolution = resolveCaptureRoot(copiedParent);
+  if (nestedResolution.resolved_path !== nestedCaptureRoot) {
+    throw new Error("proof-doctor self-test failed to resolve nested LiquidGlassCaptures");
+  }
+
+  const olderCaptureRoot = join(copiedParent, "Old", "LiquidGlassCaptures");
+  mkdirSync(join(olderCaptureRoot, "Series"), { recursive: true });
+  writeJson(join(olderCaptureRoot, "Series", "old.repeat-manifest.json"), {
+    finished_at_ns: "100"
+  });
+  const newestResolution = resolveCaptureRoot(copiedParent);
+  if (newestResolution.resolved_path !== nestedCaptureRoot || newestResolution.candidate_count < 2) {
+    throw new Error("proof-doctor self-test failed to pick newest nested LiquidGlassCaptures");
+  }
+
   const staleVerifyOut = join(dir, "stale.verify.json");
   writeJson(staleVerifyOut, {
     status: "pass",
@@ -433,7 +570,7 @@ function runSelfTest() {
       inspect_command: "stale-inspect-command"
     }
   });
-  const staleTrapReport = runDoctor({
+  const missingRootReport = runDoctor({
     out: join(dir, "stale-trap.report.json"),
     ipaReport: reportPath,
     planOut: join(dir, "stale-trap.plan.json"),
@@ -442,14 +579,57 @@ function runSelfTest() {
     refreshIpa: false,
     verifyCapture: true
   });
-  if (staleTrapReport.status !== "fail") {
+  if (missingRootReport.status !== "fail") {
     throw new Error("proof-doctor self-test failed to reject missing capture root");
   }
-  if (staleTrapReport.artifacts.verify_report_path !== null) {
+  if (!missingRootReport.checks.some((check) => check.name === "capture_root_ready_for_verify" && check.status === "fail")) {
+    throw new Error("proof-doctor self-test failed to explain missing capture root");
+  }
+  if (missingRootReport.artifacts.verify_report_path !== null) {
     throw new Error("proof-doctor self-test reused stale verify report path");
   }
-  if (existsSync(staleVerifyOut)) {
-    throw new Error("proof-doctor self-test did not remove stale verify report before retry");
+
+  const badCaptureRoot = join(dir, "Bad", "LiquidGlassCaptures");
+  mkdirSync(join(badCaptureRoot, "Series"), { recursive: true });
+  writeJson(join(badCaptureRoot, "Series", "bad.repeat-manifest.json"), {
+    schema_version: "1.2.0",
+    kind: "repeat_capture_manifest",
+    status: "complete",
+    rig_id: "R0",
+    scene_id: "S01_SEARCH",
+    state_id: "rest",
+    capture_kind: "compositor",
+    device_matrix_role: "mvl_primary",
+    repeat_count_requested: 1,
+    repeat_count_observed: 1,
+    artifact_json_paths: ["missing.capture.json"],
+    max_fidelity: true,
+    capture_raw_frames: true,
+    capture_raw_pixels: true,
+    max_frames: 1
+  });
+  writeJson(staleVerifyOut, {
+    status: "pass",
+    capture_count: 1,
+    next: {
+      inspect_command: "stale-inspect-command"
+    }
+  });
+  const staleTrapReport = runDoctor({
+    out: join(dir, "bad-root.report.json"),
+    ipaReport: reportPath,
+    planOut: join(dir, "bad-root.plan.json"),
+    captureRoot: badCaptureRoot,
+    verifyOut: staleVerifyOut,
+    refreshIpa: false,
+    verifyCapture: true
+  });
+  if (staleTrapReport.status !== "fail") {
+    throw new Error("proof-doctor self-test failed to reject bad capture root");
+  }
+  const overwrittenVerify = readJson(staleVerifyOut);
+  if (overwrittenVerify.next?.inspect_command === "stale-inspect-command") {
+    throw new Error("proof-doctor self-test reused stale verify report content");
   }
   rmSync(dir, { recursive: true, force: true });
   console.log("PASS proof-doctor self-test");

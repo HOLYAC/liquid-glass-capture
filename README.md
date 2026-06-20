@@ -145,11 +145,13 @@ Press `B`. The status line prints the generated repeat-manifest path. If you
 changed the app state earlier, press `2` to show controls and restore those
 values before pressing `B`.
 
-4. Copy the app Documents folder `LiquidGlassCaptures` to this repo under
-   `./artifacts/iphone/LiquidGlassCaptures`. File sharing is enabled in
-   `app.json` (`UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace`),
-   so the folder is reachable through Files/iTunes/Sideloadly-style file
-   browsers.
+4. Copy the app Documents folder into this repo under `./artifacts/iphone/`.
+   File sharing is enabled in `app.json` (`UIFileSharingEnabled` +
+   `LSSupportsOpeningDocumentsInPlace`), so the folder is reachable through
+   Files/iTunes/Sideloadly-style file browsers. The doctor accepts either
+   `./artifacts/iphone/LiquidGlassCaptures` or a parent folder such as
+   `./artifacts/iphone/Documents`; it auto-discovers the newest nested
+   `LiquidGlassCaptures`.
 
 5. Verify the newest copied manifest. The command finds the latest
    `LiquidGlassCaptures/Series/*.repeat-manifest.json` by the manifest's
@@ -157,7 +159,7 @@ values before pressing `B`.
    `../Sessions/...` artifact paths:
 
 ```bash
-npm run proof:doctor -- --capture-root ./artifacts/iphone/LiquidGlassCaptures
+npm run proof:doctor -- --capture-root ./artifacts/iphone
 ```
 
 `PASS_VERIFIED_CAPTURE` here means the verifier read the repeat manifest, every
