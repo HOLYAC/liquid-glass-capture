@@ -13,7 +13,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zaeba.liquidglasscapture",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "requireFullScreen": true,
       "infoPlist": {
         "UIRequiresFullScreen": true,
