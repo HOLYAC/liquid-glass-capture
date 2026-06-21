@@ -23,6 +23,7 @@
     "proof:prepare": "node scripts/lab-proof-doctor.mjs --refresh-ipa",
     "proof:run": "node scripts/lab-proof-run.mjs",
     "proof:run:reuse": "node scripts/lab-proof-run.mjs --reuse-ipa",
+    "proof:auto": "node scripts/lab-proof-run.mjs --reuse-ipa --poll-ms 500 --auto-capture",
     "proof:watch": "node scripts/lab-proof-doctor.mjs --capture-root ./artifacts/iphone --wait",
     "phone:pull": "node scripts/lab-phone-pull.mjs",
     "phone:wait": "node scripts/lab-phone-pull.mjs --bootstrap --wait",

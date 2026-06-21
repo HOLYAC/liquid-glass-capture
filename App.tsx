@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Pressable,
   SafeAreaView,
@@ -50,6 +50,10 @@ const phases = ["rest", "press", "drag_left", "drag_right", "merge_near", "merge
 const tints = ["none", "cyan", "amber", "red"] as const;
 const repeatCounts = [1, 3, 10, 24, 50, 300] as const;
 const deviceMatrixRoles = ["mvl_primary", "weakest_supported", "target", "latest_pro"] as const;
+const launchAutoRepeatEnabled = true;
+const launchAutoRepeatRuns = 5;
+const launchAutoRepeatDelayMs = 1500;
+const launchAutoRepeatGapMs = 1000;
 const backgroundPackId = "glass_background_pack_v1";
 const backgroundPackSha256 = "5c305dcadc6d32b7ca9366c5b82793345e791a3e7c5c58b46c3da5557450d877";
 const geometryPackId = "glass_geometry_pack_v1";
@@ -291,6 +295,10 @@ function nextValue<T extends string | number>(values: readonly T[], current: T):
   return values[(values.indexOf(current) + 1) % values.length];
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function sceneSpecFor(sceneId: SceneId): SceneSpec {
   return sceneSpecs.find((scene) => scene.sceneId === sceneId) ?? sceneSpecs[1];
 }
@@ -353,6 +361,7 @@ function Chip({
 
 export default function App() {
   const glassRef = useRef<LiquidGlassCaptureViewHandle>(null);
+  const launchAutoRepeatStarted = useRef(false);
   const [sceneId, setSceneId] = useState<SceneId>("S01_SEARCH");
   const [rig, setRig] = useState<LiquidGlassCaptureRig>("R0");
   const [mode, setMode] = useState<Mode>(sceneSpecFor("S01_SEARCH").mode);
@@ -573,6 +582,27 @@ export default function App() {
       setControls(true);
     }
   }
+
+  useEffect(() => {
+    if (!launchAutoRepeatEnabled || launchAutoRepeatStarted.current) return;
+    launchAutoRepeatStarted.current = true;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        for (let index = 0; index < launchAutoRepeatRuns && !cancelled; index += 1) {
+          setCaptureStatus(`auto repeat ${index + 1}/${launchAutoRepeatRuns}`);
+          await runRepeatCapture();
+          if (index + 1 < launchAutoRepeatRuns) await wait(launchAutoRepeatGapMs);
+        }
+      })();
+    }, launchAutoRepeatDelayMs);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
 
   async function runNullQualification() {
     const handle = glassRef.current;

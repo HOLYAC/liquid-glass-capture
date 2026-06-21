@@ -43,7 +43,11 @@ function runProof(request) {
   console.log(`PASS_READY_FOR_PHONE ${request.proofReport}`);
   console.log(request.refreshIpa ? "IPA_MODE refresh" : "IPA_MODE reuse");
   console.log(`INSTALL ${ipaPath}`);
-  console.log("PHONE Open Liquid Glass Capture, press B after this line, keep the iPhone unlocked and trusted over USB.");
+  if (request.autoCapture) {
+    console.log("PHONE Open Liquid Glass Capture after this line; launch auto-repeat will capture without pressing B. Keep the iPhone unlocked and trusted over USB.");
+  } else {
+    console.log("PHONE Open Liquid Glass Capture, press B after this line, keep the iPhone unlocked and trusted over USB.");
+  }
 
   const freshnessStartedAtNs = freshnessStartNs(request.freshnessSkewMs);
   console.log(`FRESHNESS_MIN_STARTED_AT_NS ${freshnessStartedAtNs}`);
@@ -85,6 +89,7 @@ function normalizeRequest(args) {
     pollMs,
     freshnessSkewMs,
     dryRun: Boolean(args.dryRun),
+    autoCapture: Boolean(args.autoCapture),
     refreshIpa: args.refreshIpa ?? true,
     proofReport: resolve(repoRoot, args.proofReport ?? defaultProofReport),
     prepareScript: resolve(repoRoot, args.prepareScript ?? join("scripts", "lab-proof-doctor.mjs")),
@@ -128,6 +133,7 @@ function parseArgs(argv) {
     const token = argv[index];
     if (token === "--self-test") args.selfTest = true;
     else if (token === "--dry-run") args.dryRun = true;
+    else if (token === "--auto-capture") args.autoCapture = true;
     else if (token === "--refresh-ipa") args.refreshIpa = true;
     else if (token === "--reuse-ipa" || token === "--no-refresh-ipa") args.refreshIpa = false;
     else if (token === "--wait-ms") args.waitMs = Number(readNext(argv, ++index, token));
