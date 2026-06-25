@@ -33,6 +33,30 @@ jobs:
       - name: Generate iOS project
         run: npx expo prebuild --platform ios --clean --non-interactive
 
+      - name: Patch hCaptcha debugInfo (experiment — blank app_/deps_/sys_/iver_/sdk_)
+        run: |
+          set -euo pipefail
+          F="$(find ios/Pods/HCaptcha -name HCaptchaDebugInfo.swift -type f | head -n 1)"
+          if [ -z "$F" ]; then
+            echo "HCaptchaDebugInfo.swift not found under ios/Pods"; find ios/Pods -name 'HCaptcha*.swift' -type f || true; exit 1
+          fi
+          echo "patching $F"
+          python3 - "$F" <<'PY'
+          import re, sys
+          p = sys.argv[1]
+          s = open(p, encoding="utf-8").read()
+          s2 = re.sub(
+              r'(private class func buildDebugInfoJson\(\) -> String \{).*?(\n    \})',
+              r'\1\n        return "[]"\2',
+              s, count=1, flags=re.S)
+          if s2 == s:
+              sys.exit("PATCH FAILED: buildDebugInfoJson not matched")
+          open(p, "w", encoding="utf-8").write(s2)
+          print('OK: buildDebugInfoJson -> return "[]"')
+          PY
+          echo "--- patched function ---"
+          sed -n '/buildDebugInfoJson/,/^    }/p' "$F"
+
       - name: Verify native module registration
         run: |
           set -euo pipefail
