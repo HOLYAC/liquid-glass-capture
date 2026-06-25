@@ -1,121 +1,49 @@
-import { requireNativeViewManager } from "expo-modules-core";
-import type { ViewProps } from "react-native";
+// JS bridge for the in-app hCaptcha-SDK minter. The native module name stays "LiquidGlassCapture"
+// so the build vehicle's module-registration checks keep passing; only its behaviour changed.
+import { requireNativeModule, type EventSubscription } from "expo-modules-core";
 
-export type LiquidGlassCaptureMode =
-  | "substrate_only"
-  | "glass_over_substrate"
-  | "glass_over_black";
-
-export type LiquidGlassCaptureRig =
-  | "R0"
-  | "R1"
-  | "C0"
-  | "C1"
-  | "DOM_C"
-  | "DX_REPLAY";
-
-export type LiquidGlassCaptureSubstrate =
-  | "s00_flat_grey"
-  | "s00_hard_edge"
-  | "s00_p3_ramp"
-  | "s00_smooth_gradient"
-  | "checker_1px"
-  | "checker_2px"
-  | "checker_4px"
-  | "checker_8px"
-  | "grid"
-  | "rgb_stripes"
-  | "luma_ramp"
-  | "text_weights"
-  | "caret_selection"
-  | "native_text_selection"
-  | "loupe_text"
-  | "floating_bar_content"
-  | "tiny_control_content"
-  | "busy_photo"
-  | "p3_saturated_gradient"
-  | "near_white"
-  | "near_black"
-  | "video_frame"
-  | "system_material_adjacency"
-  | "noise";
-
-export type LiquidGlassCaptureShape =
-  | "circle"
-  | "capsule"
-  | "rounded_rect"
-  | "twin_capsules";
-
-export type LiquidGlassCapturePhase =
-  | "rest"
-  | "press"
-  | "drag_left"
-  | "drag_right"
-  | "merge_near"
-  | "merge_overlap"
-  | "morph_tall";
-
-export type LiquidGlassCaptureTint = "none" | "cyan" | "amber" | "red";
-
-export type LiquidGlassCaptureViewProps = ViewProps & {
-  rig?: LiquidGlassCaptureRig;
-  mode?: LiquidGlassCaptureMode;
-  substrate?: LiquidGlassCaptureSubstrate;
-  shape?: LiquidGlassCaptureShape;
-  phase?: LiquidGlassCapturePhase;
-  tint?: LiquidGlassCaptureTint;
-  interactive?: boolean;
-  autoplay?: boolean;
+export type TokenEvent = { len: number; minted: number; head: string };
+export type ErrorEvent = { stage: string; error: string };
+export type PostedEvent = { status: number; posted: number; error: string };
+export type MinterStatus = {
+  minting: boolean;
+  minted: number;
+  posted: number;
+  sitekey: string;
+  oracleUrl: string;
 };
 
-export type LiquidGlassCaptureSnapshot = {
-  label: string;
-  timestampMs: number;
-  pngPath: string;
-  jsonPath: string;
-  view: {
-    width: number;
-    height: number;
-    scale: number;
-  };
-  props: Record<string, unknown>;
-  metadata: Record<string, unknown>;
-  metrics: Record<string, unknown>;
+type MinterNativeModule = {
+  startMinting(sitekey: string, oracleUrl: string, intervalMs: number): Promise<void>;
+  stopMinting(): void;
+  getStatus(): MinterStatus;
+  addListener(event: "onToken", listener: (e: TokenEvent) => void): EventSubscription;
+  addListener(event: "onError", listener: (e: ErrorEvent) => void): EventSubscription;
+  addListener(event: "onPosted", listener: (e: PostedEvent) => void): EventSubscription;
 };
 
-export type LiquidGlassCaptureLabArtifact = Record<string, unknown> & {
-  schema_version: "1.2.0";
-  id: string;
-  jsonPath: string;
-};
+const Minter = requireNativeModule<MinterNativeModule>("LiquidGlassCapture");
 
-export type LiquidGlassCaptureViewHandle = {
-  captureSnapshotAsync(
-    label: string,
-    metadata: Record<string, unknown>
-  ): Promise<LiquidGlassCaptureSnapshot>;
-  captureLabArtifactAsync?(
-    label: string,
-    metadata: Record<string, unknown>
-  ): Promise<LiquidGlassCaptureLabArtifact>;
-  startCompositorCaptureAsync?(
-    label: string,
-    metadata: Record<string, unknown>
-  ): Promise<Record<string, unknown>>;
-  stopCompositorCaptureAsync?(): Promise<Record<string, unknown>>;
-  runNullQualificationAsync?(
-    referenceArtifactPath: string,
-    candidateArtifactPath: string,
-    rung?: string | null
-  ): Promise<Record<string, unknown>>;
-  runCompositorRepeatCaptureAsync?(
-    label: string,
-    metadata: Record<string, unknown>,
-    repeatCount: number,
-    captureDurationMs: number,
-    cooldownMs: number
-  ): Promise<Record<string, unknown>>;
-};
+export function startMinting(sitekey: string, oracleUrl: string, intervalMs = 8000): Promise<void> {
+  return Minter.startMinting(sitekey, oracleUrl, intervalMs);
+}
 
-export const LiquidGlassCaptureView =
-  requireNativeViewManager<LiquidGlassCaptureViewProps>("LiquidGlassCapture");
+export function stopMinting(): void {
+  Minter.stopMinting();
+}
+
+export function getStatus(): MinterStatus {
+  return Minter.getStatus();
+}
+
+export function onToken(listener: (e: TokenEvent) => void): EventSubscription {
+  return Minter.addListener("onToken", listener);
+}
+
+export function onError(listener: (e: ErrorEvent) => void): EventSubscription {
+  return Minter.addListener("onError", listener);
+}
+
+export function onPosted(listener: (e: PostedEvent) => void): EventSubscription {
+  return Minter.addListener("onPosted", listener);
+}

@@ -7,7 +7,7 @@
     "platforms": [
       "ios"
     ],
-    "orientation": "landscape",
+    "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
@@ -19,7 +19,11 @@
         "UIRequiresFullScreen": true,
         "ITSAppUsesNonExemptEncryption": false,
         "UIFileSharingEnabled": true,
-        "LSSupportsOpeningDocumentsInPlace": true
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSLocalNetworkUsageDescription": "Posts minted hCaptcha tokens to the local oracle on your computer."
       }
     },
     "plugins": [
