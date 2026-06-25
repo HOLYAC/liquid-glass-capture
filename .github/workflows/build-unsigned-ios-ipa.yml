@@ -41,6 +41,7 @@ jobs:
             echo "HCaptchaDebugInfo.swift not found under ios/Pods"; find ios/Pods -name 'HCaptcha*.swift' -type f || true; exit 1
           fi
           echo "patching $F"
+          chmod u+w "$F"
           python3 - "$F" <<'PY'
           import re, sys
           p = sys.argv[1]
