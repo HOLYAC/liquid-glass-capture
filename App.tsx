@@ -24,7 +24,7 @@ import { PROVIDERS } from "./src/providers/registry";
 
 // ElevenLabs' hCaptcha sitekey — the in-app SDK solve for THIS key is the only token EL's siteverify
 // accepts (Safari / Chrome-WKWebView / standalone solves were all silently rejected).
-const SITEKEY = "7f1a1c8e-99e4-4ace-b106-4f3e78a0e5c2";
+const DEFAULT_SITEKEY = "7f1a1c8e-99e4-4ace-b106-4f3e78a0e5c2"; // EL preset; editable in the field
 const DEFAULT_ORACLE = "http://192.168.1.82:8000/collect";
 
 const intervalChoices = [4000, 6000, 8000, 12000, 20000] as const;
@@ -63,10 +63,11 @@ function errMsg(e: unknown): string {
 }
 
 export default function App() {
+  const [sitekey, setSitekey] = useState(DEFAULT_SITEKEY);
   const [oracle, setOracle] = useState(DEFAULT_ORACLE);
   const [running, setRunning] = useState(false);
   const [intervalMs, setIntervalMs] = useState<(typeof intervalChoices)[number]>(8000);
-  const [jitterPct, setJitterPct] = useState<(typeof jitterChoices)[number]>(0.3);
+  const [jitterPct, setJitterPct] = useState<(typeof jitterChoices)[number]>(0);
   const [adaptive, setAdaptive] = useState(false);
   const [stats, setStats] = useState({ minted: 0, posted: 0 });
   const [reason, setReason] = useState("idle");
@@ -134,7 +135,7 @@ export default function App() {
       return;
     }
     // Proven path — unchanged. Then push jitter/interval via the additive config hook.
-    await startMinting(SITEKEY, oracle, intervalMs);
+    await startMinting(sitekey.trim(), oracle, intervalMs);
     try {
       await updateMintConfig(intervalMs, jitterPct);
     } catch (e) {
@@ -180,9 +181,19 @@ export default function App() {
       <StatusBar barStyle="light-content" />
       <Text style={styles.title}>hCaptcha Minter — combine</Text>
       <Text style={styles.sub}>
-        sitekey {SITEKEY.slice(0, 8)}…  ·  providers {liveCount}/{PROVIDERS.length} live  ·  {reason}
+        sitekey {sitekey.slice(0, 8)}…  ·  providers {liveCount}/{PROVIDERS.length} live  ·  {reason}
       </Text>
 
+      <TextInput
+        style={styles.input}
+        value={sitekey}
+        onChangeText={setSitekey}
+        autoCapitalize="none"
+        autoCorrect={false}
+        editable={!running}
+        placeholder="hCaptcha sitekey"
+        placeholderTextColor="#777"
+      />
       <TextInput
         style={styles.input}
         value={oracle}

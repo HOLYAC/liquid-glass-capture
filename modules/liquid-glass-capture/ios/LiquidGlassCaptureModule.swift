@@ -18,8 +18,6 @@ public final class LiquidGlassCaptureModule: Module {
   private var minted = 0
   private var posted = 0
   private var runId = 0
-  private var inFlight = false           // true while one validate cycle is outstanding (serializes the loop)
-  private var consecutiveFailures = 0    // drives exponential backoff after WebView-process terminations
   private var jitterPct: Double = 0      // 0..1 — randomises scheduling cadence (set live via updateConfig)
 
   public func definition() -> ModuleDefinition {
@@ -50,8 +48,6 @@ public final class LiquidGlassCaptureModule: Module {
       self.intervalMs = max(2000, intervalMs)
       self.minted = 0
       self.posted = 0
-      self.inFlight = false
-      self.consecutiveFailures = 0
       self.minting = true
       self.emitDiagnostic(stage: "start",
                           message: "minting loop started",
@@ -65,7 +61,6 @@ public final class LiquidGlassCaptureModule: Module {
 
     Function("stopMinting") {
       self.minting = false
-      self.inFlight = false
       self.runId += 1
       self.hcaptcha?.stop()
       self.hcaptcha = nil
@@ -92,12 +87,12 @@ public final class LiquidGlassCaptureModule: Module {
   }
 
   // One validate cycle on the key-window view; on completion post the token and schedule the next.
+  // Concurrency is intentional: on a flaky WebView (this device hangs ~half the solves with no
+  // callback) overlapping cycles mask the hangs and keep the stream steady — that's why the
+  // un-serialized build mints "ровно". A timer-driven pool is the clean version (see plan); for
+  // now this is the proven 413-token loop, plus cadence jitter.
   private func mintOnce(runId: Int) {
     guard minting, runId == self.runId else { return }
-    guard !inFlight else {
-      emitDiagnostic(stage: "validate", message: "skipped: a solve is already in flight", extra: ["run_id": runId])
-      return
-    }
     guard let presenterView = keyWindowView() else {
       emitError(stage: "presenter", error: "no active UIWindow/root view", extra: ["run_id": runId])
       return scheduleNext(runId: runId)
@@ -111,7 +106,6 @@ public final class LiquidGlassCaptureModule: Module {
       return scheduleNext(runId: runId)
     }
     hcaptcha = captcha
-    inFlight = true
 
     captcha.onEvent { [weak self] event, payload in
       self?.emitDiagnostic(stage: "sdk",
@@ -120,36 +114,13 @@ public final class LiquidGlassCaptureModule: Module {
                                    "payload": String(describing: payload ?? "")])
     }
 
-    // The hCaptcha SDK can fire the validate completion more than once when the WebView
-    // content process dies ("...did terminate"). `completed` makes teardown run once;
-    // `inFlight` stops a second cycle overlapping — together they kill the self-amplifying
-    // loop that hit 5 solves/sec on device (each fresh WebView adds memory pressure → more
-    // terminations). Failures back off exponentially so the web content process can recover.
-    var completed = false
-    let finish: (Bool) -> Void = { [weak self] success in
-      guard let self, !completed else { return }
-      completed = true
-      captcha.stop()
-      if self.hcaptcha === captcha { self.hcaptcha = nil }
-      self.inFlight = false
-      self.consecutiveFailures = success ? 0 : min(self.consecutiveFailures + 1, 6)
-      let backoffMs = success
-        ? self.intervalMs
-        : min(self.intervalMs << min(self.consecutiveFailures, 5), 120_000)
-      self.scheduleNext(runId: runId, delayMs: backoffMs)
-    }
-
-    // Watchdog: if the SDK never calls back (hung WebView), don't wedge `inFlight` forever.
-    DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(45)) { [weak self] in
-      guard let self, !completed, runId == self.runId else { return }
-      self.emitError(stage: "validate", error: "timeout: no SDK callback in 45s", extra: ["run_id": runId])
-      finish(false)
-    }
-
     emitDiagnostic(stage: "validate", message: "starting hCaptcha validate", extra: ["run_id": runId])
     captcha.validate(on: presenterView) { [weak self] result in
       guard let self else { return }
-      guard self.minting, runId == self.runId else { captcha.stop(); return }
+      guard self.minting, runId == self.runId else {
+        captcha.stop()
+        return
+      }
       do {
         let token = try result.dematerialize()
         self.minted += 1
@@ -158,18 +129,21 @@ public final class LiquidGlassCaptureModule: Module {
                                    "head": String(token.prefix(16)),
                                    "run_id": runId])
         self.postToOracle(token, runId: runId)
-        finish(true)
       } catch {
         self.emitError(stage: "validate", error: String(describing: error), extra: ["run_id": runId])
-        finish(false)
       }
+      captcha.stop()
+      if self.hcaptcha === captcha {
+        self.hcaptcha = nil
+      }
+      self.scheduleNext(runId: runId)
     }
   }
 
-  private func scheduleNext(runId: Int? = nil, delayMs: Int? = nil) {
+  private func scheduleNext(runId: Int? = nil) {
     let targetRunId = runId ?? self.runId
     guard minting, targetRunId == self.runId else { return }
-    let delay = Self.jittered(delayMs ?? intervalMs, pct: jitterPct)
+    let delay = Self.jittered(intervalMs, pct: jitterPct)
     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delay)) { [weak self] in
       guard let self, self.minting, targetRunId == self.runId else { return }
       self.mintOnce(runId: targetRunId)
