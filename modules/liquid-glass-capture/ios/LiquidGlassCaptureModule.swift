@@ -137,26 +137,17 @@ public final class LiquidGlassCaptureModule: Module {
   }
 
   private func makeCaptcha() throws -> HCaptcha {
-    do {
-      return try configuredCaptcha(userJourney: true)
-    } catch HCaptchaError.journeyliticsNotAvailable {
-      emitDiagnostic(stage: "init",
-                     message: "userJourney unavailable; retrying without it",
-                     extra: ["host": sdkHost])
-      return try configuredCaptcha(userJourney: false)
-    }
+    return try configuredCaptcha()
   }
 
-  private func configuredCaptcha(userJourney: Bool) throws -> HCaptcha {
-    guard let baseURL = URL(string: "https://\(sdkHost)") else {
-      throw HCaptchaError.invalidHostFormat
-    }
+  private func configuredCaptcha() throws -> HCaptcha {
+    // sdkHost is always "<sitekey>.ios-sdk.hcaptcha.com", so the URL is well-formed.
+    let baseURL = URL(string: "https://\(sdkHost)")!
     return try HCaptcha(apiKey: sitekey,
                         baseURL: baseURL,
                         size: .invisible,
                         sentry: false,
-                        diagnosticLog: true,
-                        userJourney: userJourney)
+                        diagnosticLog: true)
   }
 
   private func keyWindowView() -> UIView? {
