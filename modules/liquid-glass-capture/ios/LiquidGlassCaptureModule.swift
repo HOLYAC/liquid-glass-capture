@@ -12,95 +12,225 @@ public final class LiquidGlassCaptureModule: Module {
   private var hcaptcha: HCaptcha?       // retained for the lifetime of a validate cycle (else it deallocs)
   private var minting = false
   private var sitekey = ""
+  private var sdkHost = ""
   private var oracleUrl = ""
   private var intervalMs = 8000
   private var minted = 0
   private var posted = 0
+  private var runId = 0
 
   public func definition() -> ModuleDefinition {
     Name("LiquidGlassCapture")
 
-    Events("onToken", "onError", "onPosted")
+    Events("onToken", "onError", "onPosted", "onDiagnostic")
 
     AsyncFunction("startMinting") { (sitekey: String, oracleUrl: String, intervalMs: Int) in
-      self.sitekey = sitekey
-      self.oracleUrl = oracleUrl
+      let cleanSitekey = sitekey.trimmingCharacters(in: .whitespacesAndNewlines)
+      let cleanOracleUrl = oracleUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !cleanSitekey.isEmpty else {
+        self.emitError(stage: "start", error: "empty sitekey")
+        return
+      }
+      guard URL(string: cleanOracleUrl) != nil else {
+        self.emitError(stage: "start", error: "bad oracleUrl")
+        return
+      }
+      guard !self.minting else {
+        self.emitDiagnostic(stage: "start", message: "already minting", extra: ["run_id": self.runId])
+        return
+      }
+
+      self.runId += 1
+      self.sitekey = cleanSitekey
+      self.sdkHost = Self.hcaptchaSDKHost(for: cleanSitekey)
+      self.oracleUrl = cleanOracleUrl
       self.intervalMs = max(2000, intervalMs)
-      guard !self.minting else { return }
+      self.minted = 0
+      self.posted = 0
       self.minting = true
-      self.mintOnce()
+      self.emitDiagnostic(stage: "start",
+                          message: "minting loop started",
+                          extra: ["run_id": self.runId,
+                                  "host": self.sdkHost,
+                                  "oracleUrl": self.oracleUrl,
+                                  "intervalMs": self.intervalMs])
+      self.mintOnce(runId: self.runId)
     }
     .runOnQueue(.main)
 
     Function("stopMinting") {
       self.minting = false
+      self.runId += 1
       self.hcaptcha?.stop()
+      self.hcaptcha = nil
+      self.emitDiagnostic(stage: "stop", message: "minting loop stopped", extra: ["run_id": self.runId])
     }
 
     Function("getStatus") { () -> [String: Any] in
       ["minting": self.minting, "minted": self.minted, "posted": self.posted,
-       "sitekey": self.sitekey, "oracleUrl": self.oracleUrl]
+       "sitekey": self.sitekey, "oracleUrl": self.oracleUrl, "host": self.sdkHost,
+       "run_id": self.runId]
     }
   }
 
   // One validate cycle on the key-window view; on completion post the token and schedule the next.
-  private func mintOnce() {
-    guard minting else { return }
+  private func mintOnce(runId: Int) {
+    guard minting, runId == self.runId else { return }
+    guard let presenterView = keyWindowView() else {
+      emitError(stage: "presenter", error: "no active UIWindow/root view", extra: ["run_id": runId])
+      return scheduleNext(runId: runId)
+    }
+
     let captcha: HCaptcha
     do {
-      captcha = try HCaptcha(apiKey: sitekey,
-                             baseURL: URL(string: "https://\(sitekey).ios-sdk.hcaptcha.com")!)
+      captcha = try makeCaptcha()
     } catch {
-      sendEvent("onError", ["stage": "init", "error": String(describing: error)])
-      return scheduleNext()
+      emitError(stage: "init", error: String(describing: error), extra: ["run_id": runId, "host": sdkHost])
+      return scheduleNext(runId: runId)
     }
     hcaptcha = captcha
-    captcha.validate(on: keyWindowView()) { [weak self] result in
+
+    captcha.onEvent { [weak self] event, payload in
+      self?.emitDiagnostic(stage: "sdk",
+                           message: String(describing: event),
+                           extra: ["run_id": runId,
+                                   "payload": String(describing: payload ?? "")])
+    }
+
+    emitDiagnostic(stage: "validate", message: "starting hCaptcha validate", extra: ["run_id": runId])
+    captcha.validate(on: presenterView) { [weak self] result in
       guard let self else { return }
+      guard self.minting, runId == self.runId else {
+        captcha.stop()
+        return
+      }
       do {
         let token = try result.dematerialize()
         self.minted += 1
-        self.sendEvent("onToken", ["len": token.count, "minted": self.minted,
-                                   "head": String(token.prefix(16))])
-        self.postToOracle(token)
+        self.emitEvent("onToken", ["len": token.count,
+                                   "minted": self.minted,
+                                   "head": String(token.prefix(16)),
+                                   "run_id": runId])
+        self.postToOracle(token, runId: runId)
       } catch {
-        self.sendEvent("onError", ["stage": "validate", "error": String(describing: error)])
+        self.emitError(stage: "validate", error: String(describing: error), extra: ["run_id": runId])
       }
       captcha.stop()
-      self.scheduleNext()
+      if self.hcaptcha === captcha {
+        self.hcaptcha = nil
+      }
+      self.scheduleNext(runId: runId)
     }
   }
 
-  private func scheduleNext() {
-    guard minting else { return }
+  private func scheduleNext(runId: Int? = nil) {
+    let targetRunId = runId ?? self.runId
+    guard minting, targetRunId == self.runId else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(intervalMs)) { [weak self] in
-      self?.mintOnce()
+      guard let self, self.minting, targetRunId == self.runId else { return }
+      self.mintOnce(runId: targetRunId)
     }
   }
 
-  private func keyWindowView() -> UIView {
+  private static func hcaptchaSDKHost(for sitekey: String) -> String {
+    "\(sitekey).ios-sdk.hcaptcha.com"
+  }
+
+  private func makeCaptcha() throws -> HCaptcha {
+    do {
+      return try configuredCaptcha(userJourney: true)
+    } catch HCaptchaError.journeyliticsNotAvailable {
+      emitDiagnostic(stage: "init",
+                     message: "userJourney unavailable; retrying without it",
+                     extra: ["host": sdkHost])
+      return try configuredCaptcha(userJourney: false)
+    }
+  }
+
+  private func configuredCaptcha(userJourney: Bool) throws -> HCaptcha {
+    guard let baseURL = URL(string: "https://\(sdkHost)") else {
+      throw HCaptchaError.invalidHostFormat
+    }
+    return try HCaptcha(apiKey: sitekey,
+                        baseURL: baseURL,
+                        size: .invisible,
+                        sentry: false,
+                        diagnosticLog: true,
+                        userJourney: userJourney)
+  }
+
+  private func keyWindowView() -> UIView? {
     let windows = UIApplication.shared.connectedScenes
       .compactMap { $0 as? UIWindowScene }
       .flatMap { $0.windows }
     let window = windows.first { $0.isKeyWindow } ?? windows.first
-    return window?.rootViewController?.view ?? UIView()
+    var controller = window?.rootViewController
+    while let presented = controller?.presentedViewController {
+      controller = presented
+    }
+    return controller?.view ?? window
   }
 
-  private func postToOracle(_ token: String) {
+  private func postToOracle(_ token: String, runId: Int) {
     guard let url = URL(string: oracleUrl) else {
-      return sendEvent("onError", ["stage": "post", "error": "bad oracleUrl"])
+      return emitError(stage: "post", error: "bad oracleUrl", extra: ["run_id": runId])
     }
     var request = URLRequest(url: url, timeoutInterval: 15)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token, "mint_id": "ios-sdk"])
-    URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+    do {
+      request.httpBody = try JSONSerialization.data(withJSONObject: [
+        "token": token,
+        "mint_id": "ios-sdk",
+        "sitekey": sitekey,
+        "host": sdkHost,
+        "run_id": runId,
+        "created_at_ms": Int(Date().timeIntervalSince1970 * 1000)
+      ])
+    } catch {
+      return emitError(stage: "post", error: String(describing: error), extra: ["run_id": runId])
+    }
+
+    URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
       guard let self else { return }
       let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-      if error == nil, (200...299).contains(code) { self.posted += 1 }
-      self.sendEvent("onPosted", ["status": code, "posted": self.posted,
-                                  "error": error?.localizedDescription ?? ""])
+      let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+      DispatchQueue.main.async { [weak self] in
+        guard let self, runId == self.runId else { return }
+        if error == nil, (200...299).contains(code) {
+          self.posted += 1
+        }
+        self.emitEvent("onPosted", ["status": code,
+                                    "posted": self.posted,
+                                    "error": error?.localizedDescription ?? "",
+                                    "body": String(body.prefix(160)),
+                                    "run_id": runId])
+      }
     }
     .resume()
+  }
+
+  private func emitError(stage: String, error: String, extra: [String: Any] = [:]) {
+    var payload = extra
+    payload["stage"] = stage
+    payload["error"] = error
+    emitEvent("onError", payload)
+  }
+
+  private func emitDiagnostic(stage: String, message: String, extra: [String: Any] = [:]) {
+    var payload = extra
+    payload["stage"] = stage
+    payload["message"] = message
+    emitEvent("onDiagnostic", payload)
+  }
+
+  private func emitEvent(_ event: String, _ payload: [String: Any]) {
+    if Thread.isMainThread {
+      sendEvent(event, payload)
+    } else {
+      DispatchQueue.main.async { [weak self] in
+        self?.sendEvent(event, payload)
+      }
+    }
   }
 }

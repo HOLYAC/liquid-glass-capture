@@ -1,0 +1,55 @@
+name: Build Android debug APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 25.8.0
+          cache: npm
+
+      - name: Install JS dependencies
+        run: |
+          npm install --global npm@11.11.0
+          node --version
+          npm --version
+          npm ci
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --clean --no-install --non-interactive
+
+      - name: Verify native module registration
+        run: |
+          set -euo pipefail
+          npx expo-modules-autolinking resolve --platform android --json > android-autolinking.json
+          grep "expo.modules.liquidglasscapture.LiquidGlassCaptureModule" android-autolinking.json
+          grep 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
+
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: LiquidGlassCapture-android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

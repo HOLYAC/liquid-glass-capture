@@ -5,7 +5,8 @@
     "scheme": "liquidglasscapture",
     "version": "0.1.1",
     "platforms": [
-      "ios"
+      "ios",
+      "android"
     ],
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -26,12 +27,21 @@
         "NSLocalNetworkUsageDescription": "Posts minted hCaptcha tokens to the local oracle on your computer."
       }
     },
+    "android": {
+      "package": "com.zaeba.liquidglasscapture",
+      "permissions": [
+        "INTERNET"
+      ]
+    },
     "plugins": [
       [
         "expo-build-properties",
         {
+          "android": {
+            "usesCleartextTraffic": true
+          },
           "ios": {
-            "deploymentTarget": "26.0"
+            "deploymentTarget": "16.4"
           }
         }
       ]

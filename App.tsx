@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import {
   getStatus,
+  onDiagnostic,
   onError,
   onPosted,
   onToken,
@@ -22,6 +23,35 @@ import {
 // accepts (Safari / Chrome-WKWebView / standalone solves were all silently rejected).
 const SITEKEY = "7f1a1c8e-99e4-4ace-b106-4f3e78a0e5c2";
 const DEFAULT_ORACLE = "http://192.168.1.82:8000/collect";
+
+function oracleStatsUrl(collectUrl: string): string {
+  const trimmed = collectUrl.trim();
+  if (trimmed.endsWith("/collect")) {
+    return `${trimmed.slice(0, -"/collect".length)}/stats`;
+  }
+  return `${trimmed.replace(/\/+$/, "")}/stats`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function summarizeStatsResponse(text: string): string {
+  try {
+    const stats = JSON.parse(text) as {
+      hcaptcha_pool?: { pool_size?: number; collected?: number; consumed?: number; expired?: number };
+      app_check?: { present?: boolean; ttl_h?: number };
+      mint_heartbeats?: Record<string, number>;
+    };
+    const pool = stats.hcaptcha_pool;
+    const beats = Object.keys(stats.mint_heartbeats ?? {}).length;
+    return `pool=${pool?.pool_size ?? "?"} collected=${pool?.collected ?? "?"} appcheck=${
+      stats.app_check?.present ? `yes ttl=${stats.app_check.ttl_h}h` : "no"
+    } heartbeats=${beats}`;
+  } catch {
+    return text.slice(0, 140);
+  }
+}
 
 export default function App() {
   const [oracle, setOracle] = useState(DEFAULT_ORACLE);
@@ -39,10 +69,15 @@ export default function App() {
         setStats((s) => ({ ...s, minted: e.minted }));
       }),
       onPosted((e) => {
-        push(`oracle ${e.status}  (posted ${e.posted})${e.error ? "  err:" + e.error : ""}`);
+        const body = e.status >= 200 && e.status < 300 ? "" : `  body:${e.body}`;
+        push(`oracle ${e.status}  (posted ${e.posted})${e.error ? "  err:" + e.error : ""}${body}`);
         setStats((s) => ({ ...s, posted: e.posted }));
       }),
-      onError((e) => push(`ERROR ${e.stage}: ${e.error}`))
+      onError((e) => push(`ERROR ${e.stage}: ${e.error}`)),
+      onDiagnostic((e) => {
+        const run = e.run_id === undefined ? "" : ` #${e.run_id}`;
+        push(`diag${run} ${e.stage}: ${e.message}`);
+      })
     ];
     setStats({ minted: getStatus().minted, posted: getStatus().posted });
     return () => subs.forEach((s) => s.remove());
@@ -60,11 +95,23 @@ export default function App() {
     }
   }
 
+  async function checkOracle() {
+    const url = oracleStatsUrl(oracle);
+    push(`oracle check -> ${url}`);
+    try {
+      const response = await fetch(url);
+      const text = await response.text();
+      push(`oracle ${response.status}  ${summarizeStatsResponse(text)}`);
+    } catch (error) {
+      push(`oracle check failed: ${errorMessage(error)}`);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar barStyle="light-content" />
       <Text style={styles.title}>hCaptcha SDK Minter</Text>
-      <Text style={styles.sub}>sitekey {SITEKEY.slice(0, 8)}…  ·  EL parity</Text>
+      <Text style={styles.sub}>sitekey {SITEKEY.slice(0, 8)}…  ·  EL parity · dbg=[]</Text>
 
       <TextInput
         style={styles.input}
@@ -77,9 +124,14 @@ export default function App() {
         placeholderTextColor="#777"
       />
 
-      <Pressable onPress={toggle} style={[styles.btn, running && styles.btnOn]}>
-        <Text style={styles.btnText}>{running ? "STOP" : "START MINTING"}</Text>
-      </Pressable>
+      <View style={styles.buttonRow}>
+        <Pressable onPress={toggle} style={[styles.btn, styles.mainBtn, running && styles.btnOn]}>
+          <Text style={styles.btnText}>{running ? "STOP" : "START MINTING"}</Text>
+        </Pressable>
+        <Pressable onPress={checkOracle} style={[styles.btn, styles.checkBtn]}>
+          <Text style={styles.btnText}>CHECK ORACLE</Text>
+        </Pressable>
+      </View>
 
       <Text style={styles.stats}>
         minted {stats.minted}   ·   posted {stats.posted}
@@ -111,20 +163,31 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.2)"
   },
+  buttonRow: { flexDirection: "row", gap: 10, marginTop: 16 },
   btn: {
+    minHeight: 54,
     marginTop: 16,
-    paddingVertical: 16,
+    paddingVertical: 15,
+    paddingHorizontal: 10,
     borderRadius: 14,
     alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(90,200,120,0.18)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(90,200,120,0.5)"
+  },
+  mainBtn: { flex: 1.1, marginTop: 0 },
+  checkBtn: {
+    flex: 1,
+    marginTop: 0,
+    backgroundColor: "rgba(120,170,255,0.16)",
+    borderColor: "rgba(120,170,255,0.45)"
   },
   btnOn: {
     backgroundColor: "rgba(230,90,90,0.18)",
     borderColor: "rgba(230,90,90,0.55)"
   },
-  btnText: { color: "white", fontSize: 16, fontWeight: "800", letterSpacing: 1 },
+  btnText: { color: "white", fontSize: 13, fontWeight: "800", letterSpacing: 1, textAlign: "center" },
   stats: {
     marginTop: 14,
     color: "rgba(255,255,255,0.8)",

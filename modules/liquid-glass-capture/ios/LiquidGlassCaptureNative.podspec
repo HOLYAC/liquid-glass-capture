@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
   s.license          = package['license']
   s.author           = 'HOLYAC'
   s.homepage         = 'https://github.com/HOLYAC/liquid-glass-capture'
-  s.platforms        = { :ios => '26.0' }
+  s.platforms        = { :ios => '16.4' }
   s.swift_version    = '5.9'
   s.source           = { git: 'https://github.com/HOLYAC/liquid-glass-capture.git' }
   s.static_framework = true

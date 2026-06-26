@@ -90,6 +90,40 @@ LiquidGlassCapture-unsigned-ipa
 
 This path uses GitHub's `macos-26` runner because the native module needs iOS 26 SDK for `glassEffect`.
 
+## Android Diagnostic Build
+
+The local native module also has an Android WebView diagnostic harness. It uses the
+same JS bridge as the iOS minter (`startMinting`, `stopMinting`, `getStatus`) and
+posts public hCaptcha response tokens to the local oracle at `/collect`.
+
+Local Windows builds need Android SDK configured through `ANDROID_HOME` or
+`android/local.properties`. Without that, use GitHub Actions:
+
+1. Open GitHub repo -> `Actions`.
+2. Run workflow:
+
+```text
+Build Android debug APK
+```
+
+3. Download artifact:
+
+```text
+LiquidGlassCapture-android-debug-apk
+```
+
+4. Install it on Android:
+
+```bash
+adb install -r app-debug.apk
+```
+
+5. Run Metro for the dev client:
+
+```bash
+npx expo start --dev-client
+```
+
 ## Run The App
 
 After the dev build is installed:
