@@ -28,6 +28,8 @@ export type MinterStatus = {
   oracleUrl: string;
   host: string;
   run_id: number;
+  jitterPct: number;
+  device: string;
 };
 
 type MinterNativeModule = {

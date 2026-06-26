@@ -70,7 +70,7 @@ public final class LiquidGlassCaptureModule: Module {
     Function("getStatus") { () -> [String: Any] in
       ["minting": self.minting, "minted": self.minted, "posted": self.posted,
        "sitekey": self.sitekey, "oracleUrl": self.oracleUrl, "host": self.sdkHost,
-       "run_id": self.runId, "jitterPct": self.jitterPct]
+       "run_id": self.runId, "jitterPct": self.jitterPct, "device": Self.deviceId]
     }
 
     // Live-tune the running loop (interval + cadence jitter) without a stop/start.
@@ -159,6 +159,10 @@ public final class LiquidGlassCaptureModule: Module {
     return max(0, Int((Double(baseMs) - span + r * 2 * span).rounded()))
   }
 
+  // Stable per-device id (IDFV) so the oracle attributes tokens + health to THIS phone (H1/H2).
+  // Was hardcoded "ios-sdk" — which made every device look like one, breaking per-device acceptance.
+  private static let deviceId: String = UIDevice.current.identifierForVendor?.uuidString ?? "ios-unknown"
+
   private static func hcaptchaSDKHost(for sitekey: String) -> String {
     "\(sitekey).ios-sdk.hcaptcha.com"
   }
@@ -199,7 +203,7 @@ public final class LiquidGlassCaptureModule: Module {
     do {
       request.httpBody = try JSONSerialization.data(withJSONObject: [
         "token": token,
-        "mint_id": "ios-sdk",
+        "mint_id": Self.deviceId,
         "sitekey": sitekey,
         "host": sdkHost,
         "run_id": runId,

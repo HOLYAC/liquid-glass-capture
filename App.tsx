@@ -42,6 +42,11 @@ function statsUrl(collectUrl: string): string {
   return t.endsWith("/collect") ? `${t.slice(0, -"/collect".length)}/stats` : `${t.replace(/\/+$/, "")}/stats`;
 }
 
+function oracleBase(collectUrl: string): string {
+  const t = collectUrl.trim().replace(/\/+$/, "");
+  return t.endsWith("/collect") ? t.slice(0, -"/collect".length) : t;
+}
+
 function parsePool(text: string): OracleStats | null {
   try {
     const j = JSON.parse(text) as { hcaptcha_pool?: Partial<OracleStats> };
@@ -72,12 +77,25 @@ export default function App() {
   const [stats, setStats] = useState({ minted: 0, posted: 0 });
   const [reason, setReason] = useState("idle");
   const [log, setLog] = useState<string[]>([]);
+  const [fleetMode, setFleetMode] = useState(false);
+  const [fleetStatus, setFleetStatus] = useState("");
   const prevStats = useRef<OracleStats | null>(null);
+  const fleetRef = useRef<{ base: string; device: string } | null>(null);
 
   const liveCount = useMemo(() => PROVIDERS.filter((p) => p.live).length, []);
 
-  const push = (line: string) =>
+  const push = (line: string) => {
     setLog((prev) => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev].slice(0, 60));
+    const f = fleetRef.current;
+    if (f) {
+      // off-device log sink (brothers' yield-as-health) — fire-and-forget, never blocks the loop
+      fetch(`${f.base}/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device: f.device, line })
+      }).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     const subs = [
@@ -100,7 +118,7 @@ export default function App() {
   // Foreground adaptive supervisor: poll /stats, rate-match, push the interval to native.
   // Wrapped so a flaky oracle never throws into the (proven, native) mint loop.
   useEffect(() => {
-    if (!running || !adaptive) return;
+    if (!running || !adaptive || fleetMode) return;   // fleet mode: the oracle drives the interval
     let cancelled = false;
     const tick = async () => {
       try {
@@ -123,7 +141,81 @@ export default function App() {
       cancelled = true;
       clearInterval(h);
     };
-  }, [running, adaptive, oracle, jitterPct]);
+  }, [running, adaptive, oracle, jitterPct, fleetMode]);
+
+  // Fleet supervisor: the OFF-DEVICE oracle drives this phone. Poll /command, apply run/interval/
+  // sitekey, post /fleet/heartbeat, and FAIL CLOSED — if the oracle is unreachable past the lease,
+  // STOP (so a partitioned phone can't outlive the remote kill-switch). Wrapped; can't break the mint.
+  useEffect(() => {
+    if (!fleetMode) return;
+    const dev = getStatus().device;
+    const base = oracleBase(oracle);
+    fleetRef.current = { base, device: dev };
+    let lastCmdOkTs = Date.now();
+    let leaseMs = 30000;
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const r = await fetch(`${base}/command?device=${encodeURIComponent(dev)}`);
+        const cmd = (await r.json()) as {
+          run?: boolean; sitekey?: string; interval_ms?: number; lease_ttl_s?: number; reason?: string;
+        };
+        lastCmdOkTs = Date.now();
+        leaseMs = (cmd.lease_ttl_s ?? 30) * 1000;
+        if (cmd.run) {
+          const iv = cmd.interval_ms ?? intervalMs;
+          const sk = cmd.sitekey ?? sitekey;
+          if (!getStatus().minting) {
+            await startMinting(sk, oracle, iv);
+            setRunning(true);
+          }
+          await updateMintConfig(iv, jitterPct);
+          setFleetStatus(`run @ ${iv}ms ${cmd.reason ?? ""}`);
+        } else {
+          if (getStatus().minting) {
+            stopMinting();
+            setRunning(false);
+          }
+          setFleetStatus(`hold: ${cmd.reason ?? "oracle"}`);
+        }
+      } catch (e) {
+        // fail-closed: cannot reach the oracle past the lease => STOP (kill-switch can't be outlived)
+        if (Date.now() - lastCmdOkTs > leaseMs && getStatus().minting) {
+          stopMinting();
+          setRunning(false);
+          setFleetStatus("FAIL-CLOSED: oracle unreachable past lease");
+          push("fleet fail-closed: stopped (oracle unreachable > lease)");
+        } else {
+          setFleetStatus(`cmd retry: ${errMsg(e)}`);
+        }
+      }
+    };
+
+    const beat = async () => {
+      if (cancelled) return;
+      try {
+        const s = getStatus();
+        await fetch(`${base}/fleet/heartbeat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device: dev, minted: s.minted, posted: s.posted })
+        });
+      } catch {}
+    };
+
+    void poll();
+    void beat();
+    const ph = setInterval(poll, 8000);
+    const bh = setInterval(beat, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(ph);
+      clearInterval(bh);
+      fleetRef.current = null;
+    };
+  }, [fleetMode, oracle, jitterPct, intervalMs, sitekey]);
 
   async function toggle() {
     if (running) {
@@ -181,7 +273,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
       <Text style={styles.title}>hCaptcha Minter — combine</Text>
       <Text style={styles.sub}>
-        sitekey {sitekey.slice(0, 8)}…  ·  providers {liveCount}/{PROVIDERS.length} live  ·  {reason}
+        sitekey {sitekey.slice(0, 8)}…  ·  providers {liveCount}/{PROVIDERS.length} live  ·  {fleetMode ? (fleetStatus || "fleet") : reason}
       </Text>
 
       <TextInput
@@ -209,6 +301,7 @@ export default function App() {
         <Chip label="interval" value={`${intervalMs}ms`} onPress={bumpInterval} />
         <Chip label="jitter" value={`${Math.round(jitterPct * 100)}%`} onPress={bumpJitter} />
         <Chip label="adaptive" value={adaptive ? "on" : "off"} onPress={() => setAdaptive((v) => !v)} on={adaptive} />
+        <Chip label="fleet" value={fleetMode ? "on" : "off"} onPress={() => setFleetMode((v) => !v)} on={fleetMode} />
       </ScrollView>
 
       <View style={styles.buttonRow}>
