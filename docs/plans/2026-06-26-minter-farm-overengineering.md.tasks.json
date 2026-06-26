@@ -1,0 +1,88 @@
+{
+  "planPath": "docs/plans/2026-06-26-minter-farm-overengineering.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Phase 0: SPIKE background-while-locked",
+      "status": "pending",
+      "description": "**Goal:** Verdict — does the native mint loop keep posting to /collect while screen LOCKED, via silent-audio keep-alive?\n**Verify:** gh run watch → success; curl /stats collected before/after locked window. Throwaway branch spike/bg-locked, do NOT merge.\n```json:metadata\n{\"phase\":0,\"deRisks\":\"U-BG\",\"verifyCommand\":\"gh run watch <id> --exit-status; curl /stats\"}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Phase 1: Config surface + persistence",
+      "status": "pending",
+      "description": "**Goal:** editable+persisted sitekey/interval/oracle; EL sitekey a default preset.\n**Verify:** npm test -- src/config; CI green; on-device persist + U-SITE probe.\n```json:metadata\n{\"phase\":1,\"deRisks\":\"U-SITE\",\"verifyCommand\":\"npm test -- src/config\"}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Phase 2: Pure controller library (TS, tested)",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** jitter/backoff/adaptive pure + unit-tested; canonical brain + parity fixtures.\n**Verify:** npm test -- src/controller → PASS.\n```json:metadata\n{\"phase\":2,\"verifyCommand\":\"npm test -- src/controller\"}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Phase 3: Native MintEngine + live updateConfig",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** native config-driven loop + updateConfig (no restart); Swift mirrors TS controller, parity-gated.\n**Verify:** gh run watch → success; device cadence change; PARITY OK.\n```json:metadata\n{\"phase\":3,\"verifyCommand\":\"gh run watch <id> --exit-status\"}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Phase 4: Adaptive rate from oracle /stats",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** engine polls /stats, rate-matches production to registration burn, natively.\n**Verify:** device + desktop /next drain; dashboard reason starved↔waste↔steady.\n```json:metadata\n{\"phase\":4,\"deRisks\":\"U-RATE(prod)\",\"verifyCommand\":\"device /stats drain probe\"}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Phase 5: Background execution (per Phase 0 verdict)",
+      "status": "pending",
+      "blockedBy": [0, 4],
+      "description": "**Goal:** keep minting screen-off via the path Phase 0 proved (audio-keepalive | foreground-resilient).\n**Verify:** 30min locked /stats measurement.\n```json:metadata\n{\"phase\":5,\"deRisks\":\"U-BG\",\"verifyCommand\":\"30min locked measurement\"}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Phase 6: Resilience — offline queue + auto-restart",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** failures don't stop the farm or drop tokens (queue<max_age_s, auto-restart, backoff).\n**Verify:** device oracle kill/restart → queue grows+backoff, then flush.\n```json:metadata\n{\"phase\":6,\"verifyCommand\":\"device oracle kill/restart probe\"}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Phase 7: Challenge/quota self-tuning",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** detect visible-challenge → AIMD ceiling; farm finds its own max rate. FIRST log captcha.onEvent payloads (don't invent event strings).\n**Verify:** drive to challenge → auto-backoff + persisted ceiling.\n```json:metadata\n{\"phase\":7,\"deRisks\":\"U-RATE\",\"verifyCommand\":\"device challenge-event probe\"}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Phase 8: Multi-sitekey fleet rotation",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** list of {sitekey,oracleUrl,weight}, weighted round-robin, per-sitekey stats; single-key migrates.\n**Verify:** two targets → both oracles at configured ratio.\n```json:metadata\n{\"phase\":8,\"verifyCommand\":\"two-target ratio probe\"}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Phase 9: Battery/thermal adaptive",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** throttle on hot/low-battery/unplugged; composes with adaptive (take MAX delay).\n**Verify:** device load or simulated state → throttle + badge.\n```json:metadata\n{\"phase\":9,\"verifyCommand\":\"device thermal/battery probe\"}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Phase 10: Observability dashboard",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** live cockpit (rate/success%/pool/per-sitekey/challenge/thermal/reason/bg-state) + filtered log.\n**Verify:** npm test (UI logic) + device visual.\n```json:metadata\n{\"phase\":10,\"verifyCommand\":\"npm test + device visual\"}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Phase 11: Multi-device fleet coordination",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** N phones share one oracle, coordinate via /stats suggested_interval_ms; oracle change additive.\n**Verify:** two devices + one oracle → aggregate holds target as you add/remove a device.\n```json:metadata\n{\"phase\":11,\"verifyCommand\":\"two-device aggregate probe\"}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-26"
+}
