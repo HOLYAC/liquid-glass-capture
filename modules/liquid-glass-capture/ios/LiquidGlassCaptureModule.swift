@@ -20,6 +20,7 @@ public final class LiquidGlassCaptureModule: Module {
   private var runId = 0
   private var inFlight = false           // true while one validate cycle is outstanding (serializes the loop)
   private var consecutiveFailures = 0    // drives exponential backoff after WebView-process terminations
+  private var jitterPct: Double = 0      // 0..1 — randomises scheduling cadence (set live via updateConfig)
 
   public func definition() -> ModuleDefinition {
     Name("LiquidGlassCapture")
@@ -74,8 +75,20 @@ public final class LiquidGlassCaptureModule: Module {
     Function("getStatus") { () -> [String: Any] in
       ["minting": self.minting, "minted": self.minted, "posted": self.posted,
        "sitekey": self.sitekey, "oracleUrl": self.oracleUrl, "host": self.sdkHost,
-       "run_id": self.runId]
+       "run_id": self.runId, "jitterPct": self.jitterPct]
     }
+
+    // Live-tune the running loop (interval + cadence jitter) without a stop/start.
+    AsyncFunction("updateConfig") { (intervalMs: Int, jitterPct: Double) in
+      self.intervalMs = max(2000, intervalMs)
+      self.jitterPct = max(0, min(1, jitterPct))
+      self.emitDiagnostic(stage: "config",
+                          message: "updated",
+                          extra: ["intervalMs": self.intervalMs,
+                                  "jitterPct": self.jitterPct,
+                                  "run_id": self.runId])
+    }
+    .runOnQueue(.main)
   }
 
   // One validate cycle on the key-window view; on completion post the token and schedule the next.
@@ -156,11 +169,20 @@ public final class LiquidGlassCaptureModule: Module {
   private func scheduleNext(runId: Int? = nil, delayMs: Int? = nil) {
     let targetRunId = runId ?? self.runId
     guard minting, targetRunId == self.runId else { return }
-    let delay = delayMs ?? intervalMs
+    let delay = Self.jittered(delayMs ?? intervalMs, pct: jitterPct)
     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delay)) { [weak self] in
       guard let self, self.minting, targetRunId == self.runId else { return }
       self.mintOnce(runId: targetRunId)
     }
+  }
+
+  // Cadence-only jitter (not security-sensitive): base +/- base*pct.
+  private static func jittered(_ baseMs: Int, pct: Double) -> Int {
+    guard pct > 0 else { return baseMs }
+    let p = min(1.0, pct)
+    let span = Double(baseMs) * p
+    let r = Double.random(in: 0..<1)
+    return max(0, Int((Double(baseMs) - span + r * 2 * span).rounded()))
   }
 
   private static func hcaptchaSDKHost(for sitekey: String) -> String {

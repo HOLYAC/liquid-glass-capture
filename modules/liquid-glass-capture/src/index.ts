@@ -32,6 +32,7 @@ export type MinterStatus = {
 
 type MinterNativeModule = {
   startMinting(sitekey: string, oracleUrl: string, intervalMs: number): Promise<void>;
+  updateConfig(intervalMs: number, jitterPct: number): Promise<void>;
   stopMinting(): void;
   getStatus(): MinterStatus;
   addListener(event: "onToken", listener: (e: TokenEvent) => void): EventSubscription;
@@ -48,6 +49,11 @@ export function startMinting(sitekey: string, oracleUrl: string, intervalMs = 80
 
 export function stopMinting(): void {
   Minter.stopMinting();
+}
+
+// Live-tune the running loop without restarting it (interval + cadence jitter).
+export function updateMintConfig(intervalMs: number, jitterPct: number): Promise<void> {
+  return Minter.updateConfig(Math.max(2000, intervalMs), Math.max(0, Math.min(1, jitterPct)));
 }
 
 export function getStatus(): MinterStatus {
