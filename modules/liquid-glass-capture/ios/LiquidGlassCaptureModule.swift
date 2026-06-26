@@ -20,6 +20,15 @@ public final class LiquidGlassCaptureModule: Module {
   private var runId = 0
   private var jitterPct: Double = 0      // 0..1 — randomises scheduling cadence (set live via updateConfig)
 
+  // Resilience state — the serial solve loop must SURVIVE a WKWebView death, not just hope it doesn't happen.
+  private var watchdog: DispatchWorkItem?   // reaps a solve that hangs with no callback (else the loop deadlocks)
+  private var consecutiveFailures = 0        // streak of validate errors/timeouts -> triggers a webview rebuild
+  private var healCount = 0                  // consecutive heals with no good mint between -> escalates backoff
+  private let watchdogMs = 30000             // a solve past this is hung; stop it and free its webview
+  private let healAfterFailures = 3          // this many failures in a row = the webview stack is wedged
+  private let healBaseBackoffMs = 8000       // first rebuild backoff; doubles per repeat up to the cap
+  private let healMaxBackoffMs = 60000       // don't thrash a terminally-wedged WebKit (battery)
+
   public func definition() -> ModuleDefinition {
     Name("LiquidGlassCapture")
 
@@ -48,6 +57,10 @@ public final class LiquidGlassCaptureModule: Module {
       self.intervalMs = max(2000, intervalMs)
       self.minted = 0
       self.posted = 0
+      self.consecutiveFailures = 0
+      self.healCount = 0
+      self.watchdog?.cancel()
+      self.watchdog = nil
       self.minting = true
       self.emitDiagnostic(stage: "start",
                           message: "minting loop started",
@@ -62,6 +75,8 @@ public final class LiquidGlassCaptureModule: Module {
     Function("stopMinting") {
       self.minting = false
       self.runId += 1
+      self.watchdog?.cancel()
+      self.watchdog = nil
       self.hcaptcha?.stop()
       self.hcaptcha = nil
       self.emitDiagnostic(stage: "stop", message: "minting loop stopped", extra: ["run_id": self.runId])
@@ -70,7 +85,8 @@ public final class LiquidGlassCaptureModule: Module {
     Function("getStatus") { () -> [String: Any] in
       ["minting": self.minting, "minted": self.minted, "posted": self.posted,
        "sitekey": self.sitekey, "oracleUrl": self.oracleUrl, "host": self.sdkHost,
-       "run_id": self.runId, "jitterPct": self.jitterPct, "device": Self.deviceId]
+       "run_id": self.runId, "jitterPct": self.jitterPct, "device": Self.deviceId,
+       "fails": self.consecutiveFailures, "heals": self.healCount]
     }
 
     // Live-tune the running loop (interval + cadence jitter) without a stop/start.
@@ -86,14 +102,21 @@ public final class LiquidGlassCaptureModule: Module {
     .runOnQueue(.main)
   }
 
-  // One validate cycle on the key-window view; on completion post the token and schedule the next.
-  // Concurrency is intentional: on a flaky WebView (this device hangs ~half the solves with no
-  // callback) overlapping cycles mask the hangs and keep the stream steady — that's why the
-  // un-serialized build mints "ровно". A timer-driven pool is the clean version (see plan); for
-  // now this is the proven 413-token loop, plus cadence jitter.
+  // The solve loop is SERIAL — one HCaptcha/WKWebView at a time, the next scheduled only after the
+  // current concludes. The proven 413-token primitive (makeCaptcha -> validate -> postToOracle) is
+  // untouched; what's new is that the loop now SURVIVES a flaky WebView instead of stalling on one.
+  // Three failure modes, three additive guards (they act only on the failing path, never the healthy
+  // "ровно" cadence):
+  //   - a solve that hangs with NO callback -> the watchdog stops it after watchdogMs and reschedules
+  //     (else the serial loop deadlocks forever, since scheduleNext lives inside the callback);
+  //   - a solve that errors fast -> counts toward consecutiveFailures;
+  //   - the content process dies and every reload fails ("Could not load embedded HTML") -> after
+  //     healAfterFailures in a row, healOrNext tears the SDK fully down and backs off (escalating up
+  //     to healMaxBackoffMs) so WebKit can respawn a content process, instead of spin-failing dead.
   private func mintOnce(runId: Int) {
     guard minting, runId == self.runId else { return }
     guard let presenterView = keyWindowView() else {
+      // No key window = app backgrounded, not a webview wedge — don't count it, just retry.
       emitError(stage: "presenter", error: "no active UIWindow/root view", extra: ["run_id": runId])
       return scheduleNext(runId: runId)
     }
@@ -103,9 +126,39 @@ public final class LiquidGlassCaptureModule: Module {
       captcha = try makeCaptcha()
     } catch {
       emitError(stage: "init", error: String(describing: error), extra: ["run_id": runId, "host": sdkHost])
-      return scheduleNext(runId: runId)
+      consecutiveFailures += 1
+      return healOrNext(runId: runId)
     }
     hcaptcha = captcha
+
+    // Exactly one conclusion per attempt — whichever of {callback, watchdog} fires first wins; the
+    // other no-ops (main-queue serial, so the concluded flag needs no lock). conclude() is also the
+    // sole place captcha.stop() runs, so a hung solve's webview is guaranteed freed within watchdogMs.
+    var concluded = false
+    let conclude: (Bool) -> Void = { [weak self] failed in
+      guard let self else { return }
+      if concluded { return }
+      concluded = true
+      self.watchdog?.cancel()
+      self.watchdog = nil
+      captcha.stop()
+      if self.hcaptcha === captcha { self.hcaptcha = nil }
+      if failed {
+        self.consecutiveFailures += 1
+      } else {
+        self.consecutiveFailures = 0
+        self.healCount = 0
+      }
+      self.healOrNext(runId: runId)
+    }
+
+    let wd = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      self.emitError(stage: "watchdog", error: "validate hung > \(self.watchdogMs)ms — reaping", extra: ["run_id": runId])
+      conclude(true)
+    }
+    watchdog = wd
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(watchdogMs), execute: wd)
 
     captcha.onEvent { [weak self] event, payload in
       self?.emitDiagnostic(stage: "sdk",
@@ -129,14 +182,11 @@ public final class LiquidGlassCaptureModule: Module {
                                    "head": String(token.prefix(16)),
                                    "run_id": runId])
         self.postToOracle(token, runId: runId)
+        conclude(false)
       } catch {
         self.emitError(stage: "validate", error: String(describing: error), extra: ["run_id": runId])
+        conclude(true)
       }
-      captcha.stop()
-      if self.hcaptcha === captcha {
-        self.hcaptcha = nil
-      }
-      self.scheduleNext(runId: runId)
     }
   }
 
@@ -147,6 +197,31 @@ public final class LiquidGlassCaptureModule: Module {
     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delay)) { [weak self] in
       guard let self, self.minting, targetRunId == self.runId else { return }
       self.mintOnce(runId: targetRunId)
+    }
+  }
+
+  // After an attempt concludes: if the webview stack looks wedged (failure streak), tear the SDK fully
+  // down and back off (escalating, capped) so WebKit can respawn a content process; else normal cadence.
+  // This is what turns "stalls until a manual force-quit" into "recovers itself".
+  private func healOrNext(runId: Int) {
+    guard minting, runId == self.runId else { return }
+    guard consecutiveFailures >= healAfterFailures else {
+      return scheduleNext(runId: runId)
+    }
+    let failed = consecutiveFailures
+    consecutiveFailures = 0
+    healCount += 1
+    watchdog?.cancel()
+    watchdog = nil
+    hcaptcha?.stop()
+    hcaptcha = nil
+    let backoff = min(healBaseBackoffMs << min(healCount - 1, 3), healMaxBackoffMs)
+    emitDiagnostic(stage: "heal",
+                   message: "webview wedged (\(failed) fails in a row) — full teardown, backoff \(backoff)ms",
+                   extra: ["run_id": runId, "healCount": healCount, "backoffMs": backoff])
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(backoff)) { [weak self] in
+      guard let self, self.minting, runId == self.runId else { return }
+      self.mintOnce(runId: runId)
     }
   }
 

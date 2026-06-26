@@ -30,6 +30,8 @@ export type MinterStatus = {
   run_id: number;
   jitterPct: number;
   device: string;
+  fails: number; // consecutive validate failures (0 = healthy); rises as the webview wedges
+  heals: number; // consecutive webview rebuilds with no good mint between (0 = healthy)
 };
 
 type MinterNativeModule = {
