@@ -61,8 +61,6 @@ public final class LiquidGlassCaptureModule: Module {
       self.healCount = 0
       self.watchdog?.cancel()
       self.watchdog = nil
-      self.hcaptcha?.stop()
-      self.hcaptcha = nil
       self.minting = true
       self.emitDiagnostic(stage: "start",
                           message: "minting loop started",
@@ -105,14 +103,16 @@ public final class LiquidGlassCaptureModule: Module {
   }
 
   // The solve loop is SERIAL — one HCaptcha/WKWebView at a time, the next scheduled only after the
-  // current concludes. REUSE: the SDK is built for one long-lived webview + many validate()/reset()
-  // cycles (lazy webView created once, reset between runs). We make the instance ONCE and reuse it across
-  // solves — creating a fresh HCaptcha per solve churned thousands of WKWebViews over a long run, which
-  // is what degraded "на дистанции". Per-solve we reset(); a full teardown (stop+nil) happens only on a
-  // failure streak (healOrNext) or stopMinting, after which the next mintOnce recreates a clean instance.
-  // The proven primitive (validate -> dematerialize -> postToOracle) and the host-spoof are byte-identical.
-  // The flaky-WebView guards still hold: a hung solve is reaped by the watchdog; a failure streak heals
-  // (escalating backoff) so a wedged WebKit gets a fresh process instead of spin-failing dead.
+  // current concludes. The proven 413-token primitive (makeCaptcha -> validate -> postToOracle) is
+  // untouched; what's new is that the loop now SURVIVES a flaky WebView instead of stalling on one.
+  // Three failure modes, three additive guards (they act only on the failing path, never the healthy
+  // "ровно" cadence):
+  //   - a solve that hangs with NO callback -> the watchdog stops it after watchdogMs and reschedules
+  //     (else the serial loop deadlocks forever, since scheduleNext lives inside the callback);
+  //   - a solve that errors fast -> counts toward consecutiveFailures;
+  //   - the content process dies and every reload fails ("Could not load embedded HTML") -> after
+  //     healAfterFailures in a row, healOrNext tears the SDK fully down and backs off (escalating up
+  //     to healMaxBackoffMs) so WebKit can respawn a content process, instead of spin-failing dead.
   private func mintOnce(runId: Int) {
     guard minting, runId == self.runId else { return }
     guard let presenterView = keyWindowView() else {
@@ -122,30 +122,18 @@ public final class LiquidGlassCaptureModule: Module {
     }
 
     let captcha: HCaptcha
-    if let existing = hcaptcha {
-      captcha = existing                                  // REUSE the long-lived instance (one webview, many solves)
-      captcha.reset()                                     // clear the solved state, ADJACENT to validate() below — the SDK's own
-                                                          // retry does reset()+validate() back-to-back; separating them drops the
-                                                          // execute() while didFinishLoading is briefly false (executeJS guard).
-    } else {
-      do {
-        captcha = try makeCaptcha()
-      } catch {
-        emitError(stage: "init", error: String(describing: error), extra: ["run_id": runId, "host": sdkHost])
-        consecutiveFailures += 1
-        return healOrNext(runId: runId)
-      }
-      hcaptcha = captcha
-      captcha.onEvent { [weak self] event, payload in     // bind once per instance, not per solve
-        self?.emitDiagnostic(stage: "sdk",
-                             message: String(describing: event),
-                             extra: ["run_id": runId, "payload": String(describing: payload ?? "")])
-      }
+    do {
+      captcha = try makeCaptcha()
+    } catch {
+      emitError(stage: "init", error: String(describing: error), extra: ["run_id": runId, "host": sdkHost])
+      consecutiveFailures += 1
+      return healOrNext(runId: runId)
     }
+    hcaptcha = captcha
 
     // Exactly one conclusion per attempt — whichever of {callback, watchdog} fires first wins; the
-    // other no-ops (main-queue serial, so the concluded flag needs no lock). The reused instance is
-    // reset() at the TOP of the next mintOnce (adjacent to validate); the webview is torn down only on heal/stop.
+    // other no-ops (main-queue serial, so the concluded flag needs no lock). conclude() is also the
+    // sole place captcha.stop() runs, so a hung solve's webview is guaranteed freed within watchdogMs.
     var concluded = false
     let conclude: (Bool) -> Void = { [weak self] failed in
       guard let self else { return }
@@ -153,6 +141,8 @@ public final class LiquidGlassCaptureModule: Module {
       concluded = true
       self.watchdog?.cancel()
       self.watchdog = nil
+      captcha.stop()
+      if self.hcaptcha === captcha { self.hcaptcha = nil }
       if failed {
         self.consecutiveFailures += 1
       } else {
@@ -169,6 +159,13 @@ public final class LiquidGlassCaptureModule: Module {
     }
     watchdog = wd
     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(watchdogMs), execute: wd)
+
+    captcha.onEvent { [weak self] event, payload in
+      self?.emitDiagnostic(stage: "sdk",
+                           message: String(describing: event),
+                           extra: ["run_id": runId,
+                                   "payload": String(describing: payload ?? "")])
+    }
 
     emitDiagnostic(stage: "validate", message: "starting hCaptcha validate", extra: ["run_id": runId])
     captcha.validate(on: presenterView) { [weak self] result in
