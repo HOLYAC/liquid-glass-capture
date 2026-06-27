@@ -124,6 +124,9 @@ public final class LiquidGlassCaptureModule: Module {
     let captcha: HCaptcha
     if let existing = hcaptcha {
       captcha = existing                                  // REUSE the long-lived instance (one webview, many solves)
+      captcha.reset()                                     // clear the solved state, ADJACENT to validate() below — the SDK's own
+                                                          // retry does reset()+validate() back-to-back; separating them drops the
+                                                          // execute() while didFinishLoading is briefly false (executeJS guard).
     } else {
       do {
         captcha = try makeCaptcha()
@@ -141,8 +144,8 @@ public final class LiquidGlassCaptureModule: Module {
     }
 
     // Exactly one conclusion per attempt — whichever of {callback, watchdog} fires first wins; the
-    // other no-ops (main-queue serial, so the concluded flag needs no lock). conclude() reset()s the
-    // challenge for the next reuse cycle; the webview is torn down only on a heal/stop, not per solve.
+    // other no-ops (main-queue serial, so the concluded flag needs no lock). The reused instance is
+    // reset() at the TOP of the next mintOnce (adjacent to validate); the webview is torn down only on heal/stop.
     var concluded = false
     let conclude: (Bool) -> Void = { [weak self] failed in
       guard let self else { return }
@@ -156,7 +159,6 @@ public final class LiquidGlassCaptureModule: Module {
         self.consecutiveFailures = 0
         self.healCount = 0
       }
-      captcha.reset()   // REUSE: keep the webview, reset the challenge for the next solve
       self.healOrNext(runId: runId)
     }
 
