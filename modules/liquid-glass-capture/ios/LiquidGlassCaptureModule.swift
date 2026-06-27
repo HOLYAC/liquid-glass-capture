@@ -14,6 +14,7 @@ public final class LiquidGlassCaptureModule: Module {
   private var sitekey = ""
   private var sdkHost = ""
   private var oracleUrl = ""
+  private var telemetryUrl = ""          // oracleBase + "/telemetry": every event streams here so ONE /board shows all phones
   private var intervalMs = 8000
   private var minted = 0
   private var posted = 0
@@ -24,10 +25,10 @@ public final class LiquidGlassCaptureModule: Module {
   private var watchdog: DispatchWorkItem?   // reaps a solve that hangs with no callback (else the loop deadlocks)
   private var consecutiveFailures = 0        // streak of validate errors/timeouts -> triggers a webview rebuild
   private var healCount = 0                  // consecutive heals with no good mint between -> escalates backoff
-  private let watchdogMs = 30000             // a solve past this is hung; stop it and free its webview
+  private let watchdogMs = 10000             // solves are bimodal (~2s success OR dead-hang); reap a hang FAST — 30s wasted nothing on a corpse
   private let healAfterFailures = 3          // this many failures in a row = the webview stack is wedged
-  private let healBaseBackoffMs = 8000       // first rebuild backoff; doubles per repeat up to the cap
-  private let healMaxBackoffMs = 60000       // don't thrash a terminally-wedged WebKit (battery)
+  private let healBaseBackoffMs = 2000       // short — webviews die often here; a long pause after rebuild just wastes mint time
+  private let healMaxBackoffMs = 8000        // cap short; frequent deaths need FAST recovery, not escalating 60s sit-outs
 
   public func definition() -> ModuleDefinition {
     Name("LiquidGlassCapture")
@@ -54,6 +55,7 @@ public final class LiquidGlassCaptureModule: Module {
       self.sitekey = cleanSitekey
       self.sdkHost = Self.hcaptchaSDKHost(for: cleanSitekey)
       self.oracleUrl = cleanOracleUrl
+      self.telemetryUrl = Self.telemetryEndpoint(from: cleanOracleUrl)
       self.intervalMs = max(2000, intervalMs)
       self.minted = 0
       self.posted = 0
@@ -322,6 +324,7 @@ public final class LiquidGlassCaptureModule: Module {
   }
 
   private func emitEvent(_ event: String, _ payload: [String: Any]) {
+    postTelemetry(line: Self.telemetryLine(event, payload))   // off-device stream -> one /board for every phone
     if Thread.isMainThread {
       sendEvent(event, payload)
     } else {
@@ -329,5 +332,37 @@ public final class LiquidGlassCaptureModule: Module {
         self?.sendEvent(event, payload)
       }
     }
+  }
+
+  // ── off-device telemetry ──────────────────────────────────────────────────────────
+  // Fire-and-forget: every cockpit event also streams to the oracle so a single desktop /board shows
+  // what EVERY phone is doing live — no more screenshotting one device. Never blocks the mint loop.
+  private static func telemetryEndpoint(from collectUrl: String) -> String {
+    guard let u = URL(string: collectUrl), let scheme = u.scheme, let host = u.host else { return "" }
+    let port = u.port.map { ":\($0)" } ?? ""
+    return "\(scheme)://\(host)\(port)/telemetry"
+  }
+
+  private static func telemetryLine(_ event: String, _ p: [String: Any]) -> String {
+    switch event {
+    case "onToken":      return "token #\(p["minted"] ?? "?")  len=\(p["len"] ?? "?")"
+    case "onPosted":     return "oracle \(p["status"] ?? "?")  (posted \(p["posted"] ?? "?"))"
+    case "onError":      return "ERROR \(p["stage"] ?? "?"): \(p["error"] ?? "?")"
+    case "onDiagnostic": return "diag \(p["stage"] ?? "?"): \(p["message"] ?? "?")"
+    default:             return event
+    }
+  }
+
+  private func postTelemetry(line: String) {
+    guard !telemetryUrl.isEmpty, let url = URL(string: telemetryUrl) else { return }
+    var request = URLRequest(url: url, timeoutInterval: 8)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try? JSONSerialization.data(withJSONObject: [
+      "device": Self.deviceId,
+      "line": line,
+      "ts_ms": Int(Date().timeIntervalSince1970 * 1000)
+    ])
+    URLSession.shared.dataTask(with: request).resume()
   }
 }
